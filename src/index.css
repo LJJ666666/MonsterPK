@@ -1,0 +1,91 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+SC:wght@400;600&family=Press+Start+2P&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b1020;
+  --bg2: #101b33;
+  --panel: rgba(19, 28, 56, 0.78);
+  --panel2: rgba(28, 40, 78, 0.78);
+  --text: #eef1ff;
+  --muted: rgba(238, 241, 255, 0.72);
+  --stroke: rgba(238, 241, 255, 0.22);
+  --stroke2: rgba(238, 241, 255, 0.14);
+  --accent: #f6c24b;
+  --ok: #66ff9a;
+  --danger: #ff5a68;
+
+  font-family: "IBM Plex Sans SC", system-ui, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 20% 0%, rgba(246, 194, 75, 0.16), transparent 55%),
+    radial-gradient(900px 600px at 85% 20%, rgba(102, 255, 154, 0.1), transparent 55%),
+    radial-gradient(900px 700px at 50% 90%, rgba(120, 162, 255, 0.14), transparent 60%),
+    linear-gradient(180deg, #070a14 0%, var(--bg) 35%, #070a14 100%);
+  color: var(--text);
+}
+
+/* 全局隐藏滚动条 (无感滑动) */
+::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+/* 满潜特效 (呼吸灯) */
+@keyframes max-stats-breathe {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+  }
+}
+
+.theme-max-stats {
+  border-color: #ffd700 !important;
+  animation: max-stats-breathe 3s ease-in-out infinite;
+  background-image: linear-gradient(90deg, rgba(255,215,0,0.15), rgba(255,140,0,0.15), rgba(255,0,0,0.15)) !important;
+}
+
+/* 异色全满潜至高特效 (黑金流光七彩固定边框 + 呼吸灯) */
+@keyframes supreme-breathe {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3), inset 0 0 10px rgba(255, 215, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(255, 215, 0, 0.8), inset 0 0 20px rgba(255, 215, 0, 0.3);
+  }
+}
+
+.theme-supreme-stats {
+  border: 2px solid transparent !important;
+  border-image: linear-gradient(135deg, #111111 0%, #ffd700 20%, #ff5555 40%, #55ff55 60%, #5555ff 80%, #ffd700 100%) 1 !important;
+  animation: supreme-breathe 4s ease-in-out infinite;
+  background-image: linear-gradient(135deg, rgba(17,17,17,0.1) 0%, rgba(255,215,0,0.15) 20%, rgba(255,85,85,0.15) 40%, rgba(85,255,85,0.15) 60%, rgba(85,85,255,0.15) 80%, rgba(255,215,0,0.15) 100%) !important;
+}
+
+.font-display {
+  font-family: "Press Start 2P", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}

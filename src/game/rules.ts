@@ -409,7 +409,6 @@ export function createInstance(specId: string, level: number, forceShiny?: boole
     .map((x) => x.moveId)));
 
   const moveIds = validMoves.slice(-4);
-  console.log("createInstance moveIds for", spec.name, ":", moveIds);
 
   return {
     id: uuid(),

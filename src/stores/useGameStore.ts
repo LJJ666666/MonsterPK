@@ -2,8 +2,9 @@ import { create } from "zustand";
 import { persist, StateStorage, createJSONStorage } from "zustand/middleware";
 import { ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS, STARTERS } from "@/game/data";
 import type { BattleState, EncounterTheme, ItemId, MonsterInstance, SaveData, LocationId, MoveId, StatModifiers } from "@/game/types";
-import { applyDamage, attemptCapture, computeDamage, createInstance, gainExp, evolveMonsterInstance, getStatMultiplier, getAccuracyMultiplier, applyStatChanges, getSpeed, canMove, roll, uuid, getMonsterStatBounds } from "@/game/rules";
+import { applyDamage, attemptCapture, computeDamage, createInstance, gainExp, evolveMonsterInstance, getStatMultiplier, getAccuracyMultiplier, applyStatChanges, getSpeed, canMove, roll, uuid, getMonsterStatBounds, getMoveMaxPP } from "@/game/rules";
 import { generateEncounter } from "@/game/gen";
+import { idleElapsedMinutes, settleIdle } from "@/game/idle";
 
 export const SAVE_VERSION = "0.1.0";
 
@@ -22,7 +23,7 @@ type GameState = {
   importSaveJson: (json: string, targetSlot?: 1 | 2 | 3) => { ok: true } | { ok: false; reason: string };
   exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
   
-  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number) => { ok: true } | { ok: false; reason: string };
+  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string) => { ok: true } | { ok: false; reason: string };
   useMove: (moveId: MoveId) => void;
   useItem: (itemId: ItemId) => void;
   switchTo: (partyIndex: number) => void;
@@ -30,6 +31,13 @@ type GameState = {
   healAll: () => void;
   useItemOutsideBattle: (itemId: ItemId, partyIndex: number) => void;
   buyItem: (itemId: ItemId, amount: number) => void;
+
+  /** 派遣挂机到某个已首通区域。 */
+  startIdle: (areaId: string) => { ok: true } | { ok: false; reason: string };
+  /** 领取挂机收益并结束本次派遣。 */
+  claimIdle: () => { money: number; capsules: Partial<Record<ItemId, number>> } | null;
+  /** 放弃本次挂机派遣，不结算收益。 */
+  cancelIdle: () => void;
 
   movePartyToBox: (partyIndex: number) => void;
   moveBoxToParty: (boxIndex: number) => void;
@@ -72,6 +80,44 @@ function averagePartyLevel(party: MonsterInstance[]) {
 function pushLog(battle: BattleState, lines: string[]) {
   const log = [...battle.log, ...lines].slice(-60);
   return { ...battle, log };
+}
+
+/** 为参战的所有幻兽建立本场战斗的 PP 表（每场战斗都补满）。 */
+function initPP(monsters: MonsterInstance[]): Record<string, Record<MoveId, number>> {
+  const table: Record<string, Record<MoveId, number>> = {};
+  for (const m of monsters) {
+    const pp: Record<MoveId, number> = {};
+    for (const id of m.moveIds) pp[id] = getMoveMaxPP(id);
+    table[m.id] = pp;
+  }
+  return table;
+}
+
+/** 从可用技能里随机挑一个；PP 全部耗尽时返回 null。 */
+function pickUsableMove(monster: MonsterInstance, pp: Record<MoveId, number> | undefined) {
+  const usable = monster.moveIds.filter((id) => (pp?.[id] ?? 0) > 0);
+  if (usable.length === 0) return null;
+  return usable[Math.floor(Math.random() * usable.length)];
+}
+
+/** 战斗获胜后把该区域记为已首通，解锁挂机收益。 */
+function markAreaCleared(save: SaveData, battle: BattleState): SaveData {
+  const areaId = battle.areaId;
+  if (!areaId) return save;
+  const prev = save.clearedAreas?.[areaId];
+  if (prev && prev.level >= battle.levelMax) return save;
+  return {
+    ...save,
+    clearedAreas: {
+      ...(save.clearedAreas ?? {}),
+      [areaId]: {
+        name: battle.areaName,
+        level: battle.levelMax,
+        theme: battle.theme,
+        clearedAt: nowIso(),
+      },
+    },
+  };
 }
 
 function alive(mon: MonsterInstance) {
@@ -220,7 +266,7 @@ export const useGameStore = create<GameState>()(
         return { ok: true, json: JSON.stringify({ ...save, lastSavedAt: nowIso() }, null, 2) };
       },
 
-      startEncounter: (theme, areaName, levelMin, levelMax) => {
+      startEncounter: (theme, areaName, levelMin, levelMax, areaId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return { ok: false, reason: "请先创建或导入存档" };
@@ -269,6 +315,7 @@ export const useGameStore = create<GameState>()(
         const battle: BattleState = {
           theme,
           areaName,
+          areaId,
           levelMin,
           levelMax,
           turn: 1,
@@ -277,6 +324,7 @@ export const useGameStore = create<GameState>()(
           playerStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
           enemyStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
           enemy,
+          ppByMonster: initPP([...save.party, enemy]),
           finished: false,
         };
         set({ [`save${state.slot}`]: { ...save, collection, lastSavedAt: nowIso() }, battle } as any);
@@ -361,7 +409,10 @@ export const useGameStore = create<GameState>()(
               timesCaptured: (save.collection[captured.specId]?.timesCaptured ?? 0) + 1,
             },
           };
-          const nextSave = { ...save, inventory: consumed.inv, party, box, collection, lastSavedAt: nowIso() };
+          const nextSave = markAreaCleared(
+            { ...save, inventory: consumed.inv, party, box, collection, lastSavedAt: nowIso() },
+            battle
+          );
           set({
             [`save${state.slot}`]: nextSave,
             battle: pushLog({ ...battle, finished: true, result: "captured" as const }, [head, `摇晃 x${shakes}… 捕获成功！${enemyName} 已加入。`]),
@@ -381,18 +432,32 @@ export const useGameStore = create<GameState>()(
         if (!save || !battle || battle.finished) return;
 
         let player = save.party[battle.playerActiveIndex];
+        if (!player) return;
+
+        // PP 校验与扣减：PP 只存在于本场战斗，战斗结束即丢弃
+        const playerPP = battle.ppByMonster?.[player.id] ?? {};
+        const remainingPP = playerPP[moveId] ?? 0;
+        if (remainingPP <= 0) {
+          set({ battle: pushLog(battle, [`${MOVE_SPECS[moveId].name} 的 PP 已耗尽，无法使用。`]) });
+          return;
+        }
+        let ppByMonster: Record<string, Record<MoveId, number>> = {
+          ...battle.ppByMonster,
+          [player.id]: { ...playerPP, [moveId]: remainingPP - 1 },
+        };
+
         let enemy = battle.enemy;
         let playerMods = { ...battle.playerStatMods };
         let enemyMods = { ...battle.enemyStatMods };
         let logs: string[] = [];
 
-        const enemyMoveId = enemy.moveIds[Math.floor(Math.random() * enemy.moveIds.length)];
+        const enemyMoveId = pickUsableMove(enemy, battle.ppByMonster?.[enemy.id]);
 
         // Speed check
         const playerSpd = getSpeed(player, playerMods);
         const enemySpd = getSpeed(enemy, enemyMods);
         const playerPriority = MOVE_SPECS[moveId].priority ?? 0;
-        const enemyPriority = MOVE_SPECS[enemyMoveId].priority ?? 0;
+        const enemyPriority = enemyMoveId ? (MOVE_SPECS[enemyMoveId].priority ?? 0) : 0;
 
         let playerGoesFirst = false;
         if (playerPriority > enemyPriority) {
@@ -431,6 +496,12 @@ export const useGameStore = create<GameState>()(
             logs.push(`${MONSTER_SPECS[enemy.specId].name} 畏缩了，无法行动！`);
             return;
           }
+          if (!enemyMoveId) {
+            logs.push(`${MONSTER_SPECS[enemy.specId].name} 已无可用技能，只能干瞪眼。`);
+            return;
+          }
+          const enemyPP = ppByMonster[enemy.id] ?? {};
+          ppByMonster = { ...ppByMonster, [enemy.id]: { ...enemyPP, [enemyMoveId]: Math.max(0, (enemyPP[enemyMoveId] ?? 0) - 1) } };
           const { ok, nextStatus } = canMove(enemy, logs);
           enemy.status = nextStatus;
           if (ok) {
@@ -462,7 +533,7 @@ export const useGameStore = create<GameState>()(
         logs.push(...endTurnRes.logs);
         player = nextParty[battle.playerActiveIndex];
 
-        battle = pushLog({ ...battle, playerStatMods: playerMods, enemyStatMods: enemyMods, enemy }, logs);
+        battle = pushLog({ ...battle, playerStatMods: playerMods, enemyStatMods: enemyMods, enemy, ppByMonster }, logs);
 
         // Check faints
         if (!alive(enemy)) {
@@ -470,7 +541,10 @@ export const useGameStore = create<GameState>()(
           const moneyGain = 50 + enemy.level * 10;
           const res = gainExp(player, expGain);
           nextParty[battle.playerActiveIndex] = res.monster;
-          const nextSave = { ...save, party: nextParty, money: save.money + moneyGain, lastSavedAt: nowIso() };
+          const nextSave = markAreaCleared(
+            { ...save, party: nextParty, money: save.money + moneyGain, lastSavedAt: nowIso() },
+            battle
+          );
           battle = pushLog({ ...battle, enemy, finished: true, result: "enemy_fainted" as const }, [
             `${MONSTER_SPECS[enemy.specId].name} 倒下了。`,
             `获得经验 ${expGain}，金钱 ¥${moneyGain}。${res.leveled ? "等级提升！" : ""}`.trim(),
@@ -536,6 +610,55 @@ export const useGameStore = create<GameState>()(
             lastSavedAt: nowIso(),
           },
         } as any);
+      },
+
+      startIdle: (areaId) => {
+        const state = get();
+        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        if (!save) return { ok: false, reason: "请先创建存档" };
+        const area = save.clearedAreas?.[areaId];
+        if (!area) return { ok: false, reason: "该区域尚未首通，无法挂机" };
+        if (save.idle) return { ok: false, reason: "已有进行中的挂机派遣" };
+        set({
+          [`save${state.slot}`]: {
+            ...save,
+            idle: { areaId, areaName: area.name, level: area.level, startedAt: nowIso() },
+            lastSavedAt: nowIso(),
+          },
+        } as any);
+        return { ok: true };
+      },
+
+      claimIdle: () => {
+        const state = get();
+        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        if (!save?.idle) return null;
+        const minutes = idleElapsedMinutes(save.idle.startedAt);
+        if (minutes <= 0) return null;
+
+        const { money, capsules } = settleIdle(save.idle.level, minutes);
+        const inventory = { ...save.inventory };
+        for (const [id, qty] of Object.entries(capsules)) {
+          const key = id as ItemId;
+          inventory[key] = (inventory[key] ?? 0) + (qty ?? 0);
+        }
+        set({
+          [`save${state.slot}`]: {
+            ...save,
+            money: save.money + money,
+            inventory,
+            idle: null,
+            lastSavedAt: nowIso(),
+          },
+        } as any);
+        return { money, capsules };
+      },
+
+      cancelIdle: () => {
+        const state = get();
+        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        if (!save?.idle) return;
+        set({ [`save${state.slot}`]: { ...save, idle: null, lastSavedAt: nowIso() } } as any);
       },
 
       movePartyToBox: (partyIndex: number) => {
@@ -971,17 +1094,24 @@ function runEnemyTurn(save: SaveData, battle: BattleState) {
     return { save, battle: { ...pushLog(battle, ["你已没有可战斗的伙伴。"]), finished: true, result: "player_fainted" as const } };
   }
 
-  const enemyMoveId = enemy.moveIds[Math.floor(Math.random() * enemy.moveIds.length)];
+  const enemyMoveId = pickUsableMove(enemy, battle.ppByMonster?.[enemy.id]);
+  let ppByMonster = battle.ppByMonster ?? {};
 
-  const { ok, nextStatus } = canMove(enemy, logs);
-  enemy.status = nextStatus;
-  if (ok) {
-    const res = executeMoveAction(enemy, player, enemyMods, playerMods, enemyMoveId);
-    enemy = res.nextAttacker;
-    player = res.nextDefender;
-    enemyMods = res.nextAttackerMods;
-    playerMods = res.nextDefenderMods;
-    logs.push(...res.logs);
+  if (!enemyMoveId) {
+    logs.push(`${MONSTER_SPECS[enemy.specId].name} 已无可用技能，只能干瞪眼。`);
+  } else {
+    const enemyPP = ppByMonster[enemy.id] ?? {};
+    ppByMonster = { ...ppByMonster, [enemy.id]: { ...enemyPP, [enemyMoveId]: Math.max(0, (enemyPP[enemyMoveId] ?? 0) - 1) } };
+    const { ok, nextStatus } = canMove(enemy, logs);
+    enemy.status = nextStatus;
+    if (ok) {
+      const res = executeMoveAction(enemy, player, enemyMods, playerMods, enemyMoveId);
+      enemy = res.nextAttacker;
+      player = res.nextDefender;
+      enemyMods = res.nextAttackerMods;
+      playerMods = res.nextDefenderMods;
+      logs.push(...res.logs);
+    }
   }
 
   party[battle.playerActiveIndex] = player;
@@ -993,7 +1123,7 @@ function runEnemyTurn(save: SaveData, battle: BattleState) {
   logs.push(...endTurnRes.logs);
   player = party[battle.playerActiveIndex];
 
-  let b = pushLog({ ...battle, playerStatMods: playerMods, enemyStatMods: enemyMods, enemy }, logs);
+  let b = pushLog({ ...battle, playerStatMods: playerMods, enemyStatMods: enemyMods, enemy, ppByMonster }, logs);
   const nextSave = { ...save, party, lastSavedAt: nowIso() };
 
   if (!alive(player)) {

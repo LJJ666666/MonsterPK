@@ -50,6 +50,25 @@ export function roll(chance: number) {
   return Math.random() < chance;
 }
 
+/**
+ * 技能的最大 PP（使用次数）。
+ * 变化类技能固定 15；伤害技能按威力分档，威力越高越少。
+ * `MoveSpec.pp` 可覆盖单独技能。
+ */
+export function getMoveMaxPP(moveId: MoveId) {
+  const move = MOVE_SPECS[moveId];
+  if (!move) return 10;
+  if (typeof move.pp === "number") return move.pp;
+  if (move.category === "status") return 15;
+  const power = move.power;
+  if (power <= 30) return 30;
+  if (power <= 50) return 25;
+  if (power <= 70) return 20;
+  if (power <= 90) return 15;
+  if (power <= 110) return 10;
+  return 5;
+}
+
 export function computeDamage(
   attacker: MonsterInstance,
   defender: MonsterInstance,

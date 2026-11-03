@@ -6,7 +6,8 @@ import StatBar from "@/components/StatBar";
 import { ELEMENT_LABEL, ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS, LOCATIONS, THEME_TABLE } from "@/game/data";
 import type { EncounterTheme, ItemId, LocationId, StatBlock, MonsterInstance } from "@/game/types";
 import { useGameStore } from "@/stores/useGameStore";
-import { getMonsterStatBounds, requiredExpForNextLevel } from "@/game/rules";
+import { getMonsterStatBounds, requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
+import { IDLE_CAP_MINUTES, idleCapsuleExpectation, idleCapsulesPerHour, idleElapsedMinutes, idleMoneyFor, idleMoneyPerHour } from "@/game/idle";
 
 import TypeChartModal from "@/components/TypeChartModal";
 
@@ -127,11 +128,14 @@ import { Info } from "lucide-react";
 export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { slot, save1, save2, save3, startEncounter, healAll, useItemOutsideBattle, buyItem, travelTo } = useGameStore();
+  const { slot, save1, save2, save3, startEncounter, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
   const [selected, setSelected] = useState<number | null>(null);
   const [boxSelected, setBoxSelected] = useState<number | null>(null);
   const [shopOpen, setShopOpen] = useState(false);
+  const [idleOpen, setIdleOpen] = useState(false);
+  const [idleNow, setIdleNow] = useState(() => Date.now());
+  const [idleResult, setIdleResult] = useState<string | null>(null);
   const [mapView, setMapView] = useState<"list" | "detail">("list");
   
   const [dialog, setDialog] = useState<{ name: string; text: string } | null>(null);
@@ -153,6 +157,14 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       setMapView("detail");
     }
   }, [location.state]);
+
+  // 挂机面板打开时每秒刷新已挂时长
+  useEffect(() => {
+    if (!idleOpen) return;
+    setIdleNow(Date.now());
+    const timer = setInterval(() => setIdleNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [idleOpen]);
 
   const saves = [save1, save2, save3];
   const save = saves[slot - 1];
@@ -248,7 +260,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                   <div key={`${id}-${index}`} className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2">
                     <div className="text-sm font-semibold text-[color:var(--text)]">{MOVE_SPECS[id].name}</div>
                     <div className="mt-1 text-[10px] text-[color:var(--muted)]">
-                      威力 {MOVE_SPECS[id].power} · 命中 {Math.round(MOVE_SPECS[id].accuracy * 100)}%
+                      威力 {MOVE_SPECS[id].power} · 命中 {Math.round(MOVE_SPECS[id].accuracy * 100)}% · PP {getMoveMaxPP(id)}
                     </div>
                     {MOVE_SPECS[id].desc && (
                       <div className="mt-1.5 text-xs text-[color:var(--text)] opacity-80 leading-relaxed">
@@ -467,6 +479,115 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       );
     }
 
+    if (idleOpen) {
+      const cleared = Object.entries(save.clearedAreas ?? {});
+      const idle = save.idle ?? null;
+      const elapsed = idle ? idleElapsedMinutes(idle.startedAt, idleNow) : 0;
+      const capped = idle ? elapsed >= IDLE_CAP_MINUTES : false;
+
+      return (
+        <PixelCard
+          title="远征挂机"
+          right={
+            <button className="text-xs text-[color:var(--accent)] hover:underline" onClick={() => setIdleOpen(false)}>
+              返回
+            </button>
+          }
+        >
+          {idleResult && (
+            <div className="mb-3 border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] p-3 text-xs text-[color:var(--text)]">
+              结算到账：{idleResult}
+            </div>
+          )}
+
+          {idle ? (
+            <div className="grid gap-3">
+              <div className="border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-[color:var(--text)]">{idle.areaName}</div>
+                  <div className="text-xs text-[color:var(--muted)]">难度 Lv{idle.level}</div>
+                </div>
+                <div className="mt-2 text-xs text-[color:var(--muted)]">
+                  有效挂机 {Math.floor(elapsed / 60)} 小时 {elapsed % 60} 分 / 上限 {IDLE_CAP_MINUTES / 60} 小时
+                </div>
+                <div className="mt-1 text-xs text-[color:var(--text)]">
+                  预计 ¥{idleMoneyFor(idle.level, elapsed)} · 捕获器期望 {idleCapsuleExpectation(elapsed).toFixed(1)} 个
+                </div>
+                {capped && <div className="mt-1 text-xs text-amber-400">已达累积上限，请及时领取。</div>}
+              </div>
+              <div className="flex gap-2">
+                <PixelButton
+                  tone="primary"
+                  disabled={elapsed <= 0}
+                  onClick={() => {
+                    const res = claimIdle();
+                    if (!res) return;
+                    const parts = [`¥${res.money}`];
+                    for (const [id, qty] of Object.entries(res.capsules)) {
+                      if (qty && qty > 0) parts.push(`${ITEM_SPECS[id as ItemId].name} ×${qty}`);
+                    }
+                    setIdleResult(parts.join(" · "));
+                  }}
+                >
+                  领取收益
+                </PixelButton>
+                <PixelButton
+                  tone="muted"
+                  onClick={() => {
+                    if (confirm("确定放弃本次挂机收益吗？")) {
+                      cancelIdle();
+                      setIdleResult(null);
+                    }
+                  }}
+                >
+                  取消派遣
+                </PixelButton>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              <div className="text-xs text-[color:var(--muted)] leading-relaxed">
+                选择一个已首通的野外区域，离线期间按时间自动产出金钱与捕获器（不做战斗模拟）。离线最多累积 {IDLE_CAP_MINUTES / 60} 小时。
+              </div>
+              {cleared.length === 0 ? (
+                <div className="text-sm text-[color:var(--muted)] border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-4">
+                  还没有首通的野外区域。先在野外打赢一场战斗，就能在这里派遣远征队。
+                </div>
+              ) : (
+                cleared
+                  .sort((a, b) => a[1].level - b[1].level)
+                  .map(([areaId, area]) => (
+                    <div key={areaId} className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-[color:var(--text)]">{area.name}</div>
+                        <div className="text-xs text-[color:var(--muted)]">难度 Lv{area.level}</div>
+                      </div>
+                      <div className="mt-1 text-[10px] text-[color:var(--muted)]">
+                        每小时约 ¥{idleMoneyPerHour(area.level)} · 捕获器期望 {idleCapsulesPerHour().toFixed(2)} 个
+                      </div>
+                      <div className="mt-3">
+                        <PixelButton
+                          size="sm"
+                          onClick={() => {
+                            setIdleResult(null);
+                            startIdle(areaId);
+                          }}
+                        >
+                          派遣
+                        </PixelButton>
+                      </div>
+                    </div>
+                  ))
+              )}
+              <div className="text-[10px] text-[color:var(--muted)] leading-relaxed">
+                捕获器按区域难度解锁：难度 Lv10 以上有概率掉落高级捕获器，Lv20 以上有概率掉落特级捕获器。
+              </div>
+            </div>
+          )}
+        </PixelCard>
+      );
+    }
+
     if (dialog) {
       return (
         <div className="mt-auto">
@@ -536,7 +657,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                       className="!border-[color:var(--danger-border)] !text-[color:var(--danger-text)] text-xs h-10 flex items-center justify-center"
                       style={{ "--danger-border": dangerColor, "--danger-text": textColor } as any}
                       onClick={() => {
-                        const res = startEncounter(wa.encounters[0], wa.name, wa.levelMin, wa.levelMax);
+                        const res = startEncounter(wa.encounters[0], wa.name, wa.levelMin, wa.levelMax, wa.id);
                         if (res.ok) {
                           navigate("/arena");
                         }
@@ -550,6 +671,21 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               </div>
             </div>
           )}
+
+          <div className="mt-4 pt-4 border-t-2 border-[color:var(--stroke)]">
+            <PixelButton
+              tone="muted"
+              onClick={() => {
+                setIdleResult(null);
+                setIdleOpen(true);
+              }}
+            >
+              远征挂机
+            </PixelButton>
+            <div className="mt-2 text-[10px] text-[color:var(--muted)]">
+              按已首通区域离线产出金钱与捕获器，最多累积 {IDLE_CAP_MINUTES / 60} 小时。
+            </div>
+          </div>
         </div>
       </PixelCard>
     );
@@ -811,7 +947,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                   <div key={`${id}-${index}`} className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2">
                     <div className="text-sm font-semibold text-[color:var(--text)]">{MOVE_SPECS[id].name}</div>
                     <div className="mt-1 text-[10px] text-[color:var(--muted)]">
-                      威力 {MOVE_SPECS[id].power} · 命中 {Math.round(MOVE_SPECS[id].accuracy * 100)}%
+                      威力 {MOVE_SPECS[id].power} · 命中 {Math.round(MOVE_SPECS[id].accuracy * 100)}% · PP {getMoveMaxPP(id)}
                     </div>
                   </div>
                 ))}
@@ -921,6 +1057,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               setTab(item.id as any);
               setSelected(null);
               setShopOpen(false);
+              setIdleOpen(false);
               setMapView("list");
               setDialog(null);
               setDexSelectedSpecId(null);

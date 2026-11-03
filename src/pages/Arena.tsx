@@ -6,7 +6,7 @@ import StatBar from "@/components/StatBar";
 import { ELEMENT_COLORS, ELEMENT_LABEL, ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS } from "@/game/data";
 import type { ItemId, Element } from "@/game/types";
 import { useGameStore } from "@/stores/useGameStore";
-import { requiredExpForNextLevel } from "@/game/rules";
+import { requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 
 import TypeChartModal from "@/components/TypeChartModal";
 import { MonsterName } from "@/components/MonsterName";
@@ -98,6 +98,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
 
   const enemySpec = MONSTER_SPECS[battle.enemy.specId];
   const playerSpec = MONSTER_SPECS[active.specId];
+  const activePP = battle.ppByMonster?.[active.id] ?? {};
 
   // 提取最新的对战日志以精简显示
   const latestLog = useMemo(() => {
@@ -219,16 +220,27 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
 
                 {panel === "moves" && (
                   <div className="grid grid-cols-2 gap-2">
-                    {active.moveIds.map((id) => (
-                      <PixelButton key={id} onClick={() => useMove(id)} disabled={battle.finished || active.hp <= 0}>
-                        <div className="flex flex-col items-center py-1">
-                          <span className={ELEMENT_COLORS[MOVE_SPECS[id].element]}>{MOVE_SPECS[id].name}</span>
-                          <span className="mt-1 text-[10px] opacity-70">
-                            威力 {MOVE_SPECS[id].power} · {Math.round(MOVE_SPECS[id].accuracy * 100)}%
-                          </span>
-                        </div>
-                      </PixelButton>
-                    ))}
+                    {active.moveIds.map((id) => {
+                      const maxPP = getMoveMaxPP(id);
+                      const curPP = activePP[id] ?? 0;
+                      return (
+                        <PixelButton
+                          key={id}
+                          onClick={() => useMove(id)}
+                          disabled={battle.finished || active.hp <= 0 || curPP <= 0}
+                        >
+                          <div className="flex flex-col items-center py-1">
+                            <span className={ELEMENT_COLORS[MOVE_SPECS[id].element]}>{MOVE_SPECS[id].name}</span>
+                            <span className="mt-1 text-[10px] opacity-70">
+                              威力 {MOVE_SPECS[id].power} · {Math.round(MOVE_SPECS[id].accuracy * 100)}%
+                            </span>
+                            <span className={`mt-0.5 text-[10px] ${curPP <= 1 ? "text-red-400" : "opacity-70"}`}>
+                              PP {curPP}/{maxPP}
+                            </span>
+                          </div>
+                        </PixelButton>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -293,7 +305,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                     <PixelButton
                       tone="primary"
                       onClick={() => {
-                        const res = startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax);
+                        const res = startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
                         if (res.ok) setPanel("moves");
                       }}
                     >

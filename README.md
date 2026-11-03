@@ -44,6 +44,8 @@ npm test
 ## 文档索引
 
 - 路线图与任务拆解：[/workspace/.trae/documents/开发路线图_roadmap.md](file:///workspace/.trae/documents/开发路线图_roadmap.md)
+- 游戏设计与可玩性分析：[/workspace/.trae/documents/游戏设计分析_可玩性补全.md](file:///workspace/.trae/documents/游戏设计分析_可玩性补全.md)
+- 性能基线（Web 运行时）：[/workspace/.trae/documents/性能基线_web.md](file:///workspace/.trae/documents/性能基线_web.md)
 - 云端打包 APK 指南：[apk_build_guide.md](file:///workspace/apk_build_guide.md)
 - 常见问题排查：[/workspace/.trae/documents/bug_log.md](file:///workspace/.trae/documents/bug_log.md)
 - PRD：[/workspace/.trae/documents/PRD-原创抓怪回合制RPG.md](file:///workspace/.trae/documents/PRD-原创抓怪回合制RPG.md)

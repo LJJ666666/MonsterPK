@@ -130,6 +130,11 @@ export type MoveSpec = {
   power: number;
   /** 技能基础命中率（0~1之间，1代表100%命中） */
   accuracy: number;
+  /**
+   * 技能的最大 PP（使用次数）。
+   * 未填写时按威力自动推导，见 `getMoveMaxPP`。仅用于覆盖个别特例技能。
+   */
+  pp?: number;
   /** 先制优先度。数值越大越先出手（如水流喷射 priority: 1）。默认为 0。 */
   priority?: number;
   /** 技能作用目标。enemy=单体敌人，self=施法者自身，all=全体目标。 */
@@ -211,6 +216,24 @@ export type CollectionEntry = {
   seenLocations?: LocationId[];
 };
 
+/** 已首通（打赢过）的野外区域记录，挂机收益按此解锁。 */
+export type ClearedArea = {
+  name: string;
+  /** 区域难度基准：取该区域的 levelMax，决定挂机金币与球档位 */
+  level: number;
+  theme: EncounterTheme;
+  clearedAt: string;
+};
+
+/** 挂机派遣状态。挂机不做战斗模拟，仅按时间结算资源。 */
+export type IdleAssignment = {
+  areaId: string;
+  areaName: string;
+  level: number;
+  /** 派遣开始的 ISO 时间戳 */
+  startedAt: string;
+};
+
 export type SaveData = {
   version: string;
   playerName: string;
@@ -223,6 +246,10 @@ export type SaveData = {
   box: MonsterInstance[];
   inventory: Record<ItemId, number>;
   collection: Record<string, CollectionEntry>;
+  /** 已首通的野外区域。挂机收益只在这些区域内解锁。 */
+  clearedAreas?: Record<string, ClearedArea>;
+  /** 当前挂机派遣。null/undefined 表示没有在挂机。 */
+  idle?: IdleAssignment | null;
   lastSavedAt: string;
 };
 
@@ -233,6 +260,8 @@ export type BattleState = {
   /** 遭遇的场景主题（决定战斗背景或氛围） */
   theme: EncounterTheme;
   areaName: string;
+  /** 野外区域 id，用于记录首通进度。快闪战没有该字段。 */
+  areaId?: string;
   levelMin: number;
   levelMax: number;
   /** 当前进行到的回合数 */
@@ -247,6 +276,11 @@ export type BattleState = {
   enemyStatMods: StatModifiers;
   /** 敌方野生幻兽的实体数据 */
   enemy: MonsterInstance;
+  /**
+   * 本场战斗中每只幻兽的技能剩余 PP。
+   * 键为幻兽实例 id；只存在于战斗内，战斗结束即丢弃，不写入存档。
+   */
+  ppByMonster: Record<string, Record<MoveId, number>>;
   /** 战斗是否已经结束 */
   finished: boolean;
   /** 战斗结束的最终结果。captured=成功捕获，enemy_fainted=击败敌方，fled=成功逃跑，player_fainted=我方全灭。 */

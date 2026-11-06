@@ -142,7 +142,7 @@ C:\Users\Six\.workbuddy\user-2f146fb9-76c5-420d-95cd-5fad8c99318f-personal\MEMOR
 5. 探活双服务（5173 / 3001），没起就按 HANDOFF.md 第 3 节启动。
 6. 跑 python scripts/check_home_env.py 与 python scripts/doc_check.py，把输出贴给我。
 
-以上全部只做只读检查。不要重跑任何已完成任务，也不要擅自开始 P2-2，等我排期。
+以上全部只做只读检查。不要重跑任何已完成任务，也不要擅自开始 P3-1c（前端切换到服务端战斗），等我排期。
 ```
 
 ## 6. 验收清单
@@ -152,16 +152,18 @@ python scripts/check_home_env.py          # 期望 ENV_CHECK_OK（[WARN] 按提�
 python scripts/doc_check.py               # 期望 DOC_CHECK_OK
 python scripts/sync_memory.py --check     # 期望 [一致] 且两侧 sha256 相同
 npm run check && npm test                 # 前端 0 错误 / 47 passed
-cd backend && npm run check && npm test   # 后端 0 错误 / 107 passed
+cd backend && npm run check && npm test   # 后端 0 错误 / 130 passed
+cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 ```
 
-服务已起时再跑（四组 E2E + 浏览器冒烟）：
+服务已起时再跑（五组 E2E + 浏览器冒烟）：
 
 ```bash
 cd backend && npm run e2e        # 57/57 E2E_OK
 cd backend && npm run e2e:p12    # 38/38 E2E_P12_OK
 cd backend && npm run e2e:p21    # 34/34 E2E_P21_OK
 cd backend && npm run e2e:p22    # 24/24 E2E_P22_OK（P2-2 在线权威态）
+cd backend && npm run e2e:p31    # 38/38 E2E_P31_OK（P3-1 服务端战斗）
 node scripts/ui_smoke_p21.mjs    # 15/15 UI_SMOKE_OK（Edge 路径可用 EDGE_PATH 覆盖）
 ```
 
@@ -186,8 +188,8 @@ node scripts/ui_smoke_p21.mjs    # 15/15 UI_SMOKE_OK（Edge 路径可用 EDGE_PA
 
 ## 8. 当前进度快照（2026-11-06）
 
-P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / **P2-1 ✅** / **P2-2 ✅（11-07）**。
-下一步 **P3-1 服务端模拟**：P2-2 已把在线权威态收敛到服务端（内存态 + DB 持久化 + `session.state` 广播 + 服务端统一写入），但战斗/捕获/挂机的中间态与内容真值仍在客户端；P3-1 把模拟整体上移、P3-2 客户端瘦终端化后，P4 多人玩法与 P5 去本地存档才安全。P1-4（榜单/成就派生）优先级低，不必抢跑。
+P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / **P2-1 ✅** / **P2-2 ✅（11-07）** / **P3-1a ✅ + P3-1b ✅（11-07）**。
+下一步 **P3-1c**：后端已有内容表、战斗内核与权威战斗态（开局/回合/结算/广播全在服务端，`e2e:p31` 38 例），但**前端还没切换**——`startEncounter`/`useMove`/`useItem`/`switchTo`/`flee` 仍走本地战斗。P3-1c 把这几个入口改调 `/api/battle/*`，玩家才真正走服务端战斗；之后 P3-2 去本地权威、P4 多人、P5 去本地存档才安全。P1-4（榜单/成就派生）优先级低，不必抢跑。
 
 北极星方向：**服务端权威 + WebSocket 实时多人同玩**，客户端瘦终端只发意图、收状态、渲染；本地存档是 P3/P5 前的过渡桥接。
 

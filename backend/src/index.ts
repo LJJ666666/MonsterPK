@@ -7,7 +7,9 @@ import { authRoutes } from './modules/auth';
 import { saveRoutes } from './modules/save';
 import { actionRoutes } from './modules/actions';
 import { sessionRoutes } from './modules/session';
-import { getSessionStats } from './modules/sessionBus';
+import { battleRoutes } from './modules/battle';
+import { contentStats } from './game/content';
+import { getSessionStats, battles } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
 import { getAccountState, BAN_CODE, type AccountState } from './lib/account';
 
@@ -53,18 +55,21 @@ fastify.decorate('authenticate', async (req: any, reply: any) => {
   req.account = state;
 });
 
-// health 附带实时通道在线数（P2-1）与在线权威态统计（P2-2），便于联调与自动化回归。
+// health 附带实时通道在线数（P2-1）、在线权威态统计（P2-2）与活跃战斗 / 内容表规模（P3-1）。
 fastify.get('/api/health', async () => ({
   ok: true,
   ts: Date.now(),
   ws: getRealtimeStats(),
   sessions: getSessionStats(),
+  battles: battles.stats(),
+  content: contentStats(),
 }));
 
 fastify.register(authRoutes);
 fastify.register(saveRoutes);
 fastify.register(actionRoutes);
 fastify.register(sessionRoutes);
+fastify.register(battleRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 registerRealtime(fastify);

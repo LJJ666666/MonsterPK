@@ -14,7 +14,7 @@
 export const WS_PATH = '/ws';
 /** 协议版本：P2-2 保持 1，用 hello.capabilities 声明新增能力，避免旧客户端被拒。 */
 export const WS_PROTOCOL_VERSION = 1;
-export const WS_CAPABILITIES = ['session.state', 'session.resync'];
+export const WS_CAPABILITIES = ['session.state', 'session.resync', 'battle.state'];
 
 /** 服务端底层 ping 周期；连接超过两个周期无响应即判定死连接。 */
 export const WS_HEARTBEAT_MS = 30_000;
@@ -93,8 +93,22 @@ export type SessionStatePayload = {
   data: string;
   updatedAt: number;
   schemaVersion: string;
-  source: 'hydrate' | 'put' | 'intent';
+  source: 'hydrate' | 'put' | 'intent' | 'battle';
   online: number;
+};
+
+/**
+ * 战斗回合快照（P3-1）。
+ * 只下发「服务端已经推进完」的结果；上行没有对应的写入口，
+ * 客户端要推进战斗必须走 POST /api/battle/action 让服务端裁决。
+ */
+export type BattleStatePayload = {
+  type: 'battle.state';
+  slot: number;
+  battleId: string;
+  turn: number;
+  finished: boolean;
+  result: 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted' | null;
 };
 
 /** 服务端 → 客户端：控制消息 + 权威态快照。 */
@@ -112,7 +126,8 @@ export type ServerMessage =
   | { type: 'pong'; serverTime: number; echo?: number }
   | { type: 'error'; code: string; reason: string }
   | { type: 'bye'; reason: string; code?: string }
-  | SessionStatePayload;
+  | SessionStatePayload
+  | BattleStatePayload;
 
 export type ParseResult =
   | { ok: true; message: ClientMessage }

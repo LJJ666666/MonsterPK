@@ -506,3 +506,59 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - **能力边界**：本层只把「在线那份权威存档」收敛到服务端。战斗中间态 / HP / PP、
   遭遇生成、内容表 ID 真值仍在客户端；GG 改内存、加速器仍需 P3-1 服务端模拟根治。
   P2-2 是 P3 的前置，不等于客户端已成为瘦终端。
+
+## 17. P3-1 服务端战斗（2026-11-07）
+
+### 17.1 内容表：单一真源 + 生成，不手工复制
+
+- 真源仍是 `src/game/data.ts`（+ 迁入的 `TYPE_CHART`）。后端 `rootDir=src` 不能跨包 import，
+  所以用 `backend/scripts/gen-content.ts` 生成 `backend/src/game/content.generated.ts`：
+  294 技能 / 40 幻兽 / 22 道具 / 8 遭遇主题 / 7 城镇 / 18 属性克制表。
+- 命令：`npm run gen:content` 生成、`npm run check:content` 比对。
+  **改了 `data.ts` 必须重新生成并一起提交**，否则 check 失败——这是防「服务端内容表慢慢过期」的唯一手段。
+- `TYPE_CHART` 特意从 `rules.ts` 移到 `data.ts`：它是纯数据，放在 data 里生成器只依赖一个文件，
+  不触发 `@/` 运行时别名（`rules.ts` 转出同名常量，旧引用不变）。
+
+### 17.2 战斗内核（`backend/src/game/`）
+
+| 文件 | 职责 |
+|---|---|
+| `content.ts` | 类型化访问内容表 + `effectiveness` / `contentStats` / `emptyMods` |
+| `rules.ts` | 伤害、命中、暴击、速度、PP 推导、异常判定、能力变化、升级、捕获率；**所有随机走注入 `Rng`** |
+| `battle.ts` | 状态机：开局 → 技能/道具/换人/捕获/逃跑 → 回合末 DOT → 结算（经验分配、奖励、首通） |
+
+- **公式必须与前端 `src/game/rules.ts` 逐项一致**。`tests/battleEngine.test.ts` 直接 import 前端规则做对照：
+  PP 294 项、克制全表、伤害数值、捕获率。任何一侧改公式而另一侧没跟上，单测立即失败。
+- 服务端不读客户端任何数值：队伍/背包/等级来自存档，敌方由服务端 `createInstance` 生成，
+  `captureRate` 从内容表读并按 `0.02~0.62` 钳制。
+
+### 17.3 权威战斗态与接口
+
+- `lib/battleSession.ts`：`BattleRegistry` 按 `(userId, slot)` 注册，**三键（userId+slot+battleId）全对才返回**，
+  同槽位新开局覆盖旧战斗，`TTL=30min`，封号时 `dropUser`。
+- 接口（全部要 JWT）：
+  - `POST /api/battle/start` `{slot, theme, areaName, areaId?, levelMin, levelMax}` → 服务端生成敌人，返回 `battle`；
+  - `POST /api/battle/action` `{battleId, slot, action}`，`action` 只能是
+    `move{moveId}` / `item{itemId}` / `capture{itemId}` / `switch{partyIndex}` / `flee`；
+  - `GET /api/battle/current?slot=`、`POST /api/battle/abandon`。
+- **HTTP 状态约定**：参数不合法 400（带 `code`：`MOVE_UNKNOWN` / `PP_EXHAUSTED` / `ITEM_NOT_ENOUGH` /
+  `SAME_ACTIVE` / `MONSTER_FAINTED` …）；战斗不存在或已结束 404 `BATTLE_NOT_FOUND`；
+  战斗已结束再动作 409 `BATTLE_FINISHED`；单场动作超过 500 次 429。
+- 结算：`applySettlement()` 用服务端战斗态覆盖存档——队伍 HP/经验/等级、金钱（`amulet_coin` 翻倍）、
+  道具消耗（`state.consumed`）、捕获入队/入箱、图鉴 seen/captured、首通 `clearedAreas`，
+  然后 `commitState(..., source='battle')` 写库并把 `authority.expected` 提到新档摘要、`revision+1`、`pending=null`。
+  这样客户端后续再整包 PUT 也只是「不得更富」，无法抹掉战斗结果或凭空加资源。
+- 广播：向下行推 `battle.state`（`battleId/turn/finished/result`），`hello.capabilities` 已声明；
+  战斗结束后还会有一条 `session.state`（结算后的新存档）。**上行仍无任何写入口**。
+
+### 17.4 验收与能力边界
+
+- `npm run e2e:p31` **38/38 `E2E_P31_OK`**：敌人生成、队伍取自存档、PP 服务端扣减、换人、多回合、
+  WS 广播、结算写档 revision 提升、伪造/越权 battleId 404、同槽位覆盖、放弃、跨账号隔离。
+- 后端 `node:test` **130/130**（新增内核 15 例 + 注册表 8 例）、前端 47/47、三组旧 E2E 无回归。
+- **边界（不要说成已完全瘦终端）**：
+  1. 前端**还没切换**到服务端战斗（P3-1c）——当前玩家仍走本地战斗，服务端战斗能力处于「已就绪未接入」；
+  2. 战斗会话在内存，服务重启即丢（客户端重新开局），不跨实例——P4 多人前要换成共享存储；
+  3. `areaId` 匹配不到服务端地图时退化为信任客户端 theme（仍校验 theme 在真值表内），
+     等级区间以服务端地图为准只在匹配成功时生效；
+  4. 加速器仍可能影响客户端动画节奏，但**不再影响结算**（回合与 RNG 都在服务端）。

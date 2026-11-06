@@ -19,7 +19,7 @@ import type { AuthorityState } from './authority';
 export const SESSION_TTL_MS = 10 * 60 * 1000;
 export const SESSION_SLOTS = [1, 2, 3] as const;
 
-export type SessionSource = 'hydrate' | 'put' | 'intent';
+export type SessionSource = 'hydrate' | 'put' | 'intent' | 'battle';
 
 export type GameSessionState = {
   userId: string;

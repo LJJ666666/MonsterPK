@@ -41,6 +41,7 @@ import { wsRegistry, gameSessions } from './sessionBus';
 import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
+import { battles } from './sessionBus';
 
 export function getRealtimeStats(): { connections: number; users: number } {
   return { connections: wsRegistry.size, users: wsRegistry.userCount };
@@ -134,6 +135,8 @@ export function registerRealtime(fastify: FastifyInstance): void {
         try { c.socket.ping(); } catch { /* 已断开，交给 close 事件注销 */ }
       }
       sweepSessions(now);
+      // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
+      battles.sweep(now);
 
       const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
       if (userIds.length === 0) return;
@@ -158,6 +161,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
             detachConnection(c.id);
           }
           dropUserSessions(u.id);
+          battles.dropUser(u.id);
         }
       } catch (err) {
         fastify.log.error({ event: 'ws_ban_sweep_error', err }, 'ws ban sweep failed');

@@ -52,4 +52,4 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 ## 7. 进度与遗留
 - **P1-2 ✅ / P1-3 ✅（11-06，路线 A、a~d 全做；P1-3 拆开嵌入对应步骤，不真并行）**：RNG/结算/时钟上移，nonce 防重放，改系统时间不生效且不封号；捕获率补稀有度/等级差、`amulet_coin` 翻倍、`exp_share` 全队经验、进化石可用。证据：后端 76/76、E2E 57/57 + 38/38、前端 27/27 + build、headless 10/10。**内容缺口**：只有 `spark_mouse` 配了 `stone_thunder` 道具进化，其余三种进化石暂无目标。
 - **P2-1 ✅（11-06）**：WebSocket 通道打通（鉴权 / 心跳 / 重连 / 限流 / 状态 UI），证据：后端 92/92、`e2e:p21` 34/34、前端 37/37 + build、headless 13/13。**下一步 P2-2 服务端 GameSession 实时态**：通道已有但无在线权威态，游戏数据仍靠整包存档 + 意图裁决；P2-2 收敛后 P3 才能把战斗模拟整体搬上服务端。
-- **Git（11-06）**：杰哥要求先建回滚点再做 P2-1、完成后再提交 → 本地两个 commit：`fe159eb`（P0~P1-3 全量，65 文件）、P2-1 提交（hash 见 `git log -2 --oneline`）。**均未推送**；`dev.db`/`.env` 已 gitignore，外部同步需杰哥确认。
+- **Git（11-06）**：杰哥要求先建回滚点再做 P2-1、完成后再提交，随后拍板「先推送」→ 两个本地 commit `fe159eb`（P0~P1-3，65 文件）、`bb04998`（P2-1，20 文件）已 `git push origin master`（`703fe1b..bb04998`）。推送时两端 HEAD 同为 `bb04998`、ahead/behind 0/0、工作树干净；本条回填另以文档 commit 入库。`dev.db`/`.env` 已 gitignore，仅 `.env.example` 占位模板入库（无真实密钥）。换机器 clone 后补 `.env` + Prisma 迁移即可续开发，文档/记忆随 commit 入库。

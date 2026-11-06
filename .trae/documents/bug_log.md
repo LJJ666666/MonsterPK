@@ -165,3 +165,25 @@
 复验：后端 `tsc` 0 / `node:test` 76/76；`npm run e2e` 57/57；`npm run e2e:p12` 连跑 3 次均 38/38。
 
 **教训**：涉及服务端 RNG 的 E2E 必须重复运行或固定随机源，单次全绿不代表两条分支都覆盖。
+
+## 18. `strict:false` 下判别联合收窄失效（P2-1，TS2339）
+
+现象：`modules/realtime.ts` 里 `parseClientMessage()` 返回 `ParseResult`（`{ok:true,...} | {ok:false,code,reason}`），
+写 `if (!parsed.ok) { parsed.code }` 后 `tsc --noEmit` 报 3 处
+`Property 'code' does not exist on type 'ParseResult'`，但 `node:test` 运行完全正常。
+
+原因：本项目 `tsconfig.json` 的 `strict: false` 同时关闭了 `strictNullChecks`，
+该模式下对布尔判别式取反（`!x.ok`）的控制流收窄会失效，TS 仍按整个联合类型检查。
+P1-1 里 zod 联合类型 narrowing 失败也是同一类坑（当时改用 throw-based `assertValidSaveData()`）。
+
+处理：改成属性存在性收窄 `if ('code' in parsed) { ... }`，两个分支都能正确推导。
+**约定**：后端判别联合优先用 `'字段' in obj` 或 `=== false` 显式比较，不要依赖 `!obj.ok`。
+
+## 19. upgrade 拒绝响应 `write` 后立刻 `destroy` 会丢 body（P2-1，预防性修复）
+
+现象：握手阶段拒绝连接时，最初实现是 `socket.write(响应)` 后立刻 `socket.destroy()`。
+`write` 是异步的，立即 destroy 可能丢掉尚未 flush 的响应体，客户端（`unexpected-response`）
+就只能看到断连，读不到 `401 UNAUTHORIZED` / `403 ACCOUNT_BANNED` 的机器码。
+
+处理：改为 `socket.end(buildRejectResponse(...))` 一次性写完并正常结束。
+`e2e_p21_ws.mjs` 的 8 个拒绝用例都断言了 `status` **且** `data.code`，可复现验证 body 完整。

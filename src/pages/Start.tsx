@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { clearToken } from "@/lib/auth";
 import { useSyncStatus } from "@/lib/sync";
 import { useIsAdmin } from "@/lib/admin";
+import { useWsStatus, type WsPhase } from "@/lib/ws";
 
 type CloudState = "checking" | "none" | "available" | "unreachable";
 
@@ -34,6 +35,23 @@ const syncColor: Record<string, string> = {
   offline: "bg-[color:var(--danger)]",
   error: "bg-[color:var(--danger)]",
 };
+// 实时通道状态（P2-1）：只显示连接相位，与存档同步状态分开，便于分别排障。
+const wsText: Record<WsPhase, string> = {
+  idle: "实时通道未启动",
+  connecting: "正在连接实时通道…",
+  online: "实时通道已连接",
+  reconnecting: "实时连接中断，正在重连…",
+  offline: "实时通道暂不可用",
+  unauthorized: "实时连接未授权",
+};
+const wsColor: Record<WsPhase, string> = {
+  idle: "bg-[color:var(--muted)]",
+  connecting: "bg-[color:var(--accent)]",
+  online: "bg-[color:var(--ok)]",
+  reconnecting: "bg-[color:var(--accent)]",
+  offline: "bg-[color:var(--danger)]",
+  unauthorized: "bg-[color:var(--danger)]",
+};
 
 export default function Start() {
   const navigate = useNavigate();
@@ -50,6 +68,7 @@ export default function Start() {
   const [cloud, setCloud] = useState<CloudState>("checking");
   const { phase, info } = useSyncStatus();
   const isAdmin = useIsAdmin();
+  const { phase: wsPhase, info: wsInfo } = useWsStatus();
 
   // 读取当前账号名 + 探测云端是否有备份（只读，不覆盖本地进度）。
   useEffect(() => {
@@ -190,6 +209,21 @@ export default function Start() {
           />
           <span className="min-w-0 break-words leading-relaxed">
             {phase === "error" && info ? `同步出错：${info}` : (syncText[phase] ?? "同步未启动")}
+          </span>
+        </div>
+
+        {/* 实时通道状态（P2-1）：重连倒计时 / 中文原因长文案需换行，避免窄屏横向溢出。 */}
+        <div className="mt-2 flex items-start gap-2 text-xs text-[color:var(--muted)]">
+          <span
+            className={[
+              "mt-1 inline-block h-2 w-2 shrink-0",
+              wsColor[wsPhase] ?? "bg-[color:var(--muted)]",
+            ].join(" ")}
+          />
+          <span className="min-w-0 break-words leading-relaxed">
+            {wsPhase === "reconnecting" && wsInfo
+              ? `${wsText[wsPhase]}（${wsInfo}）`
+              : (wsText[wsPhase] ?? "实时通道未启动")}
           </span>
         </div>
 

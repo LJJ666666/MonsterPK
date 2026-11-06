@@ -8,7 +8,6 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { Info } from "lucide-react";
 import Start from "@/pages/Start";
 import Camp from "@/pages/Camp";
 import Arena from "@/pages/Arena";
@@ -20,6 +19,7 @@ import MoveChartModal from "@/components/MoveChartModal";
 import { isLoggedIn, clearToken } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, BANNED_EVENT } from "@/lib/api";
 import { startAutoSync } from "@/lib/sync";
+import { startRealtime } from "@/lib/ws";
 import PixelButton from "@/components/PixelButton";
 
 // 未登录一律先去登录页；登录完成后由 Auth 页 navigate("/") 回到游戏。
@@ -106,6 +106,16 @@ function SyncBootstrap() {
   return null;
 }
 
+// 启动实时通道（P2-1）：只建连/保活/重连，不承载游戏状态。
+// 依赖路由是为了在「登录成功 / 退出登录」切换后重新建连；startRealtime 自身幂等。
+function RealtimeBootstrap() {
+  const location = useLocation();
+  useEffect(() => {
+    startRealtime();
+  }, [location.pathname]);
+  return null;
+}
+
 export default function App() {
   const [showMechanics, setShowMechanics] = useState(false);
   const [showMoveChart, setShowMoveChart] = useState(false);
@@ -115,6 +125,7 @@ export default function App() {
       <UnauthorizedListener />
       <BanGate />
       <SyncBootstrap />
+      <RealtimeBootstrap />
       <Routes>
         <Route
           path="/"

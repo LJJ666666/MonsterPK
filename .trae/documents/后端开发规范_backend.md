@@ -401,3 +401,56 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 
 已挡：改存档加钱/加道具/加等级、绕过 UI 直接 PUT、伪造捕获成功、白嫖购买、重复领奖、改系统时间刷挂机、伪造 rebase 洗白、普通账号调测试菜单。
 未挡（留 P3）：GG 修改器改客户端内存、加速器改节奏、战斗中间态 HP/PP/状态伪造、`captureRate` 等 ID 真值伪造（当前只做 0.62 上界钳制）。
+
+---
+
+## 15. P2-1 实时通道（WebSocket 接入与鉴权）
+
+### 15.1 选型与目录
+
+| 项 | 约定 |
+|---|---|
+| 依赖 | `ws@8`（运行时）+ `@types/ws`（开发）。不引入 `@fastify/websocket` 插件 |
+| 路径 | `GET /ws`，与 `/api/*` 分开，便于网关按路径分流 |
+| 装配 | `modules/realtime.ts::registerRealtime(fastify)` 在 `index.ts` 里于 `listen` 之前调用 |
+| 纯函数 | `lib/wsProtocol.ts`（协议 / 握手校验 / 拒绝响应）、`lib/wsRegistry.ts`（按用户会话登记） |
+| 前端 | `src/lib/ws.ts`（唯一客户端）、`App.tsx` 的 `<RealtimeBootstrap/>`、`Start.tsx` 状态行 |
+
+**为什么直接用 `ws` 不用插件**：浏览器原生 WebSocket 不能自定义 `Authorization` header，JWT 只能放 query；
+「未授权拒连」最干净的做法是在 **HTTP upgrade 阶段** 写回 401/403，而不是先建连再关。
+直接持有 `fastify.server.on('upgrade')` 可完全控制握手响应与状态码。
+
+### 15.2 握手安全（五道闸，顺序不可调换）
+
+1. **路径**：只认精确 `/ws`，其余 upgrade 直接断开（当前无第二个 upgrade handler）。
+2. **Origin 白名单**：与 `CORS_ORIGIN` 共用配置，防跨站 WebSocket 劫持（CSWSH）；
+   不带 Origin 的非浏览器客户端（E2E / 服务端脚本）放行。
+3. **JWT**：从 query `token` 取，`fastify.jwt.verify` 验签；缺失 / 篡改 / 过期 → `401 UNAUTHORIZED`。
+4. **账号状态**：与 HTTP 认证守卫同一口径，实时 `getAccountState()` 查库；
+   不存在 → 401，封号 → `403 ACCOUNT_BANNED`（带中文原因），封号必须即时生效。
+5. **连接数**：单账号上限 3，超限 → `429 TOO_MANY_CONNECTIONS`。
+
+> 拒绝响应用 `socket.end(buildRejectResponse(...))` 一次性写完再关闭；
+> `write` 后立刻 `destroy` 可能丢掉未 flush 的 body，客户端只能看到断连、拿不到机器码。
+
+### 15.3 消息协议与保活
+
+- 控制消息：`hello`（protocol / connectionId / userId / serverTime / heartbeatMs）、
+  `ping` → `pong`（回显 ts）、`error`（code + 中文原因）、`bye`（reason + 可选 code）。
+- **P2-1 不承载任何游戏状态**：业务消息与状态广播留到 P2-2 `GameSession`，
+  不要现在就设计一套用不上的假协议。
+- 单消息上限 4KB（`maxPayload` + 纯函数双保险）、单连接每秒最多 20 条，超限关闭 1008。
+- 服务端每 30s 发底层 `ping`，两个周期无 `pong` 判定死连接并 `terminate`；
+  心跳扫描顺带批量复查在线账号是否被封，被封则发 `bye`(`code=ACCOUNT_BANNED`) + 关闭 1008。
+- 前端：指数退避 1/2/4/8/15s + 抖动；`online` / 页面重新可见立即重连；
+  握手失败时用 `api.me()` 区分 401 / 封号（停止重连并交给全局弹窗）与网络故障（继续重连）；
+  超过两个心跳周期收不到任何消息则主动断开触发重连。
+
+### 15.4 测试与能力边界
+
+- 后端单测：`backend/tests/wsProtocol.test.ts`（协议 + 登记表，含死连接 / 广播 / 上限）。
+- E2E：`npm run e2e:p21`（需服务已起），覆盖握手、鉴权、封号、限流、坏包、重连、REST 回归。
+- UI：`scripts/ui_smoke_p21.mjs`（headless Edge 375px），
+  「实时通道已连接」文案来自 `useWsStatus()`，可证明浏览器真的完成了握手。
+- **边界**：P2-1 只是通道。游戏数据一致性仍由 P1-2 的意图裁决 + 整包存档保证；
+  在线权威态、状态广播、多人同屏分别属于 P2-2 / P3 / P4，不要夸大本层能力。

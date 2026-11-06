@@ -6,6 +6,7 @@ import { prisma } from './lib/prisma';
 import { authRoutes } from './modules/auth';
 import { saveRoutes } from './modules/save';
 import { actionRoutes } from './modules/actions';
+import { registerRealtime, getRealtimeStats } from './modules/realtime';
 import { getAccountState, BAN_CODE, type AccountState } from './lib/account';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
@@ -50,11 +51,19 @@ fastify.decorate('authenticate', async (req: any, reply: any) => {
   req.account = state;
 });
 
-fastify.get('/api/health', async () => ({ ok: true, ts: Date.now() }));
+// health 附带实时通道在线数（P2-1）：便于联调与自动化回归确认连接登记/注销。
+fastify.get('/api/health', async () => ({
+  ok: true,
+  ts: Date.now(),
+  ws: getRealtimeStats(),
+}));
 
 fastify.register(authRoutes);
 fastify.register(saveRoutes);
 fastify.register(actionRoutes);
+
+// P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
+registerRealtime(fastify);
 
 const port = Number(process.env.PORT ?? 3001);
 

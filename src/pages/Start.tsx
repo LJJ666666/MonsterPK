@@ -10,6 +10,7 @@ import { clearToken } from "@/lib/auth";
 import { useSyncStatus } from "@/lib/sync";
 import { useIsAdmin } from "@/lib/admin";
 import { useWsStatus, type WsPhase } from "@/lib/ws";
+import { useSessionStatus } from "@/lib/session";
 
 type CloudState = "checking" | "none" | "available" | "unreachable";
 
@@ -69,6 +70,7 @@ export default function Start() {
   const { phase, info } = useSyncStatus();
   const isAdmin = useIsAdmin();
   const { phase: wsPhase, info: wsInfo } = useWsStatus();
+  const sessionView = useSessionStatus();
 
   // 读取当前账号名 + 探测云端是否有备份（只读，不覆盖本地进度）。
   useEffect(() => {
@@ -224,6 +226,21 @@ export default function Start() {
             {wsPhase === "reconnecting" && wsInfo
               ? `${wsText[wsPhase]}（${wsInfo}）`
               : (wsText[wsPhase] ?? "实时通道未启动")}
+          </span>
+        </div>
+
+        {/* 在线权威态（P2-2）：rev 来自服务端 session.state 快照，长文案换行避免窄屏溢出。 */}
+        <div className="mt-2 flex items-start gap-2 text-xs text-[color:var(--muted)]">
+          <span
+            className={[
+              "mt-1 inline-block h-2 w-2 shrink-0",
+              sessionView ? "bg-[color:var(--ok)]" : "bg-[color:var(--muted)]",
+            ].join(" ")}
+          />
+          <span className="min-w-0 break-words leading-relaxed">
+            {sessionView
+              ? `在线权威态 rev=${sessionView.revision}（槽位 ${sessionView.slot} · ${sessionView.online} 端在线）`
+              : "在线权威态：等待服务端快照"}
           </span>
         </div>
 

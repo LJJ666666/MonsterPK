@@ -1,9 +1,10 @@
-// P2-1 实时通道客户端：只负责「建连 + 保活 + 断线重连 + 状态展示」。
-// 刻意不承载任何游戏状态——业务消息与在线权威态留到 P2-2 的 GameSession，
-// 避免现在就把客户端状态写进一条还没定型的协议里。
+// P2-1 实时通道客户端：建连 + 保活 + 断线重连 + 状态展示。
+// P2-2：收到 session.state 权威快照后只做转发（派发全局事件），
+// 真正的「应用快照 / 抑制回传」在 lib/session.ts，避免通道层直接改游戏状态。
 import { useEffect, useState } from "react";
 import { api, API_BASE, UNAUTHORIZED_EVENT, BANNED_EVENT, BAN_CODE } from "./api";
 import { getToken, isTokenValid } from "./auth";
+import { SESSION_STATE_EVENT, type SessionStateMessage } from "./sessionState";
 
 // 用数字常量而不是 WebSocket.OPEN：本模块会被 vitest 在 Node 环境里 import，
 // 那里没有全局 WebSocket，顶层引用静态常量会直接抛错。
@@ -40,6 +41,17 @@ export function parseServerMessage(raw: string): ServerEnvelope | null {
   } catch {
     return null;
   }
+}
+
+/** P2-2：校验下行快照形状；不合法的一律不派发，避免脏数据写进 store。 */
+export function isSessionStateMessage(m: ServerEnvelope | null): m is SessionStateMessage {
+  return !!m
+    && m.type === "session.state"
+    && typeof m.slot === "number"
+    && typeof m.revision === "number"
+    && Number.isFinite(m.revision)
+    && typeof m.data === "string"
+    && typeof m.updatedAt === "number";
 }
 
 export type WsPhase =
@@ -225,6 +237,11 @@ function connect() {
       // 心跳周期以服务端下发为准，钳制在 5s~120s 防止畸形配置
       heartbeatMs = Math.min(Math.max(m.heartbeatMs, 5_000), 120_000);
       startHeartbeat();
+    } else if (isSessionStateMessage(m)) {
+      // P2-2：只转发，不在这里改游戏状态；session.ts 负责幂等应用与抑制回传。
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(SESSION_STATE_EVENT, { detail: m }));
+      }
     } else if (m.type === "error") {
       setPhase("online", m.reason);
     } else if (m.type === "bye" && m.code === BAN_CODE) {
@@ -276,7 +293,6 @@ function onAuthLost() {
 export function startRealtime(): void {
   const token = getToken();
   if (!token || !isTokenValid(token)) {
-    // 未登录：确保没有残留连接，等登录后由路由变化再次触发
     stopRealtime();
     setPhase("idle");
     return;

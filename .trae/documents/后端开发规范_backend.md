@@ -322,10 +322,9 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - ✅ **P0-3 自动云同步**：登录按冲突策略自动恢复、防抖自动 PUT、离线队列重传、同步状态 UI（过渡桥接）。
 - ✅ **P1-1 服务端存档数值校验**：`saveValidator.ts` 分级校验 + 告警日志 + 前端 4xx 分流。
 - ✅ **P1-1b 管理员权限 + 封号风控 + 服务端时钟**：见 §5、§13。
-- ⬜ **P1-2 关键随机与结算上移服务端**：捕获判定、金币/道具/挂机结算由服务端裁决；
-  **挂机 `startedAt` 必须服务端记录**（根治「把系统时间往过去调」刷资源）；捕获结果客户端不可伪造。
-- ⬜ **P2-1/P2-2 WebSocket 实时传输层 + GameSession 在线权威态**：替代静态 `Save` blob。
-- ⬜ **P3 服务端模拟**：战斗/捕获/挂机逻辑上移服务端，客户端变瘦终端（此时才真正防住 GG 修改器 / 加速器）。
+- ✅ **P1-2 关键随机与结算上移服务端**：见 §14；捕获判定、金币/道具/挂机结算均由服务端裁决，挂机 `startedAt` 用服务端时钟。
+- ✅ **P2-1 WebSocket 实时通道 + P2-2 GameSession 在线权威态**：见 §15 / §16；状态写入收敛到 `commitState()`，客户端只收 `session.state` 快照。
+- ⬜ **P3 服务端模拟（下一步 P3-1）**：战斗/捕获/挂机中间态上移服务端，客户端变瘦终端（此时才真正防住 GG 修改器 / 加速器）。
 - ⬜ **P5 上线与去本地**：SQLite → Postgres、HTTPS、`VITE_API_BASE`/`CORS_ORIGIN` 切云、
   去除本地存档持久化（须等服务端权威 + 实时就绪后才安全）。
 
@@ -452,5 +451,58 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - E2E：`npm run e2e:p21`（需服务已起），覆盖握手、鉴权、封号、限流、坏包、重连、REST 回归。
 - UI：`scripts/ui_smoke_p21.mjs`（headless Edge 375px），
   「实时通道已连接」文案来自 `useWsStatus()`，可证明浏览器真的完成了握手。
-- **边界**：P2-1 只是通道。游戏数据一致性仍由 P1-2 的意图裁决 + 整包存档保证；
-  在线权威态、状态广播、多人同屏分别属于 P2-2 / P3 / P4，不要夸大本层能力。
+- **边界**：P2-1 只是通道；在线权威态、状态广播由 P2-2 补齐（见 §16），多人同屏仍属 P4，不要夸大本层能力。
+
+---
+
+## 16. P2-2 GameSession 在线权威态（2026-11-07）
+
+> 任务表验收口径：「按用户的内存态 + DB 持久化；在线状态；状态变更服务端写入」。
+> 实施原则：**不新增 Prisma 迁移、不动 `SCHEMA_VERSION`、不改写 P1-2 的三分支裁决逻辑**，
+> 只把「裁决 / 整包 PUT 成功后的写库」这一步收敛到唯一入口。
+
+### 16.1 状态模型与生命周期
+
+- `lib/gameSession.ts`：`GameSessionRegistry` 按 `userId:slot` 维护内存态
+  （`data` / `schemaVersion` / `clientId` / `authority` / `updatedAt` / `connections`）。
+  纯逻辑、零依赖，`node:test` 可注入时间直接覆盖。
+- DB 持久化仍用既有 `Save` 表（`data` + `authority`）；**revision 复用 `authority.revision`**，
+  `monotonicAuthority()` 保证任何一次服务端写入至少 +1。连接建立时 `hydrateForUser()`
+  从 DB 恢复三个槽位；最后一个连接断开后按 `SESSION_TTL_MS`（10 分钟）保留，
+  心跳扫描 `sweepSessions()` 回收空会话，封号 `dropUserSessions()` 立即清理。
+- `modules/sessionBus.ts` 放 `WsRegistry` + `GameSessionRegistry` 两个共享单例，
+  消除 `realtime.ts ↔ session.ts` 的循环依赖；`getSessionStats()` 供 health 使用。
+
+### 16.2 唯一写入口与协议
+
+- `modules/session.ts::commitState()`：`prisma.save.upsert` → 更新内存态 →
+  `broadcastToUser()` 推 `session.state`。`PUT /api/save` 与 `POST /api/actions/:type`
+  均改调它；`GET /api/save` 在线时直接读内存权威态，`GET /api/session?slot=`
+  返回在线 / revision / 连接数，`GET /api/health` 增加 `sessions` 统计。
+- 下行 `session.state`：`{ slot, revision, data, updatedAt, schemaVersion, source, online }`
+  全量快照（`source` = hydrate / put / intent）。**下行不受上行 4KB `maxPayload` 约束**；
+  `hello.capabilities` 声明 `session.state` / `session.resync`，协议版本仍为 1。
+- 上行只有 `ping` 与 `session.resync`（可带 slot，只请求重推快照）。
+  **客户端不能通过 WS 写状态**：伪造 `session.state` 上行被 `UNKNOWN_TYPE` 拒绝并关闭 1008；
+  所有状态变更必须经 REST 的意图裁决 / 整包 PUT，由服务端校验后统一写入。
+- 广播给该账号所有在线连接（含发起端）。前端用 revision 幂等判断：本端 PUT 成功后
+  `noteRevision()`，自己的回显版本相同即忽略；其它端的更新才应用。
+
+### 16.3 前端接入与回环防护
+
+- `lib/sessionState.ts`（零依赖）保存已见 revision / 意图在途计数 / 暂存快照，
+  避免 `ws.ts` / `sync.ts` / `intents.ts` / `session.ts` 之间循环导入。
+- `lib/ws.ts` 只校验并派发 `mpk:session-state`；`lib/session.ts` 幂等应用快照，
+  应用前先 `suppressNextUpload()`，避免「收快照 → 自动 PUT → 再广播」多端回环；
+  `intents.ts` 在发意图到 commitIntent 期间暂存快照，结束后再按 revision 补应用。
+- `Start.tsx` 增加「在线权威态 rev=N」状态行；`App.tsx` 挂 `<SessionBootstrap/>`。
+
+### 16.4 验收与边界
+
+- `npm run e2e:p22` **24/24 `E2E_P22_OK`**：hydrate 快照、多端广播、revision 单调、
+  GET 内存态、`session.resync`、伪造上行被拒且状态不变、意图登记与提交各广播一次、
+  断线保留、重连拉最新、REST 回归。后端 `node:test` **107/107**、前端 vitest **47/47**、
+  headless 375px **15/15**；原 57 / 38 / 34 三组 E2E 无回归。
+- **能力边界**：本层只把「在线那份权威存档」收敛到服务端。战斗中间态 / HP / PP、
+  遭遇生成、内容表 ID 真值仍在客户端；GG 改内存、加速器仍需 P3-1 服务端模拟根治。
+  P2-2 是 P3 的前置，不等于客户端已成为瘦终端。

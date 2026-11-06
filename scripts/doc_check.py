@@ -28,25 +28,30 @@ b = DOCS / "项目记忆.md"
 memory_text = text(a)
 bug_text = text(DOCS / "bug_log.md")
 task_text = text(DOCS / "开发任务优先级_2026-11-04.md")
-log_text = text(MEM / "2026-11-06.md")
+# 拼接全部每日日志：跨机器 / 跨日期都能验收到最新一段，不写死某一天。
+log_text = "\n".join(text(p) for p in sorted(MEM.glob("2026-*.md")))
 spec_text = text(DOCS / "后端开发规范_backend.md")
 pkg_text = text(ROOT / "backend" / "package.json")
 
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（92 / 37 / 34 / 13）",
-     all(x in memory_text for x in ["**92**", "**37**", "**34**", "**13/13**"])),
-    ("MEMORY.md 下一步为 P2-2", "下一步 P2-2" in memory_text),
+    ("MEMORY.md 写入最终数字（107 / 47 / 34 / 24 / 15）",
+     all(x in memory_text for x in ["**107**", "**47**", "**34**", "**24**", "**15/15**"])),
+    ("MEMORY.md 下一步为 P3-1", "下一步 P3-1" in memory_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text),
-    ("MEMORY.md 体积已收敛", a.stat().st_size < 13_000, f"{a.stat().st_size} bytes"),
+    ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
     ("bug_log 含 §17 / §18 / §19", all(f"## {n}." in bug_text for n in (17, 18, 19))),
-    ("任务表 P2-1 ✅ 与 34/34 已回填", "**P2-1 WebSocket 接入与鉴权** | ✅" in task_text and "34/34" in task_text),
-    ("任务表下一步为 P2-2", "P2-2 服务端 GameSession 实时态**" in task_text),
+    ("任务表 P2-2 ✅ 与 24/24 已回填", "P2-2 ✅" in task_text and "24/24" in task_text),
+    ("任务表下一步为 P3-1", "下一步建议" in task_text and "P3-1 服务端模拟" in task_text),
     ("后端规范含 §15 实时通道", "## 15. P2-1 实时通道" in spec_text),
-    ("每日日志含 P2-1 段落", "## P2-1 WebSocket 接入与鉴权" in log_text),
+    ("后端规范含 §16 GameSession", "## 16. P2-2 GameSession" in spec_text),
+    ("每日日志含 P2-2 段落", "## P2-2" in log_text),
+    ("后端单测含 gameSession.test.ts", (ROOT / "backend" / "tests" / "gameSession.test.ts").exists()),
     ("e2e:p21 已注册且脚本存在",
      '"e2e:p21"' in pkg_text and (ROOT / "backend" / "tests" / "e2e_p21_ws.mjs").exists()),
+    ("e2e:p22 已注册且脚本存在",
+     '"e2e:p22"' in pkg_text and (ROOT / "backend" / "tests" / "e2e_p22_session.mjs").exists()),
     ("UI 冒烟脚本已固化到 scripts/ 且 ROOT 动态推导",
      (ROOT / "scripts" / "ui_smoke_p21.mjs").exists()
      and "fileURLToPath(import.meta.url)" in text(ROOT / "scripts" / "ui_smoke_p21.mjs")),

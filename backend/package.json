@@ -15,7 +15,8 @@
     "admin": "tsx scripts/admin.ts",
     "e2e": "node tests/e2e_save_validation.mjs",
     "e2e:p12": "node tests/e2e_p12.mjs",
-    "e2e:p21": "node tests/e2e_p21_ws.mjs"
+    "e2e:p21": "node tests/e2e_p21_ws.mjs",
+    "e2e:p22": "node tests/e2e_p22_session.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

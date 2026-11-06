@@ -1,9 +1,9 @@
 /**
- * P2-1 前端 UI 冒烟（375px 移动端，headless Edge，无需外部依赖）。
+ * P2-1 / P2-2 前端 UI 冒烟（375px 移动端，headless Edge，无需外部依赖）。
  * 运行：node scripts/ui_smoke_p21.mjs
  *
- * 在 P1-2 冒烟基础上增加实时通道断言：Start 页必须渲染状态行且显示「实时通道已连接」，
- * 这条文案来自 useWsStatus()，因此它能直接证明浏览器真的完成了 WS 握手并收到 hello。
+ * 断言：Start 页必须渲染状态行且显示「实时通道已连接」（证明 WS 握手 + hello），
+ * 并显示「在线权威态 rev=N」（证明收到服务端 session.state 权威快照）。
  * 临时 public 文件与浏览器 profile 用完即删。
  */
 import { execFileSync } from 'node:child_process';
@@ -60,6 +60,8 @@ function probeHtml(route) {
              hasWs:t.indexOf('实时通道')>=0,
              wsOnline:t.indexOf('实时通道已连接')>=0,
              wsUnauth:t.indexOf('实时连接未授权')>=0,
+             hasSession:t.indexOf('在线权威态')>=0,
+             sessionRev:t.indexOf('rev=')>=0,
              hasCamp:t.indexOf('地区列表')>=0&&t.indexOf('背包')>=0,textHead:t.slice(0,260),
              title:d.title};
       }catch(e){out.error=String(e)}
@@ -85,7 +87,9 @@ function parseProbe(dom) {
 
 async function main() {
   const health = await fetch(`${API}/api/health`).then((r) => r.json());
-  check('后端 health 带 ws 在线统计', typeof health?.ws?.connections === 'number', JSON.stringify(health));
+  check('后端 health 带 ws 在线统计与 sessions 权威态统计',
+    typeof health?.ws?.connections === 'number' && typeof health?.sessions?.slots === 'number',
+    JSON.stringify(health));
 
   const reg = await fetch(`${API}/api/auth/register`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -123,6 +127,8 @@ async function main() {
       check('Start 显示实时通道状态行', p.hasWs === true, JSON.stringify(p));
       check('Start 实时通道已连接（WS 握手并收到 hello）',
         p.wsOnline === true && p.wsUnauth === false, JSON.stringify(p));
+      check('Start 显示在线权威态状态行', p.hasSession === true, JSON.stringify(p));
+      check('Start 收到服务端权威快照（rev=N）', p.sessionRev === true, JSON.stringify(p));
     } else {
       check('Camp 显示营地内容', p.hasCamp === true, JSON.stringify(p));
     }

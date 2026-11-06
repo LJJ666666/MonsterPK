@@ -8,7 +8,7 @@
  *  ③ 服务端裁决 —— 掷骰、服务端时钟、价格表、奖励公式全在 lib/settlements.ts；
  *  ④ 登记一次性授权 pending，客户端应用结果后带 intentNonce 由 PUT 消费。
  *
- * 与整包 PUT 的关系见 lib/authority.ts 顶部说明。
+ * P2-2：④ 的落库改走 commitState()，让在线权威态同步登记 pending 并广播快照。
  */
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -17,10 +17,9 @@ import { validateSaveData } from '../lib/saveValidator';
 import { decideSaveAction } from '../lib/antiCheat';
 import { clampSaveTimestamps } from '../lib/serverClock';
 import { banAccount, BAN_CODE } from '../lib/account';
-import {
-  digestOf, compareDigest, parseAuthority, serializeAuthority,
-} from '../lib/authority';
+import { digestOf, compareDigest, parseAuthority } from '../lib/authority';
 import { decideIntent, INTENT_TYPES, type IntentType } from '../lib/settlements';
+import { commitState } from './session';
 
 const paramsSchema = z.object({ type: z.string().min(1).max(40) });
 const bodySchema = z.object({
@@ -47,8 +46,7 @@ export async function actionRoutes(fastify: FastifyInstance) {
     const { slot, nonce, save, payload } = parsed.data;
     const isAdmin = req.account?.isAdmin ?? false;
 
-    // ① 消费 nonce：唯一索引冲突即重放。放在最前面，裁决失败也不退还，
-    //    否则攻击者可以反复调用捕获接口直到掷出「成功」。
+    // ① 消费 nonce：唯一索引冲突即重放。放在最前面，裁决失败也不退还。
     try {
       await prisma.intentLog.create({ data: { userId, slot, nonce, type } });
     } catch (e: any) {
@@ -75,7 +73,6 @@ export async function actionRoutes(fastify: FastifyInstance) {
     const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
     const authority = parseAuthority(rec?.authority, baseData);
 
-    // 管理员测试菜单走服务端授权：允许把基线直接抬到测试档，其他人一律单调比对。
     const skipBaselineCheck = type === 'admin_test' && isAdmin;
     if (!skipBaselineCheck) {
       const violations = compareDigest(baseDigest, authority.expected);
@@ -115,11 +112,12 @@ export async function actionRoutes(fastify: FastifyInstance) {
       authority.idleAreaId = null;
       authority.idleLevel = null;
     }
-    const authText = serializeAuthority(authority);
-    await prisma.save.upsert({
-      where: { userId_slot: { userId, slot } },
-      create: { userId, slot, data: baseData, schemaVersion: validation.schemaVersion, authority: authText },
-      update: { data: baseData, schemaVersion: validation.schemaVersion, authority: authText },
+    await commitState(userId, slot, {
+      data: baseData,
+      schemaVersion: validation.schemaVersion,
+      clientId: rec?.clientId ?? null,
+      authority,
+      source: 'intent',
     });
     req.log.info({ userId, slot, kind: 'intent_decided', type, nonce, result: pending.result }, '服务端裁决完成');
     return { ok: true, nonce, result: pending.result };

@@ -6,10 +6,12 @@ import { decideSaveAction } from '../lib/antiCheat';
 import { clampSaveTimestamps } from '../lib/serverClock';
 import { banAccount, BAN_CODE } from '../lib/account';
 import {
-  digestOf, compareDigest, parseAuthority, serializeAuthority, freshAuthority,
+  digestOf, compareDigest, parseAuthority, freshAuthority,
   advanceAuthority, checkFreshSave, type AuthorityState,
 } from '../lib/authority';
 import { checkIntentDelta } from '../lib/settlements';
+import { gameSessions } from './sessionBus';
+import { commitState } from './session';
 
 // PUT 入参：存档 JSON 文本（限 5MB）+ 可选客户端标识 / 意图 nonce / 重建基线标记
 const putSchema = z.object({
@@ -26,16 +28,30 @@ const getQuerySchema = z.object({
 });
 
 /**
- * 存档读写（P0-2 结构校验 → P1-1/P1-1b 三层风控 → P1-2 权威摘要）。
- * 路由只负责组装响应与日志，判定逻辑都在 lib 下的纯函数里。
+ * 存档读写（P0-2 结构校验 → P1-1/P1-1b 三层风控 → P1-2 权威摘要 → P2-2 在线权威态）。
+ * 路由只负责组装响应与日志，判定逻辑都在 lib 下的纯函数里；
+ * 落库统一走 commitState()，保证内存会话态与 DB 同步、并把快照广播给所有在线连接。
  */
 export async function saveRoutes(fastify: FastifyInstance) {
-  // 读取某个槽位存档（附带冲突判断所需的元数据）
+  // 读取某个槽位存档：在线期间以内存权威态为准，否则回 DB。
   fastify.get('/api/save', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
     const parsed = getQuerySchema.safeParse(req.query);
     if (!parsed.success) return reply.code(400).send({ error: 'slot 必须是 1/2/3' });
     const slot = parsed.data.slot;
+
+    const live = gameSessions.get(userId, slot);
+    if (live) {
+      return {
+        slot,
+        data: live.data,
+        updatedAt: new Date(live.updatedAt).toISOString(),
+        clientId: live.clientId,
+        schemaVersion: live.schemaVersion,
+        revision: live.authority.revision,
+      };
+    }
+
     const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
     if (!rec) return reply.code(404).send({ error: '该槽位无存档' });
     let revision = 0;
@@ -95,7 +111,6 @@ export async function saveRoutes(fastify: FastifyInstance) {
       if (parsed.data.intentNonce && pending && pending.nonce === parsed.data.intentNonce) {
         const violations = checkIntentDelta(pending.baseDigest, actual, pending);
         if (violations.length === 0) {
-          // idle 开始/结束还要核对存档里的挂机对象本身（摘要只存了 areaId）
           let s: any = null;
           try { s = JSON.parse(dataToStore); } catch { /* 前面已校验过 JSON */ }
           if (pending.allow.idle === 'start' && pending.idleStart) {
@@ -154,27 +169,20 @@ export async function saveRoutes(fastify: FastifyInstance) {
       req.log.warn({ userId, slot, kind: 'save_suspicious', codes: validation.soft.map((x) => x.code), stats: validation.stats }, '存档存在兼容类告警，已放行并记录');
     }
 
-    const saved = await prisma.save.upsert({
-      where: { userId_slot: { userId, slot } },
-      create: {
-        userId, slot, data: dataToStore,
-        schemaVersion: validation.schemaVersion,
-        clientId: parsed.data.clientId ?? null,
-        authority: serializeAuthority(authority),
-      },
-      update: {
-        data: dataToStore,
-        schemaVersion: validation.schemaVersion,
-        clientId: parsed.data.clientId ?? null,
-        authority: serializeAuthority(authority),
-      },
+    // P2-2：写入收敛到在线权威态（DB + 内存 + 广播），revision 由 commitState 保证单调递增。
+    const { saved, revision } = await commitState(userId, slot, {
+      data: dataToStore,
+      schemaVersion: validation.schemaVersion,
+      clientId: parsed.data.clientId ?? null,
+      authority,
+      source: 'put',
     });
     return {
       ok: true, slot,
       updatedAt: saved.updatedAt,
       clientId: saved.clientId,
       schemaVersion: saved.schemaVersion,
-      revision: authority.revision,
+      revision,
     };
   });
 }

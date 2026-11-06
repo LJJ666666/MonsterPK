@@ -1,17 +1,18 @@
 /**
- * 实时通道装配（P2-1）：把 WebSocket 挂在 Fastify 底层 HTTP server 的 upgrade 上。
+ * 实时通道装配（P2-1 建通道，P2-2 挂在线权威态）。
  *
  * 为什么不用 @fastify/websocket 插件：浏览器原生 WebSocket 不能自定义 Authorization header，
- * JWT 只能放 query；而「未授权拒连」最干净的实现是在 **HTTP upgrade 阶段** 就写回 401/403，
- * 而不是先建立连接再关掉。直接持有 upgrade 事件可以完全控制握手响应与状态码。
+ * JWT 只能放 query；而「未授权拒连」最干净的实现是在 **HTTP upgrade 阶段** 就写回 401/403。
  *
  * 安全要点：
  *  1) Origin 白名单（防跨站 WebSocket 劫持 CSWSH）；
  *  2) JWT 验签 + 实时查库判断账号存在 / 封号（封号必须即时生效，不能等旧 token 过期）；
- *  3) 单账号连接数上限、单条消息长度上限、单连接速率限制；
- *  4) 底层 ping/pong 心跳 + 死连接清理；心跳扫描顺带复查会话期封号。
+ *  3) 单账号连接数上限、单条上行消息长度上限、单连接速率限制；
+ *  4) 底层 ping/pong 心跳 + 死连接清理；心跳扫描顺带复查会话期封号 + 回收空会话。
  *
- * P2-1 只建通道，不承载任何游戏状态；业务消息与状态广播留到 P2-2 GameSession。
+ * P2-2：连接建立时 hydrate 该用户的在线权威态并推送 session.state 快照；
+ * 状态写入统一走 modules/session.ts 的 commitState()，由它广播给所有在线连接。
+ * 上行只有 ping / session.resync（请求重推），没有任何写状态入口。
  */
 import type { FastifyInstance } from 'fastify';
 import type { Duplex } from 'node:stream';
@@ -19,9 +20,11 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type RawData } from 'ws';
 import { prisma } from '../lib/prisma';
 import { getAccountState, BAN_CODE } from '../lib/account';
-import { WsRegistry, type WsConnection, type WsLike } from '../lib/wsRegistry';
+import { type WsConnection } from '../lib/wsRegistry';
+import { buildSnapshot, SESSION_SLOTS } from '../lib/gameSession';
 import {
   WS_PROTOCOL_VERSION,
+  WS_CAPABILITIES,
   WS_HEARTBEAT_MS,
   WS_MAX_MESSAGE_BYTES,
   WS_RATE_WINDOW_MS,
@@ -34,12 +37,13 @@ import {
   buildRejectResponse,
   deadAfterMs,
 } from '../lib/wsProtocol';
-
-/** 进程级单例：health 接口与后续 P2-2 广播都从这里读在线状态。 */
-const registry = new WsRegistry();
+import { wsRegistry, gameSessions } from './sessionBus';
+import {
+  hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
+} from './session';
 
 export function getRealtimeStats(): { connections: number; users: number } {
-  return { connections: registry.size, users: registry.userCount };
+  return { connections: wsRegistry.size, users: wsRegistry.userCount };
 }
 
 /** 心跳周期可由 .env 覆盖（便于联调），但钳制在 5s~120s，防止配置失误打爆服务。 */
@@ -63,8 +67,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
   ): void {
     fastify.log.warn({ event: 'ws_rejected', status, code, userId }, reason);
     try {
-      // 用 end(data) 一次性写完再关闭：write 后立刻 destroy 可能丢掉尚未 flush 的响应体，
-      // 客户端就只能看到断连、拿不到 401/403 的机器码。
+      // 用 end(data) 一次性写完再关闭：write 后立刻 destroy 可能丢掉尚未 flush 的响应体。
       socket.end(buildRejectResponse(status, { error: reason, code }));
     } catch {
       socket.destroy();
@@ -73,8 +76,6 @@ export function registerRealtime(fastify: FastifyInstance): void {
 
   fastify.server.on('upgrade', (req, socket, head) => {
     if (!isWsUpgradePath(req.url)) {
-      // 目前没有别的 upgrade handler；非 /ws 直接断开，避免请求一直挂起。
-      // 将来若引入第二个 upgrade 监听器，这里让位给它处理。
       if (fastify.server.listenerCount('upgrade') <= 1) socket.destroy();
       return;
     }
@@ -85,12 +86,8 @@ export function registerRealtime(fastify: FastifyInstance): void {
         if (!isOriginAllowed(req.headers.origin, allowedOrigin)) {
           return reject(socket, 403, 'ORIGIN_DENIED', '连接来源不被允许');
         }
-
         const token = extractWsToken(req.url);
-        if (!token) {
-          return reject(socket, 401, 'UNAUTHORIZED', '未登录或登录已过期');
-        }
-
+        if (!token) return reject(socket, 401, 'UNAUTHORIZED', '未登录或登录已过期');
         let payload: any;
         try {
           payload = (fastify.jwt as any).verify(token);
@@ -101,8 +98,6 @@ export function registerRealtime(fastify: FastifyInstance): void {
         if (!userId || typeof userId !== 'string') {
           return reject(socket, 401, 'UNAUTHORIZED', '未登录或登录已过期');
         }
-
-        // 与 HTTP 认证守卫同一口径：实时查库，封号立刻生效。
         const state = await getAccountState(userId);
         if (!state.exists) {
           return reject(socket, 401, 'UNAUTHORIZED', '账号不存在或已被删除', userId);
@@ -110,10 +105,9 @@ export function registerRealtime(fastify: FastifyInstance): void {
         if (state.banned) {
           return reject(socket, 403, BAN_CODE, state.banReason ?? '你已被封号', userId);
         }
-        if (!registry.canAccept(userId)) {
+        if (!wsRegistry.canAccept(userId)) {
           return reject(socket, 429, 'TOO_MANY_CONNECTIONS', '同一账号连接数过多', userId);
         }
-
         wss.handleUpgrade(req, socket, head, (ws) => onConnected(fastify, ws, userId, heartbeatMs));
       } catch (err) {
         fastify.log.error({ event: 'ws_upgrade_error', err }, 'ws upgrade failed');
@@ -122,33 +116,26 @@ export function registerRealtime(fastify: FastifyInstance): void {
     })();
   });
 
-  // —— 心跳扫描：死连接清理 + 会话期封号复查 ——
+  // —— 心跳扫描：死连接清理 + 会话期封号复查 + 空会话回收 ——
   const timer = setInterval(() => {
     void (async () => {
       const now = Date.now();
-      for (const c of registry.findStale(now, deadAfterMs(heartbeatMs))) {
+      for (const c of wsRegistry.findStale(now, deadAfterMs(heartbeatMs))) {
         fastify.log.warn(
           { event: 'ws_dead', userId: c.userId, connectionId: c.id },
           'ws heartbeat timeout',
         );
-        try {
-          c.socket.terminate();
-        } catch {
-          // 已断开
-        }
-        registry.remove(c.id);
+        try { c.socket.terminate(); } catch { /* 已断开 */ }
+        wsRegistry.remove(c.id);
+        detachConnection(c.id);
       }
-      for (const c of registry.all()) {
+      for (const c of wsRegistry.all()) {
         c.alive = false;
-        try {
-          c.socket.ping();
-        } catch {
-          // 已断开，交给 close 事件注销
-        }
+        try { c.socket.ping(); } catch { /* 已断开，交给 close 事件注销 */ }
       }
+      sweepSessions(now);
 
-      // 账号可能在连接建立之后才被封（HTTP 侧改档触发）；一次批量查询即可踢掉。
-      const userIds = Array.from(new Set(registry.all().map((c) => c.userId)));
+      const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
       if (userIds.length === 0) return;
       try {
         const banned = await prisma.user.findMany({
@@ -156,7 +143,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
           select: { id: true, banReason: true },
         });
         for (const u of banned) {
-          for (const c of registry.listForUser(u.id)) {
+          for (const c of wsRegistry.listForUser(u.id)) {
             try {
               c.socket.send(
                 encodeServerMessage({
@@ -166,11 +153,11 @@ export function registerRealtime(fastify: FastifyInstance): void {
                 }),
               );
               c.socket.close(1008, BAN_CODE);
-            } catch {
-              // 已断开
-            }
-            registry.remove(c.id);
+            } catch { /* 已断开 */ }
+            wsRegistry.remove(c.id);
+            detachConnection(c.id);
           }
+          dropUserSessions(u.id);
         }
       } catch (err) {
         fastify.log.error({ event: 'ws_ban_sweep_error', err }, 'ws ban sweep failed');
@@ -181,20 +168,19 @@ export function registerRealtime(fastify: FastifyInstance): void {
 
   fastify.addHook('onClose', async () => {
     clearInterval(timer);
-    for (const c of registry.all()) {
+    for (const c of wsRegistry.all()) {
       try {
         c.socket.send(encodeServerMessage({ type: 'bye', reason: '服务器正在关闭' }));
         c.socket.close(1001, 'server closing');
-      } catch {
-        // 已断开
-      }
+      } catch { /* 已断开 */ }
     }
-    registry.clear();
+    wsRegistry.clear();
+    gameSessions.clear();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   });
 }
 
-/** 单条连接建立后的消息循环（控制协议，不含业务状态）。 */
+/** 单条连接建立后的消息循环（控制消息 + 权威态快照下行）。 */
 function onConnected(
   fastify: FastifyInstance,
   ws: any,
@@ -205,13 +191,12 @@ function onConnected(
   const conn: WsConnection = {
     id: randomUUID(),
     userId,
-    socket: ws as WsLike,
+    socket: ws,
     connectedAt: now,
     lastSeenAt: now,
     alive: true,
   };
-  if (!registry.add(conn)) {
-    // 竞态：握手查过上限，但同一账号另一个连接刚好先插入
+  if (!wsRegistry.add(conn)) {
     ws.close(1008, 'too many connections');
     return;
   }
@@ -224,12 +209,23 @@ function onConnected(
       userId,
       serverTime: now,
       heartbeatMs,
+      capabilities: WS_CAPABILITIES,
     }),
   );
-  fastify.log.info(
-    { event: 'ws_connected', userId, connectionId: conn.id },
-    'ws connected',
-  );
+  fastify.log.info({ event: 'ws_connected', userId, connectionId: conn.id }, 'ws connected');
+
+  // P2-2：连接就绪后把该用户已有槽位的权威快照推下去（重连等于拉最新状态）。
+  void (async () => {
+    try {
+      const snapshots = await hydrateForUser(userId, conn.id);
+      for (const snap of snapshots) {
+        if (ws.readyState !== 1) return;
+        ws.send(encodeServerMessage(snap));
+      }
+    } catch (err) {
+      fastify.log.error({ event: 'session_hydrate_error', userId, err }, 'session hydrate failed');
+    }
+  })();
 
   let windowStart = now;
   let windowCount = 0;
@@ -256,16 +252,13 @@ function onConnected(
       return;
     }
 
-    // ws 的 RawData 可能是 Buffer / ArrayBuffer / Buffer[]，统一转成字符串再交给纯函数。
     const text = Array.isArray(raw)
       ? Buffer.concat(raw).toString('utf8')
       : Buffer.isBuffer(raw)
         ? raw.toString('utf8')
         : Buffer.from(raw).toString('utf8');
     const parsed = parseClientMessage(text);
-    // 用属性存在性收窄：本项目 strict:false（strictNullChecks 关闭），
-    // 对 `if (!parsed.ok)` 的判别联合收窄会失效，TS 会报 code/reason 不存在。
-    // 与 P1-1 里 zod 联合类型改用 assert 抛错是同一类坑（见 bug_log §18）。
+    // strict:false 下判别联合收窄不可靠，用属性存在性判断（bug_log §18）。
     if ('code' in parsed) {
       ws.send(encodeServerMessage({ type: 'error', code: parsed.code, reason: parsed.reason }));
       ws.close(1008, parsed.code);
@@ -274,23 +267,34 @@ function onConnected(
 
     conn.alive = true;
     conn.lastSeenAt = t;
+    const msg = parsed.message;
+
+    // 上行只请求重推快照，不接收任何状态数据；写入口始终在服务端。
+    if (msg.type === 'session.resync') {
+      for (const slot of SESSION_SLOTS) {
+        if (msg.slot !== undefined && slot !== msg.slot) continue;
+        const s = gameSessions.get(userId, slot);
+        if (s && ws.readyState === 1) ws.send(encodeServerMessage(buildSnapshot(s)));
+      }
+      return;
+    }
+
+    const ts = 'ts' in msg ? msg.ts : undefined;
     ws.send(
       encodeServerMessage({
         type: 'pong',
         serverTime: t,
-        ...(parsed.message.ts !== undefined ? { echo: parsed.message.ts } : {}),
+        ...(ts !== undefined ? { echo: ts } : {}),
       }),
     );
   });
 
   ws.on('close', () => {
-    registry.remove(conn.id);
-    fastify.log.info(
-      { event: 'ws_closed', userId, connectionId: conn.id },
-      'ws closed',
-    );
+    wsRegistry.remove(conn.id);
+    detachConnection(conn.id);
+    fastify.log.info({ event: 'ws_closed', userId, connectionId: conn.id }, 'ws closed');
   });
   ws.on('error', () => {
-    // close 事件会紧随，注销统一放在 close 里，避免重复移除
+    // close 事件会紧随，注销统一放在 close 里
   });
 }

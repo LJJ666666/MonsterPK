@@ -1,21 +1,25 @@
 /**
- * WebSocket 消息协议与握手校验（P2-1）。
+ * WebSocket 消息协议与握手校验（P2-1 建通道，P2-2 扩展业务消息）。
  *
  * 设计原则：全部是零依赖纯函数，便于 node:test 单测，不放任何业务逻辑。
- * P2-1 只负责「建通道 + 鉴权 + 保活」，游戏状态广播留到 P2-2 的 GameSession。
- * 因此协议里目前只有 hello / ping / pong / error / bye 五种控制消息，
- * 业务消息类型将在 P2-2 按领域扩展，避免现在就设计一套用不上的假协议。
+ * P2-2 新增：
+ *   - 下行 `session.state`：服务端权威态的全量快照（含 revision / data / online）；
+ *   - 上行 `session.resync`：客户端只请求「重推快照」，**不允许携带任何状态数据**。
+ * 客户端不能通过 WS 写状态，状态变更只能走 REST 的意图裁决 / 整包 PUT，
+ * 由服务端校验后统一经 GameSession 写入。伪造 session.state 上行会被 UNKNOWN_TYPE 拒绝。
+ *
+ * 注意：4KB / 20 条每秒限制针对**上行**；下行快照是完整存档，不受 maxPayload 约束。
  */
-
 /** 握手路径。刻意独立于 /api/*，方便网关按路径分流 WebSocket 流量。 */
 export const WS_PATH = '/ws';
-/** 协议版本：客户端收到 hello 后据此判断是否兼容，后续升级用它做协商。 */
+/** 协议版本：P2-2 保持 1，用 hello.capabilities 声明新增能力，避免旧客户端被拒。 */
 export const WS_PROTOCOL_VERSION = 1;
+export const WS_CAPABILITIES = ['session.state', 'session.resync'];
 
 /** 服务端底层 ping 周期；连接超过两个周期无响应即判定死连接。 */
 export const WS_HEARTBEAT_MS = 30_000;
 export const WS_DEAD_GRACE_MS = 5_000;
-/** 单条消息上限（字节）。ws 的 maxPayload 也会在更底层强制截断。 */
+/** 单条上行消息上限（字节）。ws 的 maxPayload 也会在更底层强制截断。 */
 export const WS_MAX_MESSAGE_BYTES = 4_096;
 /** 同一账号允许的同时在线连接数，防止单账号耗尽服务端连接表。 */
 export const WS_MAX_CONNECTIONS_PER_USER = 3;
@@ -76,10 +80,24 @@ export function isOriginAllowed(
   return allowed.includes(origin);
 }
 
-/** 客户端 → 服务端：目前只接受 ping（业务意图在 P2-2 才接入）。 */
-export type ClientMessage = { type: 'ping'; ts?: number };
+/** 客户端 → 服务端：控制消息。业务状态只能由服务端下发，上行没有写入口。 */
+export type ClientMessage =
+  | { type: 'ping'; ts?: number }
+  | { type: 'session.resync'; slot?: number };
 
-/** 服务端 → 客户端：控制消息集合。 */
+/** 会话快照消息体（P2-2）。 */
+export type SessionStatePayload = {
+  type: 'session.state';
+  slot: number;
+  revision: number;
+  data: string;
+  updatedAt: number;
+  schemaVersion: string;
+  source: 'hydrate' | 'put' | 'intent';
+  online: number;
+};
+
+/** 服务端 → 客户端：控制消息 + 权威态快照。 */
 export type ServerMessage =
   | {
       type: 'hello';
@@ -88,10 +106,13 @@ export type ServerMessage =
       userId: string;
       serverTime: number;
       heartbeatMs: number;
+      /** P2-2 能力声明；旧客户端忽略即可。 */
+      capabilities?: string[];
     }
   | { type: 'pong'; serverTime: number; echo?: number }
   | { type: 'error'; code: string; reason: string }
-  | { type: 'bye'; reason: string; code?: string };
+  | { type: 'bye'; reason: string; code?: string }
+  | SessionStatePayload;
 
 export type ParseResult =
   | { ok: true; message: ClientMessage }
@@ -119,6 +140,13 @@ export function parseClientMessage(
   if (obj.type === 'ping') {
     const ts = typeof obj.ts === 'number' && Number.isFinite(obj.ts) ? obj.ts : undefined;
     return { ok: true, message: ts === undefined ? { type: 'ping' } : { type: 'ping', ts } };
+  }
+  if (obj.type === 'session.resync') {
+    // 只接受「请求重推」，其它字段一律忽略（尤其不允许带 data 改状态）。
+    const slot = typeof obj.slot === 'number' && Number.isInteger(obj.slot) && obj.slot >= 1 && obj.slot <= 3
+      ? obj.slot
+      : undefined;
+    return { ok: true, message: slot === undefined ? { type: 'session.resync' } : { type: 'session.resync', slot } };
   }
   return {
     ok: false,

@@ -147,17 +147,18 @@ C:\Users\Six\.workbuddy\user-2f146fb9-76c5-420d-95cd-5fad8c99318f-personal\MEMOR
 python scripts/check_home_env.py          # 期望 ENV_CHECK_OK（[WARN] 按提示处理）
 python scripts/doc_check.py               # 期望 DOC_CHECK_OK
 python scripts/sync_memory.py --check     # 期望 [一致] 且两侧 sha256 相同
-npm run check && npm test                 # 前端 0 错误 / 37 passed
-cd backend && npm run check && npm test   # 后端 0 错误 / 92 passed
+npm run check && npm test                 # 前端 0 错误 / 47 passed
+cd backend && npm run check && npm test   # 后端 0 错误 / 107 passed
 ```
 
-服务已起时再跑（三组 E2E + 浏览器冒烟）：
+服务已起时再跑（四组 E2E + 浏览器冒烟）：
 
 ```bash
 cd backend && npm run e2e        # 57/57 E2E_OK
 cd backend && npm run e2e:p12    # 38/38 E2E_P12_OK
 cd backend && npm run e2e:p21    # 34/34 E2E_P21_OK
-node scripts/ui_smoke_p21.mjs    # 13/13 UI_SMOKE_OK（Edge 路径可用 EDGE_PATH 覆盖）
+cd backend && npm run e2e:p22    # 24/24 E2E_P22_OK（P2-2 在线权威态）
+node scripts/ui_smoke_p21.mjs    # 15/15 UI_SMOKE_OK（Edge 路径可用 EDGE_PATH 覆盖）
 ```
 
 浏览器打开 5173：能注册登录、Start 页显示「实时通道已连接」（证明 WS 握手与 hello 成功）。
@@ -181,8 +182,8 @@ node scripts/ui_smoke_p21.mjs    # 13/13 UI_SMOKE_OK（Edge 路径可用 EDGE_PA
 
 ## 8. 当前进度快照（2026-11-06）
 
-P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / **P2-1 ✅**。
-下一步 **P2-2 服务端 GameSession 实时态**：WS 通道已有，但没有在线权威态，游戏数据仍靠整包存档 + 意图裁决；P2-2 收敛后 P3 才能把战斗模拟整体搬上服务端。P1-4（榜单/成就派生）优先级低，不必抢跑。
+P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / **P2-1 ✅** / **P2-2 ✅（11-07）**。
+下一步 **P3-1 服务端模拟**：P2-2 已把在线权威态收敛到服务端（内存态 + DB 持久化 + `session.state` 广播 + 服务端统一写入），但战斗/捕获/挂机的中间态与内容真值仍在客户端；P3-1 把模拟整体上移、P3-2 客户端瘦终端化后，P4 多人玩法与 P5 去本地存档才安全。P1-4（榜单/成就派生）优先级低，不必抢跑。
 
 北极星方向：**服务端权威 + WebSocket 实时多人同玩**，客户端瘦终端只发意图、收状态、渲染；本地存档是 P3/P5 前的过渡桥接。
 

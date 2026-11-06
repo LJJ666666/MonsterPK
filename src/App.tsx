@@ -20,6 +20,7 @@ import { isLoggedIn, clearToken } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, BANNED_EVENT } from "@/lib/api";
 import { startAutoSync } from "@/lib/sync";
 import { startRealtime } from "@/lib/ws";
+import { startSessionSync } from "@/lib/session";
 import PixelButton from "@/components/PixelButton";
 
 // 未登录一律先去登录页；登录完成后由 Auth 页 navigate("/") 回到游戏。
@@ -106,13 +107,21 @@ function SyncBootstrap() {
   return null;
 }
 
-// 启动实时通道（P2-1）：只建连/保活/重连，不承载游戏状态。
-// 依赖路由是为了在「登录成功 / 退出登录」切换后重新建连；startRealtime 自身幂等。
+// 启动实时通道（P2-1）：只建连/保活/重连。依赖路由是为了登录/登出后重新建连。
 function RealtimeBootstrap() {
   const location = useLocation();
   useEffect(() => {
     startRealtime();
   }, [location.pathname]);
+  return null;
+}
+
+// 接入在线权威态（P2-2）：监听 session.state 快照，幂等应用并抑制自动回传。
+// 必须在 RealtimeBootstrap 之前挂载无关紧要（事件监听是全局的），但放在同一层便于排障。
+function SessionBootstrap() {
+  useEffect(() => {
+    startSessionSync();
+  }, []);
   return null;
 }
 
@@ -125,6 +134,7 @@ export default function App() {
       <UnauthorizedListener />
       <BanGate />
       <SyncBootstrap />
+      <SessionBootstrap />
       <RealtimeBootstrap />
       <Routes>
         <Route

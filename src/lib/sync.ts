@@ -1,12 +1,12 @@
-// 自动云同步引擎（P0-3；P1-2 增加「裁决结果立即提交」通道）。
+// 自动云同步引擎（P0-3；P1-2 增加「裁决结果立即提交」通道；P2-2 增加「远端快照不回传」）。
 // 设计要点：
 //  - 登录后按冲突策略自动恢复（last-write-wins，必要时把云端存档拉回本地）；
 //  - 本地存档变更后防抖自动 PUT（默认 1.5s），不阻塞操作；
 //  - 离线 / 服务端不可达时入队，网络恢复或登录后重传；
-//  - P1-2：关键路径走「发意图 → 服务端裁决 → 应用结果 → commitIntent 立即带 nonce 提交」，
-//    避免旧的整包 PUT 在裁决结果落库前把客户端自算值覆盖回去；
-//  - 暴露同步状态（syncing / synced / offline ...）供 UI 展示；
-//  - 冲突决策抽成纯函数 decideSyncAction，便于单测，不依赖网络。
+//  - P1-2：关键路径走「发意图 → 服务端裁决 → 应用结果 → commitIntent 立即带 nonce 提交」；
+//  - P2-2：应用服务端权威快照会写 store，必须抑制这一次自动上传，否则
+//    「收快照 → 上传 → 再广播」会形成多端回环；本端 PUT 成功后记下 revision，
+//    使自己的回显快照被幂等忽略。
 import { useEffect, useState } from "react";
 import { api, type PutExtra } from "./api";
 import { getClientId } from "./auth";
@@ -14,6 +14,7 @@ import { useGameStore } from "@/stores/useGameStore";
 import { decideSyncAction, type SyncDecision } from "./syncPolicy";
 import { classifyUploadError, uploadErrorMessage } from "./syncErrors";
 import { takeRebase } from "./rebase";
+import { noteRevision } from "./sessionState";
 
 export type SyncPhase = "idle" | "syncing" | "synced" | "offline" | "error";
 export type { SyncDecision };
@@ -52,7 +53,6 @@ export function cancelPendingUpload(): void {
 
 /**
  * 只读诊断信息（P1-1）：供排障与自动化回归确认「离线队列没有堆积被拒的存档」。
- * 不修改任何状态，也不暴露队列内容，避免泄漏存档数据。
  */
 export function getSyncDiagnostics(): { phase: SyncPhase; info?: string; queueLength: number } {
   return { phase, info: phaseInfo, queueLength: offlineQueue.length };
@@ -77,26 +77,43 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: { slot: number; data: string; extra?: PutExtra } | null = null;
 const offlineQueue: { slot: number; data: string; extra?: PutExtra }[] = [];
 
+// —— P2-2：远端快照写入 store 时抑制一次自动上传 ——
+let suppressUploads = 0;
+/**
+ * 必须在调用 importSaveJson() 之前调用；zustand 的 subscribe 是同步触发的，
+ * 用 queueMicrotask 兜底清除，即使应用失败也不会永久吞掉后续合法上传。
+ */
+export function suppressNextUpload(): void {
+  suppressUploads += 1;
+  queueMicrotask(() => {
+    suppressUploads = Math.max(0, suppressUploads - 1);
+  });
+}
+function consumeSuppressedUpload(): boolean {
+  if (suppressUploads <= 0) return false;
+  suppressUploads -= 1;
+  return true;
+}
+
 // 导出当前槽位的存档 JSON（与手动备份使用的同一个出口，保证落盘格式一致）
 function exportSlot(slot: number): string | null {
   const r = useGameStore.getState().exportSaveJson(slot as 1 | 2 | 3);
   return r.ok ? r.json : null;
 }
 
-async function uploadNow(slot: number, data: string, extra?: PutExtra): Promise<void> {
-  await api.putSave(slot, data, getClientId(), extra);
+async function uploadNow(slot: number, data: string, extra?: PutExtra): Promise<any> {
+  return api.putSave(slot, data, getClientId(), extra);
 }
 
 /**
- * 上传一次并分类结果（P1-1）。
- * 4xx 属于「请求本身非法」——例如服务端拒绝了被篡改的存档，重试不会成功，
- * 若塞进离线队列会无限重传且状态永远卡在 offline。这里统一收敛：
- * 永久失败直接置 error 并展示后端中文原因，临时失败才由调用方入队。
+ * 上传一次并分类结果（P1-1）。4xx 属永久失败，不入队；临时失败才入队。
+ * P2-2：成功响应的 revision 记进会话态，供快照幂等判断。
  */
 async function attemptUpload(slot: number, data: string, extra?: PutExtra): Promise<"permanent" | "transient" | null> {
   try {
     setPhase("syncing");
-    await uploadNow(slot, data, extra);
+    const res = await uploadNow(slot, data, extra);
+    if (res && typeof res.revision === "number") noteRevision(slot, res.revision);
     setPhase("synced", "已同步到云端");
     return null; // 成功
   } catch (e) {
@@ -125,13 +142,10 @@ async function flush(): Promise<void> {
     offlineQueue.push(job);
     setPhase("offline", "离线，将在网络恢复后重传");
   }
-  // permanent：已被服务端拒绝，不入队、不重试（attemptUpload 已置 error 并带原因）
 }
 
 /**
  * P1-2：应用服务端裁决结果后**立即**提交，带上 intentNonce 让服务端核对增量。
- * 与普通防抖 PUT 的区别：取消 pending 快照、跳过 1.5s 等待，消除「旧存档覆盖裁决」竞态。
- * 返回是否成功落库；失败时状态行会显示后端中文原因，下一次正常同步会自行纠正。
  */
 export async function commitIntent(slot: number, nonce: string): Promise<boolean> {
   cancelPendingUpload();
@@ -153,11 +167,9 @@ function flushQueue(): void {
     for (const job of jobs) {
       const outcome = await attemptUpload(job.slot, job.data, job.extra);
       if (outcome === "transient") {
-        // 网络仍未恢复：放回队列，下次再试
         offlineQueue.push(job);
         setPhase("offline", "离线，将在网络恢复后重传");
       }
-      // permanent：丢弃该任务，避免无限重传被拒的存档
     }
   })();
 }
@@ -169,30 +181,19 @@ export async function syncOnLogin(slot: number): Promise<void> {
   const localTime = local?.lastSavedAt ? Date.parse(local.lastSavedAt) : 0;
 
   try {
-    const cloud = await api.getSave(slot); // 无存档时抛 status=404 的错误
+    const cloud = await api.getSave(slot);
     const sameDevice = cloud.clientId === getClientId();
     const cloudTime = cloud.updatedAt ? Date.parse(cloud.updatedAt) : 0;
-    const decision = decideSyncAction({
-      localExists,
-      localTime,
-      cloudExists: true,
-      cloudTime,
-      sameDevice,
-    });
+    const decision = decideSyncAction({ localExists, localTime, cloudExists: true, cloudTime, sameDevice });
     if (decision === "restore") {
-      // importSaveJson 返回 {ok:true} | {ok:false; reason}；这里用安全断言取 reason，避免判别联合窄化在复杂表达式下失效
       const r = useGameStore
         .getState()
-        .importSaveJson(cloud.data, slot as 1 | 2 | 3) as {
-        ok: boolean;
-        reason?: string;
-      };
+        .importSaveJson(cloud.data, slot as 1 | 2 | 3) as { ok: boolean; reason?: string };
       if (r.ok) setPhase("synced", "已从云端恢复");
       else setPhase("error", r.reason ?? "恢复失败");
     } else if (decision === "upload") {
       const data = exportSlot(slot);
       if (data) {
-        // 用分类上传替代裸 uploadNow：被服务端拒绝时不要落进外层 catch 当成离线故障
         const outcome = await attemptUpload(slot, data);
         if (outcome === null) setPhase("synced", "已将本地进度上传云端");
         else if (outcome === "transient") {
@@ -207,7 +208,6 @@ export async function syncOnLogin(slot: number): Promise<void> {
     }
   } catch (e: any) {
     if (e?.status === 404) {
-      // 云端无存档：本地有则上传基线
       const data = exportSlot(slot);
       if (data) {
         const outcome = await attemptUpload(slot, data);
@@ -220,16 +220,13 @@ export async function syncOnLogin(slot: number): Promise<void> {
         setPhase("synced");
       }
     } else if (classifyUploadError(e) === "permanent") {
-      // 例如 401 登录失效（api.ts 已统一登出）或 400 参数非法：不重试
       setPhase("error", uploadErrorMessage(e));
     } else {
-      // 网络 / 服务不可用：本地有则进队列稍后重传
       const data = exportSlot(slot);
       if (data) offlineQueue.push({ slot, data });
       setPhase("offline", "无法连接服务器，稍后重传");
     }
   }
-  // 不论结果，尝试把离线队列也发了
   flushQueue();
 }
 
@@ -243,12 +240,12 @@ export function startAutoSync(): void {
     const next = pickSaves(state);
     if (next.s1 !== prev.s1 || next.s2 !== prev.s2 || next.s3 !== prev.s3) {
       prev = next;
+      // P2-2：这次变更来自服务端权威快照，不再回传，避免多端广播回环。
+      if (consumeSuppressedUpload()) return;
       const data = exportSlot(state.slot);
-      // 新建/重置存档时带 rebase，让服务端重建权威基线（否则旧基线会把新档判成改档）。
       if (data) scheduleUpload(state.slot, data, 1500, takeRebase() ? { rebase: true } : undefined);
     }
   });
-  // 网络恢复时重传离线队列
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => flushQueue());
   }

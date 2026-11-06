@@ -32,6 +32,7 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **账号管理**：`cd backend && npm run admin -- grant <用户名>` / `revoke` / `ban` / `unban` / `list` / `audit`。⚠️ 不授权就用测试菜单会被风控封号。**绝不写死固定用户名**。
 - 本机 `D:\MyJob\MonsterPK`（NTFS，11-07 重建环境）；remote `https://github.com/LJJ666666/MonsterPK.git`；node v22.22.2 / npm 10.9.7。dev/preview 的 `/api/save` 无 `save_data.json` 返回 404 属正常。
 - 新机重建后端：`cp .env.example .env`（换 JWT_SECRET）→ `npx prisma migrate deploy` → `npx prisma generate` → `npm run dev`。`.env` 与 `dev.db` 已 gitignore。改 Prisma schema 前先停 :3001（Windows DLL 文件锁，bug_log §12）。
+- **Git 提交流程（11-07 杰哥定，每次提交都执行，不用再问）**：全量验收通过 → **先建回滚点**：`git tag -a rollback-YYYYMMDD-<阶段> -m "..." <当前HEAD>` 且 `git push origin <tag>`（回滚点必须到远端）→ `git add -A` 并确认无 `.env` / `*.db` 入库 → commit（中文、按模块分条、末尾写验收数字）→ `git push origin master` → 收尾核对 `HEAD == origin/master` 且工作树干净。已建回滚点：`rollback-20261107-pre-p22`（→ `834a55a`）。
 
 ## 5. 后端架构与风控现状（独立 `backend/`）
 - 栈：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + SQLite + bcryptjs + zod + tsx。
@@ -54,5 +55,5 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **P1-2 ✅ / P1-3 ✅（11-06）**：RNG/结算/时钟上移，nonce 防重放；捕获率补稀有度/等级差、`amulet_coin` 翻倍、`exp_share` 全队经验、进化石可用。证据：后端 76/76、E2E 57/57 + 38/38、前端 27/27、headless 10/10。**内容缺口**：仅 `spark_mouse` 配了 `stone_thunder` 道具进化。
 - **P2-1 ✅（11-06）**：WebSocket 通道（鉴权/心跳/重连/限流/状态 UI），证据：后端 92/92、`e2e:p21` 34/34、前端 37/37、headless 13/13。
 - **P2-2 ✅（11-07，杰哥排期开工）**：服务端 GameSession 在线权威态，内存态 + DB 持久化 + 状态变更服务端写入 + 多端广播；不加 Prisma 迁移、不改 SCHEMA_VERSION。证据：后端 `check` 0 / `node:test` **107/107**、新增 `e2e:p22` **24/24 `E2E_P22_OK`**、原 57/57 + 38/38×2 + 34/34 无回归；前端 `check` 0 / `test` **47/47** / `build` 606.75 KB、headless **15/15**（含权威快照 rev）。**下一步 P3-1**：战斗/捕获/挂机逻辑与中间态上移服务端，客户端只发意图收状态；P3-2 才能去本地真值。P1-4 榜单/成就优先级低。
-- **Git（11-06）**：两个本地 commit `fe159eb`（P0~P1-3）、`bb04998`（P2-1）已推送；`834a55a`（HANDOFF）为当前 HEAD。`dev.db`/`.env` 已 gitignore，仅 `.env.example` 入库。**11-07 起 P2-2 改动仍在工作树，未提交**。
+- **Git（11-06 / 11-07）**：`fe159eb`（P0~P1-3）、`bb04998`（P2-1）、`834a55a`（HANDOFF）已推送；**`2f2c8b7`（P2-2，27 文件 +1595/−260）已 `git push origin master`（`834a55a..2f2c8b7`）**，推送后 HEAD 与 `origin/master` 一致、工作树干净。回滚点 tag `rollback-20261107-pre-p22` → `834a55a` 已同步远端。`dev.db`/`.env` 已 gitignore，仅 `.env.example` 入库。
 - **回家交接（11-06）**：`HANDOFF.md`（项目根，已入库）含 clone / 环境重建 / 三层记忆恢复 / 首段话术 / 验收 / 坑；配套 `scripts/check_home_env.py`、`scripts/doc_check.py`。**11-07 已在 `D:\MyJob\MonsterPK` 按手册重建环境**：装依赖、随机 JWT_SECRET、4 条迁移、起双服务、建 `admin/adminJJ` 本地管理员、补用户级记忆、全量验收 `ENV_CHECK_OK`（日志未提交时为 WARN）。

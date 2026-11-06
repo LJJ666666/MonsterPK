@@ -15,11 +15,15 @@
 
 ## 1. 公司侧已完成的收尾（不用再做）
 
-- 远端 `https://github.com/LJJ666666/MonsterPK.git`，`master` 指向 `6f78d85`（以 `git ls-remote origin refs/heads/master` 为准）。
-- 三个 commit：
+- 远端 `https://github.com/LJJ666666/MonsterPK.git`，`master` 指向 `2f2c8b7`（以 `git ls-remote origin refs/heads/master` 为准）。
+- 已推送的 commit：
   - `fe159eb` 回滚点：P0~P1-3 全量代码 + 文档 + 记忆（65 文件）
   - `bb04998` P2-1 WebSocket 接入与鉴权（20 文件）
   - `6f78d85` 推送记录文档
+  - `834a55a` HANDOFF 手册与跨机器自检脚本
+  - `2f2c8b7` P2-2 服务端 GameSession 在线权威态（27 文件，+1595/−260）
+- 回滚点 tag：`rollback-20261107-pre-p22` → `834a55a`（已推到远端）。
+- **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 先建回滚点 `git tag -a rollback-YYYYMMDD-<阶段> <当前HEAD>` 并 `git push origin <tag>` → 确认无 `.env` / `*.db` 入库 → commit → `git push origin master` → 核对 `HEAD == origin/master` 且工作树干净。回滚用 `git reset --hard <tag>` 或 `git revert <commit>`。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，家里必须补**：`backend/.env`、`backend/prisma/dev.db`、`save_data.json`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。
 

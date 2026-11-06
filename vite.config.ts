@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -55,6 +56,12 @@ function localSavePlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  // 前端测试边界：后端 backend/ 使用独立的 node:test（见 backend/package.json 的 npm test），
+  // 两套测试框架不能混跑，否则 vitest 会把 node:test 文件当成空套件报错。
+  test: {
+    include: ['src/**/*.test.{ts,tsx}'],
+    exclude: ['node_modules/**', 'dist/**', 'backend/**'],
+  },
   build: {
     sourcemap: 'hidden',
   },

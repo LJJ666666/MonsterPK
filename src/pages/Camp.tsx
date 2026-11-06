@@ -8,6 +8,7 @@ import type { EncounterTheme, ItemId, LocationId, StatBlock, MonsterInstance } f
 import { useGameStore } from "@/stores/useGameStore";
 import { getMonsterStatBounds, requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 import { IDLE_CAP_MINUTES, idleCapsuleExpectation, idleCapsulesPerHour, idleElapsedMinutes, idleMoneyFor, idleMoneyPerHour } from "@/game/idle";
+import { useIsAdmin } from "@/lib/admin";
 
 import TypeChartModal from "@/components/TypeChartModal";
 
@@ -106,8 +107,8 @@ function TestMenuModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
         </div>
         <div className="p-4 flex flex-col gap-3">
-          <PixelButton onClick={() => { addGold(999999); onClose(); }}>满金币 (+999999)</PixelButton>
-          <PixelButton onClick={() => { addMasterBalls(99); onClose(); }}>大师球 99个</PixelButton>
+          <PixelButton onClick={() => { void addGold(999999); onClose(); }}>满金币 (+999999)</PixelButton>
+          <PixelButton onClick={() => { void addMasterBalls(99); onClose(); }}>大师球 99个</PixelButton>
           <PixelButton tone={testOHKO ? "danger" : "primary"} onClick={toggleTestOHKO}>
             秒杀开关 {testOHKO ? "[ON]" : "[OFF]"}
           </PixelButton>
@@ -128,6 +129,9 @@ import { Info } from "lucide-react";
 export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
+  // 测试菜单仅管理员可见（服务端判定）。普通账号即使改前端也只是看到按钮，
+  // 真正写入异常存档仍会被后端风控封号。
+  const isAdmin = useIsAdmin();
   const { slot, save1, save2, save3, startEncounter, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
   const [selected, setSelected] = useState<number | null>(null);
@@ -463,7 +467,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                     <PixelButton
                       size="sm"
                       disabled={save.money < (item.price ?? 99999)}
-                      onClick={() => buyItem(item.id, 1)}
+                      onClick={() => void buyItem(item.id, 1)}
                     >
                       购买 1 个
                     </PixelButton>
@@ -519,8 +523,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                 <PixelButton
                   tone="primary"
                   disabled={elapsed <= 0}
-                  onClick={() => {
-                    const res = claimIdle();
+                  onClick={async () => {
+                    const res = await claimIdle();
                     if (!res) return;
                     const parts = [`¥${res.money}`];
                     for (const [id, qty] of Object.entries(res.capsules)) {
@@ -535,7 +539,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                   tone="muted"
                   onClick={() => {
                     if (confirm("确定放弃本次挂机收益吗？")) {
-                      cancelIdle();
+                      void cancelIdle();
                       setIdleResult(null);
                     }
                   }}
@@ -570,7 +574,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                           size="sm"
                           onClick={() => {
                             setIdleResult(null);
-                            startIdle(areaId);
+                            void startIdle(areaId);
                           }}
                         >
                           派遣
@@ -1004,9 +1008,11 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         <div className="flex items-center justify-between">
           <div className="font-display text-xl tracking-widest text-[color:var(--text)]">兽域手记</div>
           <div className="flex items-center gap-3">
-            <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTestMenu(true)}>
-              测试
-            </button>
+            {isAdmin && (
+              <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTestMenu(true)}>
+                测试
+              </button>
+            )}
             <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTypeChart(true)}>
               属性表
             </button>
@@ -1030,7 +1036,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         </div>
       </div>
 
-      {showTestMenu && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
+      {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
 
       {/* Main Content Area */}

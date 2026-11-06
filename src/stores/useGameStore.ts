@@ -4,9 +4,24 @@ import { ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS, STARTERS } from "@/game/data";
 import type { BattleState, EncounterTheme, ItemId, MonsterInstance, SaveData, LocationId, MoveId, StatModifiers } from "@/game/types";
 import { applyDamage, attemptCapture, computeDamage, createInstance, gainExp, evolveMonsterInstance, getStatMultiplier, getAccuracyMultiplier, applyStatChanges, getSpeed, canMove, roll, uuid, getMonsterStatBounds, getMoveMaxPP } from "@/game/rules";
 import { generateEncounter } from "@/game/gen";
-import { idleElapsedMinutes, settleIdle } from "@/game/idle";
+import { idleElapsedMinutes } from "@/game/idle";
+import { SCHEMA_VERSION, SAVE_VERSION, migrateSaveState } from "@/stores/saveVersion";
+import { markRebase } from "@/lib/rebase";
+import type { IntentResult } from "@/lib/intents";
 
-export const SAVE_VERSION = "0.1.0";
+/**
+ * P1-2：关键随机与经济结算统一走服务端裁决。
+ * 用动态 import 调用 intents.ts，避免 useGameStore 与 intents 形成顶层循环导入（TDZ）。
+ * apply 回调拿到服务端结果后直接改 store，随后由 runIntent 立即带 nonce 提交权威结果。
+ */
+async function intent(
+  type: string,
+  payload: Record<string, unknown>,
+  apply: (result: IntentResult, save: SaveData, slot: number) => void,
+): Promise<IntentResult | null> {
+  const { runIntent } = await import("@/lib/intents");
+  return runIntent(type, payload, apply);
+}
 
 type GameState = {
   slot: 1 | 2 | 3;
@@ -24,20 +39,20 @@ type GameState = {
   exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
   
   startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string) => { ok: true } | { ok: false; reason: string };
-  useMove: (moveId: MoveId) => void;
-  useItem: (itemId: ItemId) => void;
+  useMove: (moveId: MoveId) => Promise<void>;
+  useItem: (itemId: ItemId) => Promise<void>;
   switchTo: (partyIndex: number) => void;
   flee: () => void;
   healAll: () => void;
   useItemOutsideBattle: (itemId: ItemId, partyIndex: number) => void;
-  buyItem: (itemId: ItemId, amount: number) => void;
+  buyItem: (itemId: ItemId, amount: number) => Promise<void>;
 
-  /** 派遣挂机到某个已首通区域。 */
-  startIdle: (areaId: string) => { ok: true } | { ok: false; reason: string };
-  /** 领取挂机收益并结束本次派遣。 */
-  claimIdle: () => { money: number; capsules: Partial<Record<ItemId, number>> } | null;
+  /** 派遣挂机到某个已首通区域（服务端时钟裁决）。 */
+  startIdle: (areaId: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** 领取挂机收益并结束本次派遣（收益由服务端按服务端时钟结算）。 */
+  claimIdle: () => Promise<{ money: number; capsules: Partial<Record<ItemId, number>> } | null>;
   /** 放弃本次挂机派遣，不结算收益。 */
-  cancelIdle: () => void;
+  cancelIdle: () => Promise<void>;
 
   movePartyToBox: (partyIndex: number) => void;
   moveBoxToParty: (boxIndex: number) => void;
@@ -52,8 +67,8 @@ type GameState = {
   toggleTestOHKO: () => void;
   toggleTestMaxStats: () => void;
   toggleTestShiny: () => void;
-  addGold: (amount: number) => void;
-  addMasterBalls: (amount: number) => void;
+  addGold: (amount: number) => Promise<void>;
+  addMasterBalls: (amount: number) => Promise<void>;
 };
 
 function nowIso() {
@@ -220,6 +235,8 @@ export const useGameStore = create<GameState>()(
           lastSavedAt: nowIso(),
         };
         set({ [`save${slot}`]: save, battle: null } as any);
+        // P1-2-d：新档必须重建服务端权威基线，否则旧基线会把初始化资源判成「凭空增加」。
+        markRebase();
       },
 
       resetSave: (slotToReset) => {
@@ -367,7 +384,7 @@ export const useGameStore = create<GameState>()(
         set({ [`save${state.slot}`]: res.save, battle: res.battle } as any);
       },
 
-      useItem: (itemId) => {
+      useItem: async (itemId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         const battle = state.battle;
@@ -392,40 +409,54 @@ export const useGameStore = create<GameState>()(
           return;
         }
 
-        const baseRate = MONSTER_SPECS[battle.enemy.specId].captureRate;
-        const modifier = item.kind === "capture" ? (item.modifier ?? 1) : 1;
-        const { ok, chance, shakes } = attemptCapture(battle.enemy, baseRate, modifier);
-        const head = `抛出了 ${item.name}…（成功率 ${Math.round(chance * 100)}%）`;
-        if (ok) {
-          const enemyName = MONSTER_SPECS[battle.enemy.specId].name;
-          const captured: MonsterInstance = { ...battle.enemy, id: uuid(), hp: battle.enemy.maxHp, status: "none" as const };
-          const party = save.party.length < 6 ? [...save.party, captured] : save.party;
-          const box = save.party.length < 6 ? save.box : [...save.box, captured];
-          const collection = {
-            ...save.collection,
-            [captured.specId]: {
-              seen: true,
-              captured: true,
-              timesCaptured: (save.collection[captured.specId]?.timesCaptured ?? 0) + 1,
-            },
-          };
-          const nextSave = markAreaCleared(
-            { ...save, inventory: consumed.inv, party, box, collection, lastSavedAt: nowIso() },
-            battle
-          );
-          set({
-            [`save${state.slot}`]: nextSave,
-            battle: pushLog({ ...battle, finished: true, result: "captured" as const }, [head, `摇晃 x${shakes}… 捕获成功！${enemyName} 已加入。`]),
-          } as any);
-          return;
-        }
-
-        const nextSave = { ...save, inventory: consumed.inv, lastSavedAt: nowIso() };
-        const res = runEnemyTurn(nextSave, pushLog(battle, [head, `摇晃 x${shakes}… 失败！`]));
-        set({ [`save${state.slot}`]: res.save, battle: res.battle } as any);
+        // P1-2-b：捕获成败、成功率、摇晃次数全部由服务端裁决（RNG 在服务端）。
+        // 客户端只上报野怪快照并渲染结果；伪造「成功」会在增量核对处被拒。
+        // P1-3：捕获率已计入稀有度与等级差，公式在后端 settlements.ts。
+        await intent("capture", {
+          itemId,
+          enemySpecId: battle.enemy.specId,
+          enemyLevel: battle.enemy.level,
+          enemyHp: battle.enemy.hp,
+          enemyMaxHp: battle.enemy.maxHp,
+          enemyStatus: battle.enemy.status,
+          baseRate: MONSTER_SPECS[battle.enemy.specId].captureRate,
+          areaId: battle.areaId ?? null,
+        }, (result, curSave, slot) => {
+          const consumedNow = consumeItem(curSave.inventory, itemId);
+          if (!consumedNow.ok) return;
+          const chance = Number(result.chance ?? 0);
+          const shakes = Number(result.shakes ?? 1);
+          const head = `抛出了 ${item.name}…（成功率 ${Math.round(chance * 100)}%）`;
+          if (result.ok) {
+            const enemyName = MONSTER_SPECS[battle.enemy.specId].name;
+            const captured: MonsterInstance = { ...battle.enemy, id: uuid(), hp: battle.enemy.maxHp, status: "none" as const };
+            const party = curSave.party.length < 6 ? [...curSave.party, captured] : curSave.party;
+            const box = curSave.party.length < 6 ? curSave.box : [...curSave.box, captured];
+            const collection = {
+              ...curSave.collection,
+              [captured.specId]: {
+                seen: true,
+                captured: true,
+                timesCaptured: (curSave.collection[captured.specId]?.timesCaptured ?? 0) + 1,
+              },
+            };
+            const nextSave = markAreaCleared(
+              { ...curSave, inventory: consumedNow.inv, party, box, collection, lastSavedAt: nowIso() },
+              battle
+            );
+            set({
+              [`save${slot}`]: nextSave,
+              battle: pushLog({ ...battle, finished: true, result: "captured" as const }, [head, `摇晃 x${shakes}… 捕获成功！${enemyName} 已加入。`]),
+            } as any);
+          } else {
+            const nextSave = { ...curSave, inventory: consumedNow.inv, lastSavedAt: nowIso() };
+            const turn = runEnemyTurn(nextSave, pushLog(battle, [head, `摇晃 x${shakes}… 失败！`]));
+            set({ [`save${slot}`]: turn.save, battle: turn.battle } as any);
+          }
+        });
       },
 
-      useMove: (moveId) => {
+      useMove: async (moveId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         let battle = state.battle;
@@ -537,19 +568,39 @@ export const useGameStore = create<GameState>()(
 
         // Check faints
         if (!alive(enemy)) {
-          const expGain = 10 + enemy.level * 6;
-          const moneyGain = 50 + enemy.level * 10;
-          const res = gainExp(player, expGain);
-          nextParty[battle.playerActiveIndex] = res.monster;
-          const nextSave = markAreaCleared(
-            { ...save, party: nextParty, money: save.money + moneyGain, lastSavedAt: nowIso() },
-            battle
-          );
-          battle = pushLog({ ...battle, enemy, finished: true, result: "enemy_fainted" as const }, [
-            `${MONSTER_SPECS[enemy.specId].name} 倒下了。`,
-            `获得经验 ${expGain}，金钱 ¥${moneyGain}。${res.leveled ? "等级提升！" : ""}`.trim(),
-          ]);
-          set({ [`save${state.slot}`]: nextSave, battle } as any);
+          // P1-2-c：战斗奖励由服务端按敌人等级裁决，本地伪造 money+500 不能落库。
+          // P1-3：amulet_coin 让金钱翻倍、exp_share 让全队分享经验，是否生效由服务端判定。
+          await intent("battle_reward", {
+            enemyLevel: enemy.level,
+            areaId: battle.areaId ?? null,
+            monsterIds: nextParty.map((m) => m.id),
+          }, (result, curSave, slot) => {
+            const expGain = Number(result.expGain ?? 0);
+            const moneyGain = Number(result.moneyGain ?? 0);
+            const party = nextParty.slice();
+            let leveled = false;
+            if (result.hasExpShare) {
+              for (let i = 0; i < party.length; i++) {
+                if (!alive(party[i])) continue;
+                const r = gainExp(party[i], expGain);
+                party[i] = r.monster;
+                leveled = leveled || r.leveled;
+              }
+            } else {
+              const r = gainExp(party[battle.playerActiveIndex], expGain);
+              party[battle.playerActiveIndex] = r.monster;
+              leveled = r.leveled;
+            }
+            const nextSave = markAreaCleared(
+              { ...curSave, party, money: curSave.money + moneyGain, lastSavedAt: nowIso() },
+              battle
+            );
+            const finishedBattle = pushLog({ ...battle, enemy, finished: true, result: "enemy_fainted" as const }, [
+              `${MONSTER_SPECS[enemy.specId].name} 倒下了。`,
+              `获得经验 ${expGain}，金钱 ¥${moneyGain}。${leveled ? "等级提升！" : ""}`.trim(),
+            ]);
+            set({ [`save${slot}`]: nextSave, battle: finishedBattle } as any);
+          });
           return;
         }
 
@@ -582,83 +633,117 @@ export const useGameStore = create<GameState>()(
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return;
         const item = ITEM_SPECS[itemId];
+        const cur = save.party[partyIndex];
+        if (!cur) return;
+
+        // P1-3：进化石此前买了用不了。只有内容表配置了 item 进化条件的幻兽才消耗石头并进化；
+        // 没有匹配条件时原样返回，避免玩家白扔道具。进化不改等级/经验/捕获数，
+        // 因此只是一次合法的道具消耗，自动同步的单调比对会放行。
+        if (item.kind === "evolution") {
+          const spec = MONSTER_SPECS[cur.specId];
+          const evo = spec?.evolutions?.find(
+            (e) => e.condition.type === "item" && e.condition.itemId === itemId
+          );
+          if (!evo) return;
+          const consumed = consumeItem(save.inventory, itemId);
+          if (!consumed.ok) return;
+          const party = save.party.slice();
+          party[partyIndex] = evolveMonsterInstance(cur, evo.targetId);
+          set({ [`save${state.slot}`]: { ...save, inventory: consumed.inv, party, lastSavedAt: nowIso() } } as any);
+          return;
+        }
+
         if (item.kind !== "heal") return;
         const consumed = consumeItem(save.inventory, itemId);
         if (!consumed.ok) return;
-
-        const cur = save.party[partyIndex];
-        if (!cur || cur.hp <= 0) return;
+        if (cur.hp <= 0) return;
         const healed = Math.min(cur.maxHp, cur.hp + (item.heal ?? 0));
         const party = save.party.slice();
         party[partyIndex] = { ...cur, hp: healed };
         set({ [`save${state.slot}`]: { ...save, inventory: consumed.inv, party, lastSavedAt: nowIso() } } as any);
       },
 
-      buyItem: (itemId, amount) => {
+      buyItem: async (itemId, amount) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return;
-        const item = ITEM_SPECS[itemId];
-        const cost = (item.price ?? 99999) * amount;
-        if (save.money < cost) return;
-        const currentAmount = save.inventory[itemId] ?? 0;
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            money: save.money - cost,
-            inventory: { ...save.inventory, [itemId]: currentAmount + amount },
-            lastSavedAt: nowIso(),
-          },
-        } as any);
+        // P1-2-c：价格与扣款由服务端裁决，客户端改价 / 白嫖都会被精确增量核对拒绝。
+        await intent("shop_buy", { itemId, amount }, (result, curSave, slot) => {
+          const cost = Number(result.cost ?? 0);
+          const qty = Number(result.amount ?? 0);
+          if (cost <= 0 || qty <= 0) return;
+          set({
+            [`save${slot}`]: {
+              ...curSave,
+              money: curSave.money - cost,
+              inventory: { ...curSave.inventory, [itemId]: (curSave.inventory[itemId] ?? 0) + qty },
+              lastSavedAt: nowIso(),
+            },
+          } as any);
+        });
       },
 
-      startIdle: (areaId) => {
+      startIdle: async (areaId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return { ok: false, reason: "请先创建存档" };
-        const area = save.clearedAreas?.[areaId];
-        if (!area) return { ok: false, reason: "该区域尚未首通，无法挂机" };
+        if (!save.clearedAreas?.[areaId]) return { ok: false, reason: "该区域尚未首通，无法挂机" };
         if (save.idle) return { ok: false, reason: "已有进行中的挂机派遣" };
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            idle: { areaId, areaName: area.name, level: area.level, startedAt: nowIso() },
-            lastSavedAt: nowIso(),
-          },
-        } as any);
-        return { ok: true };
+        // P1-2-a：区域难度与开始时间都由服务端给出，客户端系统时间不参与结算。
+        const result = await intent("idle_start", { areaId }, (res, curSave, slot) => {
+          set({
+            [`save${slot}`]: {
+              ...curSave,
+              idle: {
+                areaId,
+                areaName: String(res.areaName ?? areaId),
+                level: Number(res.level ?? 1),
+                startedAt: String(res.startedAt ?? nowIso()),
+              },
+              lastSavedAt: nowIso(),
+            },
+          } as any);
+        });
+        return result ? { ok: true } : { ok: false, reason: "派遣失败，请检查网络后重试" };
       },
 
-      claimIdle: () => {
+      claimIdle: async () => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save?.idle) return null;
-        const minutes = idleElapsedMinutes(save.idle.startedAt);
-        if (minutes <= 0) return null;
-
-        const { money, capsules } = settleIdle(save.idle.level, minutes);
-        const inventory = { ...save.inventory };
-        for (const [id, qty] of Object.entries(capsules)) {
-          const key = id as ItemId;
-          inventory[key] = (inventory[key] ?? 0) + (qty ?? 0);
-        }
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            money: save.money + money,
-            inventory,
-            idle: null,
-            lastSavedAt: nowIso(),
-          },
-        } as any);
-        return { money, capsules };
+        // P1-2-a：收益按服务端时钟 + 服务端 RNG 结算，改系统时间（往前/往后）都不生效。
+        const result = await intent("idle_claim", {}, (res, curSave, slot) => {
+          const money = Number(res.money ?? 0);
+          const capsules = (res.capsules ?? {}) as Partial<Record<ItemId, number>>;
+          const inventory = { ...curSave.inventory };
+          for (const [id, qty] of Object.entries(capsules)) {
+            const key = id as ItemId;
+            inventory[key] = (inventory[key] ?? 0) + (qty ?? 0);
+          }
+          set({
+            [`save${slot}`]: {
+              ...curSave,
+              money: curSave.money + money,
+              inventory,
+              idle: null,
+              lastSavedAt: nowIso(),
+            },
+          } as any);
+        });
+        if (!result) return null;
+        return {
+          money: Number(result.money ?? 0),
+          capsules: (result.capsules ?? {}) as Partial<Record<ItemId, number>>,
+        };
       },
 
-      cancelIdle: () => {
+      cancelIdle: async () => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save?.idle) return;
-        set({ [`save${state.slot}`]: { ...save, idle: null, lastSavedAt: nowIso() } } as any);
+        await intent("idle_cancel", {}, (_res, curSave, slot) => {
+          set({ [`save${slot}`]: { ...curSave, idle: null, lastSavedAt: nowIso() } } as any);
+        });
       },
 
       movePartyToBox: (partyIndex: number) => {
@@ -762,7 +847,9 @@ export const useGameStore = create<GameState>()(
             [evolvedSpecId]: {
               seen: true,
               captured: true,
-              timesCaptured: Math.max(prev?.timesCaptured ?? 0, 1),
+              // 进化只登记图鉴「已见过/已获得」，不增加捕获计数：
+              // 捕获次数是服务端裁决资源，客户端自行 +1 会被权威摘要判成伪造捕获。
+              timesCaptured: prev?.timesCaptured ?? 0,
               seenLocations,
             },
           };
@@ -785,146 +872,27 @@ export const useGameStore = create<GameState>()(
       toggleTestOHKO: () => set((s) => ({ testOHKO: !s.testOHKO })),
       toggleTestMaxStats: () => set((s) => ({ testMaxStats: !s.testMaxStats })),
       toggleTestShiny: () => set((s) => ({ testShiny: !s.testShiny })),
-      addGold: (amount) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        set({ [`save${state.slot}`]: { ...save, money: Math.min(999999, save.money + amount), lastSavedAt: nowIso() } } as any);
+      // P1-2-d：测试菜单必须走服务端 admin_test 授权；普通账号即使直接调用也会被拒，
+      // 不会在本地凭空加钱 / 加球。管理员身份只由服务端判定。
+      addGold: async (amount) => {
+        await intent("admin_test", {}, (_res, save, slot) => {
+          set({ [`save${slot}`]: { ...save, money: Math.min(999999, save.money + amount), lastSavedAt: nowIso() } } as any);
+        });
       },
-      addMasterBalls: (amount) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        const inventory = { ...save.inventory };
-        inventory["capsule_master"] = (inventory["capsule_master"] || 0) + amount;
-        set({ [`save${state.slot}`]: { ...save, inventory, lastSavedAt: nowIso() } } as any);
+      addMasterBalls: async (amount) => {
+        await intent("admin_test", {}, (_res, save, slot) => {
+          const inventory = { ...save.inventory };
+          inventory["capsule_master"] = (inventory["capsule_master"] || 0) + amount;
+          set({ [`save${slot}`]: { ...save, inventory, lastSavedAt: nowIso() } } as any);
+        });
       }
     }),
     {
       name: "beast-journal-save",
       storage: createJSONStorage(() => customStorage),
       partialize: (s) => ({ save1: s.save1, save2: s.save2, save3: s.save3, slot: s.slot }),
-      version: 9,
-      migrate: (persistedState: any, version: number) => {
-        let state = persistedState;
-        if (version === 1) {
-          state = { slot: 1, save1: state.save, save2: null, save3: null };
-          version = 2;
-        }
-        if (version === 2) {
-          if (state.save1) state.save1.locationId = "town_starter";
-          if (state.save2) state.save2.locationId = "town_starter";
-          if (state.save3) state.save3.locationId = "town_starter";
-          version = 3;
-        }
-        if (version === 3) {
-          if (state.save1) state.save1.lastHealLocationId = state.save1.locationId;
-          if (state.save2) state.save2.lastHealLocationId = state.save2.locationId;
-          if (state.save3) state.save3.lastHealLocationId = state.save3.locationId;
-          version = 4;
-        }
-        if (version === 4) {
-          const migrateLocation = (save: any) => {
-            if (!save) return;
-            if (save.locationId === "route_1") save.locationId = "town_starter";
-            if (save.locationId === "cave_echo") save.locationId = "city_pebble";
-            if (save.lastHealLocationId === "route_1") save.lastHealLocationId = "town_starter";
-            if (save.lastHealLocationId === "cave_echo") save.lastHealLocationId = "city_pebble";
-            if (!save.visitedLocationIds) save.visitedLocationIds = [save.locationId];
-            
-            // replace old wild areas in visited array
-            save.visitedLocationIds = save.visitedLocationIds.map((id: string) => {
-              if (id === "route_1") return "town_starter";
-              if (id === "cave_echo") return "city_pebble";
-              return id;
-            });
-          };
-          migrateLocation(state.save1);
-          migrateLocation(state.save2);
-          migrateLocation(state.save3);
-          version = 5;
-        }
-        if (version === 5) {
-          const migrateGrowth = (save: any) => {
-            if (!save) return;
-            const fixMonster = (m: any) => {
-              if (!m.growthRates || !m.initStats) {
-                // Generate fresh stats for existing monsters, we just keep their current level
-                // but replace their stats with properly generated ones for consistency
-                const fresh = createInstance(m.specId, m.level);
-                m.initStats = fresh.initStats;
-                m.growthRates = fresh.growthRates;
-                m.maxHp = fresh.maxHp;
-                m.hp = m.hp > m.maxHp ? fresh.maxHp : m.hp;
-                m.atk = fresh.atk;
-                m.def = fresh.def;
-                m.spAtk = fresh.spAtk;
-                m.spDef = fresh.spDef;
-                m.spd = fresh.spd;
-              }
-              return m;
-            };
-            if (Array.isArray(save.party)) save.party = save.party.map(fixMonster);
-            if (Array.isArray(save.box)) save.box = save.box.map(fixMonster);
-          };
-          migrateGrowth(state.save1);
-          migrateGrowth(state.save2);
-          migrateGrowth(state.save3);
-          version = 6;
-        }
-        if (version === 6) {
-          const dedupeMoves = (save: any) => {
-            if (!save) return;
-            const fixMonster = (m: any) => {
-              if (m.moveIds && Array.isArray(m.moveIds)) {
-                m.moveIds = Array.from(new Set(m.moveIds));
-              }
-              return m;
-            };
-            if (Array.isArray(save.party)) save.party = save.party.map(fixMonster);
-            if (Array.isArray(save.box)) save.box = save.box.map(fixMonster);
-          };
-          dedupeMoves(state.save1);
-          dedupeMoves(state.save2);
-          dedupeMoves(state.save3);
-          version = 7;
-        }
-        if (version === 7) {
-          const dedupeMoves = (save: any) => {
-            if (!save) return;
-            const fixMonster = (m: any) => {
-              if (m.moveIds && Array.isArray(m.moveIds)) {
-                m.moveIds = Array.from(new Set(m.moveIds));
-              }
-              return m;
-            };
-            if (Array.isArray(save.party)) save.party = save.party.map(fixMonster);
-            if (Array.isArray(save.box)) save.box = save.box.map(fixMonster);
-          };
-          dedupeMoves(state.save1);
-          dedupeMoves(state.save2);
-          dedupeMoves(state.save3);
-          version = 8;
-        }
-        if (version === 8) {
-          const initSeenLocations = (save: any) => {
-            if (!save || !save.collection) return;
-            Object.values(save.collection).forEach((entry: any) => {
-              if (entry.seen && !entry.seenLocations) {
-                entry.seenLocations = []; // or we could add save.visitedLocationIds if we wanted to be lenient
-              }
-            });
-            if (save.party && save.party.length > 0 && save.collection[save.party[0].specId]) {
-              save.collection[save.party[0].specId].seenLocations = ["town_starter"];
-            }
-          };
-          initSeenLocations(state.save1);
-          initSeenLocations(state.save2);
-          initSeenLocations(state.save3);
-          version = 9;
-        }
-        return state;
-      }
+      version: SCHEMA_VERSION,
+      migrate: (persistedState: any, version: number) => migrateSaveState(persistedState, version),
     }
   )
 );

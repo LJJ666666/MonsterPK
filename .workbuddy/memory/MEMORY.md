@@ -1,61 +1,55 @@
 # MEMORY.md — MonsterPK（兽域手记）项目记忆
 
-> 权威源：**本文件**。镜像：`.trae/documents/项目记忆.md`（用 `scripts/sync_memory.py` 双向同步）。
-> 每日工作日志：`.workbuddy/memory/YYYY-MM-DD.md`（追加写，不改旧内容）。
+> 权威源：**本文件**。镜像 `.trae/documents/项目记忆.md`，改完任一侧跑 `python scripts/sync_memory.py`（`--reverse` 反向 / `--check` 校验）。
+> 每日日志 `.workbuddy/memory/YYYY-MM-DD.md` 追加写、不改旧内容。`.trae/documents/` 的 PRD / 路线图 / 任务表 / bug_log / 后端规范是**产品文档**，不被本文件覆盖。
 
-## 0. 两边同步约定（2026-11-03 建立）
-- `.workbuddy/memory/MEMORY.md` 与 `.trae/documents/项目记忆.md` 内容必须逐字一致。
-- 改完任一侧后跑：`python scripts/sync_memory.py`（默认 workbuddy → trae；`--reverse` 反向；`--check` 只校验）。
-- `.trae/documents/` 里的 PRD / 技术架构 / 路线图 / bug_log 属于**产品文档**，不被本文件覆盖；代码与文档的偏差记在下面第 3 节。
-
-## 1. 项目是什么
-浏览器 + Capacitor/Android 的原创抓怪回合制 RPG 原型「兽域手记」（appId `com.monster.game`）。
-核心循环：营地 → 野外遭遇 → 回合制战斗 → 捕获 → 战后结算 → 回营地管理/图鉴。
-纯前端无后端：存档走 localStorage（zustand persist，key `beast-journal-save`）+ JSON 导入导出；
-dev/preview 另有 `/api/save` 中间件落盘 `save_data.json`（`vite.config.ts` 里的 `localSavePlugin`）。
+## 1. 项目与方向
+浏览器 + Capacitor/Android 的原创抓怪回合制 RPG 原型（`com.monster.game`）。循环：营地 → 遭遇 → 回合战斗 → 捕获 → 结算 → 营地管理/图鉴。原纯前端 localStorage；11-03 起自建 Node+TS 后端，11-04 起强制登录。
+- **北极星（11-04 拍板）**：最终 = **服务端权威 + 实时多人同玩**（WebSocket；战斗/捕获/经济服务端结算，客户端只发意图、收状态、渲染）。本地存档是过渡态，P3/P5 后去除；P0-3 自动同步是 P3 前的桥接。
+- **反作弊分级（11-05 拍板）**：测试菜单级数据（满属性/高等级/满金币）**只放行管理员账号**；他人用外挂/GG 修改器/加速器/自带 test 改数据一律拦截 + 封号弹窗 + 强制登出；**改系统时间获取资源不封号，只要求「不生效」**。P1-1b 只识别「明显改档」，勿夸大；根治在 P1-2（RNG/结算/时钟上移）与 P3（客户端无真值）。分工表见任务表 §六 / 后端规范 §13。
+- 总表 `.trae/documents/开发任务优先级_2026-11-04.md`：P0 五项 ✅ / P1-1 ✅ + P1-1b ✅ / **P1-2 ✅** / **P1-3 ✅** / **下一步 P2-1 WebSocket** / P3 服务端模拟 / P4 多人 / P5 上线去本地。
 
 ## 2. 技术栈与代码入口
-React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由：`/` 启动页、`/camp` 营地、`/arena` 训练场。
-- 内容数据源（唯一）：`src/game/data.ts` — MOVE_SPECS、ITEM_SPECS、MONSTER_SPECS（40 只）、STARTERS、THEME_TABLE、LOCATIONS（7 城镇）
-- 规则引擎：`src/game/rules.ts` — 18 属性克制表、伤害/暴击/多段、异常状态、捕获率、升级、进化重算、`getMoveMaxPP`（技能 PP 分档）、`initPP`（战斗内 PP 初始化）
-- 挂机：`src/game/idle.ts` — 离线结算金币/捕获器（8h 封顶、捕获器按区域难度 Lv10/Lv20 解锁）；首通记录 `SaveData.clearedAreas`，打赢即写入
-- 遭遇生成：`src/game/gen.ts` — 稀有 8% / 精英 12%，等级带 clamp 1~30
-- 全局状态：`src/stores/useGameStore.ts`（1010 行，最核心）— 3 存档槽；`SAVE_VERSION="0.1.0"`；persist `version=9`，migrate 链 1→9
-- 页面：`src/pages/Start.tsx`（多槽位+导入导出）、`Camp.tsx`（5 Tab）、`Arena.tsx`（战斗/捕获）
-- 弹窗：`MechanicsModal` / `MoveChartModal` / `MoveLearnerModal` / `EvolutionModal` / `TypeChartModal`
+React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` 首页、`/camp` 营地、`/arena` 训练场、`/auth` 登录（守卫 `App.tsx`）。
+- 内容唯一源 `src/game/data.ts`（40 幻兽 / 22 道具 / 7 城镇 / 18 属性）；规则 `rules.ts`（伤害/异常/捕获/升级/进化/PP）；挂机 `idle.ts`（8h 封顶）；遭遇 `gen.ts`。
+- 全局状态 `src/stores/useGameStore.ts`（最核心）：3 槽；persist `version` 由 `saveVersion.ts` 的 `SCHEMA_VERSION`(=10) 单一真源派生，migrate 1→10。**BattleState 不进存档**。
+- 页面 `Start.tsx`（账号条 + 管理员标识 + 同步状态行）、`Auth.tsx`、`Camp.tsx`（5 Tab，测试菜单仅管理员可见）、`Arena.tsx`；弹窗 `MechanicsModal` / `MoveChartModal` / `MoveLearnerModal` / `EvolutionModal` / `TypeChartModal`。
+- 同步链路 `lib/sync.ts`（`attemptUpload`/`commitIntent`/`getSyncDiagnostics`）、`syncPolicy.ts`、`syncErrors.ts`（4xx 除 429 判永久失败）、`api.ts`（401→`mpk:unauthorized`、403 封号→`mpk:banned`）、`intents.ts`、`rebase.ts`、`auth.ts`、`admin.ts`（`useIsAdmin()` 仅 UI 收敛，**不是安全边界**）。`App.tsx` 全局组件：`<UnauthorizedListener/>`、`<BanGate/>`、`<SyncBootstrap/>`。
+- **测试边界**：前端 vitest 只收 `src/**/*.test.{ts,tsx}`（`vite.config.ts` 的 `test.include`）；后端 `node:test` 独立在 `backend/tests/`。两套框架不能混跑（bug_log §13）。
 
-## 3. 文档与代码偏差（2026-11-03 与 2fc7439 同步后）
-- 路线图 `.trae/documents/开发路线图_roadmap.md` 已整体更新到与代码一致（含 PP/挂机、世界地图、5 Tab、3 存档槽、克制卡片、测试菜单），并保留「文档与代码一致性核对」表。
-- **远端已落地、本次 pull 验证为真的系统**：技能 PP（`getMoveMaxPP` 按威力分档、`BattleState.ppByMonster` 战斗内消耗、敌我均扣减、归零禁用）、首通记录 `SaveData.clearedAreas`、远征挂机（`idle.ts` + `startIdle`/`settleIdle`，8h 封顶、捕获器按区域难度解锁）。这三者是 `2fc7439` 提交新增。
-- **仍真实存在的待修缺口**（已登记进路线图「已知遗留缺口」）：
-  - 道具进化全链路未打通：`useItemOutsideBattle` 只处理 `kind==="heal"`，进化石（已在商店卖）买了用不了。
-  - 关键道具无效：`amulet_coin`（金钱翻倍）、`exp_share`（经验分享）已售卖但无任何效果代码。
-  - 捕获率仅按概率分 3 档摇晃，未计稀有度/等级差。
-  - `SAVE_VERSION="0.1.0"` 与 persist `version=9` 已脱钩（见第 4 节）。
-- 已删：空壳 `src/pages/Home.tsx`（2026-11-03）。
+## 3. 改代码前必读的硬约束
+- **新增持久化字段 → 递增 `SCHEMA_VERSION`（= persist `version`）并补 migrate 分支**，老存档必须能玩；后端 `EXPECTED_SAVE_VERSION`(=10) 必须同步改，否则新档全被拒。
+- `data.ts` 是大对象字面量，漏 `};` 会让后续 `export` 落进对象内部 → `Unexpected keyword 'export'`。改完立刻 `npm run check`。
+- 禁用 `crypto.randomUUID()`（旧 WebView 没有），统一 `rules.ts` 的 `uuid()`。所有 Hook 必须在组件顶层。
+- 移动端优先：弹窗小 `max-w` + `overflow-auto` + `max-h`；禁止大表格横向滚动；375px 实测 `scrollWidth`。
+- `strict:false` / `noUnusedLocals:false` —— tsc 很宽松，别指望它兜逻辑。
+- **服务端权威原则**：客户端上报的存档/战报/数值/意图，服务端必须校验；关键 RNG、结算、时钟逐步上移服务端。
+- 前端设计先读 `.impeccable.md`（复古像素 / 野外手记；`--bg #0b1020`、`--accent #f6c24b`、Press Start 2P；内联 SVG、零 CDN）。Capacitor 打包见 `apk_build_guide.md`。
 
-## 4. 改代码前必读的硬约束
-- **新增持久化字段 → 递增 `SAVE_VERSION` 且递增 persist `version` 并补 `migrate` 分支**，老存档必须还能玩（bug_log 第 3 条就是这个坑）。
-- `data.ts` 是大对象字面量，漏写 `};` 会让后面的 `export` 落进对象内部 → 报 `Unexpected keyword 'export'`。改完立刻 `npm run check`（= `tsc -b --noEmit`）。
-- 禁用 `crypto.randomUUID()`（旧 WebView 没有），统一用 `rules.ts` 的 `uuid()`。
-- 所有 Hook 必须在组件顶层，渲染函数（如 `renderDex`）里不能再 `useState`。
-- 移动端优先：弹窗需小 `max-w` + `overflow-auto` + `max-h`；禁止大表格横向滚动。
-- 打包：Capacitor + 云端 Android SDK 全流程见 `apk_build_guide.md`。
+## 4. 运行命令与环境
+- 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**关机/会话交接后后台服务不会自动恢复**，新会话先 curl 探活（5173 / 3001）再重启。
+- 校验：前端 `check` / `build`（597 KB / gzip 141 KB）/ `test`（**27**）；后端 `check` / `test`（**76**）/ `e2e`（**57** `E2E_OK`）/ `e2e:p12`（**38** `E2E_P12_OK`，连跑 3 次稳定）；headless 375px **10/10**（`.vtmp/p12_ui_smoke.mjs`）。E2E 需服务已起；**涉及服务端 RNG 的用例必须重复跑**，单次全绿不代表覆盖成功/失败两条分支（bug_log §17）。
+- **账号管理**：`cd backend && npm run admin -- grant <用户名>` / `revoke` / `ban` / `unban` / `list` / `audit`。⚠️ 不授权就用测试菜单会被风控封号。**绝不写死固定用户名**。
+- 本机 `E:\Six\MonsterPK`（NTFS）；remote `https://github.com/LJJ666666/MonsterPK.git`；node v22.22.2 / npm 10.9.7；生产 `sourcemap:'hidden'`，`vite-plugin-trae-solo-badge` 仅 prod。dev/preview 的 `/api/save` 无 `save_data.json` 返回 404 属正常。
+- 新机重建后端：`cp .env.example .env`（换 JWT_SECRET）→ `npx prisma migrate deploy` → `npx prisma generate` → `npm run dev`。`.env` 与 `dev.db` 已 gitignore。改 Prisma schema 前先停 :3001（Windows DLL 文件锁，bug_log §12）。
 
-## 5. 运行命令（2026-11-03 实测通过）
-- 装依赖：`npm install`（已装，368 包）
-- 起服务：`npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`（固定 5173，别换端口）
-- 校验：`npm run check`（tsc）/ `npm run build`（vite build，约 5s，产物 542 KB JS）/ `npm test`（vitest，3 个用例全过）
-- `strict: false`、`noUnusedLocals: false` —— 类型检查很宽松，别指望 tsc 兜住所有问题。
+## 5. 后端架构与风控现状（独立 `backend/`）
+- 栈：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + SQLite + bcryptjs + zod + tsx。
+- 模型：`User`(username 唯一, bcrypt hash, `role`/`bannedAt`/`banReason`) + `Save`(userId+slot 复合唯一, data 文本, `schemaVersion`, `clientId`, `updatedAt`, **`authority`**, 3 槽) + `BanRecord` + **`IntentLog`**(userId+slot+nonce 唯一索引防重放)。迁移链 `..._init` → `..._add_save_meta` → `20261105101951_add_account_moderation` → `20261106073502_add_authority_and_intent_log`。
+- API：`POST /api/auth/register|login`（JWT，已封号 403）、`GET /api/auth/me`（`isAdmin`/`banned`）、`GET|PUT /api/save?slot=1|2|3`、**`POST /api/actions/:type`**、`GET /api/health`。守卫实时查封号 → `403 ACCOUNT_BANNED`；CORS 放行 5173。
+- **存档三层（P1-1/P1-1b）**：`saveValidator.ts`（hard/soft/stats，结构+数值契约，刻意不硬编码内容白名单，ID 真值留 P3）→ `antiCheat.ts`（`decideSaveAction` → allow/reject/ban，`CHEAT_CODES` 白名单防误封：格式/旧档/版本错配只 400 不封号，管理员放行改档但坏结构仍拒）→ `serverClock.ts`（未来时间戳钳制为服务端时间，改时间不生效、不封号）。日志 `save_rejected`/`save_banned`/`admin_override`/`save_clock_clamped`。
+- **权威裁决（P1-2 路线 A）**：意图带 nonce → 服务端落可信基线、掷 RNG/用服务端时钟/查价格表 → 登记 `authority.pending` → 客户端应用结果后 `commitIntent()` 立即 PUT 带 `intentNonce` → 服务端精确核对增量（不符 400，**不封号**）。`PUT /api/save` 三分支：rebase / intentNonce / 普通单调比对（资源不得更富）。意图类型 `idle_start|claim|cancel`、`capture`、`battle_reward`、`shop_buy`、`admin_test`。模块 `lib/authority.ts`、`lib/settlements.ts`、`modules/actions.ts`。**完整机制见任务表 §七 / 后端规范 §14**。
+- **云同步（P0-3 桥接）**：`syncOnLogin` 冲突恢复 + `SyncBootstrap` 1.5s 防抖整包 PUT + 离线队列；被拒档不入队。**契约**：客户端不能再整包把资源改高；旧 E2E 已改独立账号基线（bug_log §15）。
+- **能力边界**：已挡改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/伪造 rebase/普通账号调测试菜单；**未挡** GG 改内存、加速器、战斗中间态 HP/PP、`captureRate` ID 真值（只钳 0.62 上界）——根治在 P3。管理员只在服务端判定（`User.role='admin'` 或 `.env` 的 `ADMIN_USERNAMES`）；封号事务写 `BanRecord` + `User.bannedAt`。服务端价格/挂机参数在 `settlements.ts`，改 `data.ts`/`idle.ts` 时两处同步。
 
-## 6. 本机环境事实
-- 项目目录 `E:\Six\MonsterPK`（NTFS，安全，非 U 盘）；git remote `https://github.com/LJJ666666/MonsterPK.git`。
-- 本地 master = `2fc7439 加入技能 PP 与远征挂机系统`（base `65c2ac6` 初始化 + 远端 1 提交）；2026-11-03 用 `git pull --ff-only` 拉取，无冲突（roadmap 冲突已手动合并）。
-- `node_modules` 已装（368 包）；dev server 跑在 `http://localhost:5173`（background 任务 9EoK2s，HMR 已加载新代码）。
-- 生产构建带 `sourcemap: 'hidden'`；`vite-plugin-trae-solo-badge` 仅 prod 注入右下角标。
-- dev/preview 的 `/api/save`：无 `save_data.json` 时返回 404，属正常，store 会回退到 localStorage。
+## 6. 已修的坑（详见 `.trae/documents/bug_log.md`）
+- `tsconfig.json` 的 `ignoreDeprecations:"6.0"` 是 TS 5.8 非法值（TS5103），已删；`rules.ts::createInstance` 残留 `console.log`、空壳 `Home.tsx` 已删。
+- 关机后后台任务报 `exit 4` / `-1073741502`(0xC0000142) 是**进程被宿主回收**，非代码崩溃，重开会话重启即可。
+- **`lib/env.ts` 的 `.env` 路径曾算错**（`../.env` → 不存在的 `backend/src/.env`），导致 `JWT_SECRET` 长期回落硬编码默认密钥、`ADMIN_USERNAMES` 读不到（严重安全缺陷）。11-05 改 `../../.env` 并实测生效；旧 token 因签名变化失效。**改配置相关代码必须实测 `process.env.XXX` 有值。**
+- §10 useNavigate 在 Router 外调用白屏 / §11 vitest EPERM / §12 Prisma DLL 锁 / §13 两套测试框架混跑 / §14 上述 `.env` 路径 / §15 P1-2 后旧 E2E 契约冲突 / §16 E2E 用户名超长 401 / §17 捕获成功新增幻兽被增量核对误拦（RNG 偶发假绿）。
 
-## 7. 已修的坑（改前都是拦路虎）
-- **`tsconfig.json` 的 `ignoreDeprecations: "6.0"` 是 TS 5.8 的非法值**（TS5103），会让 `npm run check` 与 `npm run build` 直接失败。已于 2026-11-03 删除该行。
-- `rules.ts::createInstance` 残留的调试 `console.log` 已删除。
-- 未被任何路由引用的空壳 `src/pages/Home.tsx` 已删除。
+## 7. 进度与遗留
+- **已闭环**：JWT 无 `exp` → P0-4；`Save.data` 不校验结构/版本 → P0-2；`SAVE_VERSION` 与 persist version 脱钩 → P0-1；服务端只认结构不认数值 → P1-1；4xx 被拒档无限重传 → P1-1；测试菜单越界数据一律放行 → P1-1b。
+- **P1-2 ✅ / P1-3 ✅（11-06，路线 A、a~d 全做；P1-3 拆开嵌入对应步骤，不真并行）**：RNG/结算/时钟上移，nonce 防重放，改系统时间不生效且不封号；捕获率补稀有度/等级差、`amulet_coin` 翻倍、`exp_share` 全队经验、进化石可用。证据：后端 76/76、E2E 57/57 + 38/38、前端 27/27 + build、headless 10/10。**内容缺口**：只有 `spark_mouse` 配了 `stone_thunder` 道具进化，其余三种进化石暂无目标。
+- **下一步 P2-1 WebSocket 接入与鉴权**：服务端已能裁决但仍是 REST，撑不起实时同屏；先通道后在线权威态（P2-2），P3 才能把战斗模拟整体搬上服务端。
+- **未提交**：整个 `backend/` + 前端联网改造 + P1-1/P1-1b/P1-2/P1-3 + 任务表/规范/记忆均在工作树未 commit（上次推送停在 `703fe1b`）。杰哥 11-06 确认「只是测试、数据没了就没了」，**未建 commit**；`dev.db`/`.env` 本就不入库。外部推送需杰哥确认后再做。

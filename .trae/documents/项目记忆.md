@@ -66,5 +66,5 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **P3-2 ✅（11-07）**：治疗/战斗外道具/进化/学招/队伍整理/移动/新档全部改由服务端判定并 `commitState(source='action')` 写档（纯逻辑 `game/mutations.ts` 35 例单测），前端删光本地写档代码；补 HP/状态回归校验、全灭惩罚上移、内容双源收口。**下一步 P4 多人**（前置：整包 PUT 加 revision）。
 - **11-07 测试体系固化 ✅**：`e2e:hardening` 114 项八分区自清理、`numericRules.test.ts` 31 项、`verify` 一条命令。详见规范 §18。
 - **11-07 两项缺陷已修 ✅**：①**个体值**——`initMin` 硬编码与内容表上限反向（144 项），进化时 `remapByBounds` 把个体差异清零；改 `initMin=种族值`、`initMax=max(initStatsMax, base+4)`。②**money**——`MONEY` 混装格式错与越界且在白名单，改 `_FORMAT`（400）/`_RANGE`（封号）拆分。见 bug_log §21/§22。
-- **Git**：`fe159eb`→`bb04998`→`2f2c8b7`→`bbb1853`→`4acbd53`→`61a37c9`→`fd6d36b`→ 本轮 P3-2（顺序即 P0~P3-2），均已推送。回滚点 `git tag -l 'rollback-*'`（pre/post 成对，均在远端）。`dev.db`/`.env` 已 gitignore。
+- **Git**：`fe159eb`→`bb04998`→`2f2c8b7`→`bbb1853`→`4acbd53`→`61a37c9`→`fd6d36b`→`04a35a8`（P3-2，顺序即 P0~P3-2），均已推送。回滚点 `git tag -l 'rollback-*'`（pre/post 成对，均在远端）。`dev.db`/`.env` 已 gitignore。
 - **回家交接**：`HANDOFF.md`（已入库）含 clone / 环境重建 / 记忆恢复 / 话术 / 验收 / 坑；配套 `check_home_env.py`、`doc_check.py`。11-07 已按手册重建环境并 `ENV_CHECK_OK`。

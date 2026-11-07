@@ -63,6 +63,51 @@ export type RoomView = {
   quota: { key: string; state: "held" | "committed" | "released" } | null;
   endReason: string | null;
   updatedAt: number;
+  /** P4-2d：1v1 战斗视图（仅 pvp 模式有值，按接收者裁剪）。 */
+  pvp: PvpView | null;
+};
+
+/** P4-2d：1v1 战斗的只读视图（服务端按接收者裁剪）。 */
+export type PvpView = {
+  turn: number;
+  finished: boolean;
+  winnerUserId: string | null;
+  winnerIsSelf: boolean;
+  fledUserId: string | null;
+  log: string[];
+  self: {
+    userId: string;
+    activeIndex: number;
+    party: PvpMonster[];
+    ppByMonster: Record<string, Record<string, number>>;
+  };
+  foe: {
+    userId: string;
+    activeIndex: number;
+    party: PvpFoeMonster[];
+  };
+};
+
+export type PvpMonster = {
+  id: string;
+  specId: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  status: string;
+  moveIds: string[];
+  element: string;
+};
+
+export type PvpFoeMonster = {
+  specId: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  status: string;
+  isShiny: boolean;
+  alive: boolean;
+  inField: boolean;
 };
 
 /** 与 wild.state 一样是下行全量快照；上行没有 room.state 类型。 */

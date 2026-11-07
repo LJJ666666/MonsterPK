@@ -15,6 +15,9 @@ import {
   type RoomResult, type RoomSeat, type RoomState, type RoomView, type RoomSeatView,
   RandomAutopilotPolicy, roomConfigFor,
 } from './roomTypes';
+import {
+  applyPvpTurn, encodePvpIntent, parsePvpIntent, pickPvpIntent, pvpViewFor, type PvpState,
+} from '../game/pvp';
 
 /** 可替换存储：换 Redis / Postgres 时实现这 7 个同步语义的适配即可。 */
 export interface RoomStorage {
@@ -70,7 +73,7 @@ const INTENT_MAX_LEN = 64;
 
 function validIntent(intent: unknown): intent is string {
   return typeof intent === 'string' && intent.length > 0 && intent.length <= INTENT_MAX_LEN
-    && /^[A-Za-z0-9_\-]+$/.test(intent);
+    && /^[A-Za-z0-9_:\-]+$/.test(intent);
 }
 
 /** quota key 允许冒号分段（如 `boss:daily:2026-11-07`），但仍是纯字符、限长，只作内存 Map 键。 */
@@ -95,6 +98,22 @@ export class RoomRegistry {
   config(mode: RoomMode): RoomConfig { return this.configFor(mode); }
 
   get(roomId: string): RoomState | undefined { return this.storage.get(roomId); }
+
+  /**
+   * P4-2d：把 1v1 战斗态挂到房间上（双方 join 完成后由路由层调用）。
+   * 只接受「房间已 active 且尚无 pvp 态」的状态；挂上后 bump 一次让客户端拿到新快照。
+   */
+  attachPvp(roomId: string, pvp: PvpState, now: number): RoomResult<RoomState> {
+    const room = this.storage.get(roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.pvp) return fail('PVP_ALREADY_STARTED', '对战已经开始');
+    if (room.status !== 'active') return fail('ROOM_CLOSED', '房间尚未开局');
+    room.pvp = pvp;
+    // 双方交齐的回合从这刻开始计时。
+    room.deadlineAt = now + this.configFor(room.mode).roundTimeoutMs;
+    this.bump(room, now);
+    return ok(room);
+  }
 
   /** 找该用户所在的所有房间（resync / 广播用）。 */
   listForUser(userId: string): RoomState[] {
@@ -139,6 +158,8 @@ export class RoomRegistry {
       quota: room.quota ? { key: room.quota.key, state: room.quota.state } : null,
       endReason: room.endReason,
       updatedAt: room.updatedAt,
+      // P4-2d：按接收者裁剪 1v1 战斗视图（仅 pvp 房间有值）。
+      pvp: room.pvp ? pvpViewFor(room.pvp, viewerUserId) : null,
     };
   }
 
@@ -176,6 +197,8 @@ export class RoomRegistry {
     quotaLimit?: number;
     now: number;
     roomId?: string;
+    /** P4-2d：1v1 战斗态（仅 pvp 模式由路由层生成后传入）。 */
+    pvp?: PvpState;
   }): RoomResult<RoomState> {
     if (!params.owner?.userId || !params.owner.tokenDigest) {
       return fail('ROOM_BAD_MEMBER', '成员身份不完整');
@@ -213,11 +236,13 @@ export class RoomRegistry {
       turn: 1,
       deadlineAt: 0,
       submitted: [],
+      turnIntents: [],
       lastAction: null,
       quota: key === undefined ? null : { key, state: 'held' },
       allOfflineSince: seat.online ? null : params.now,
       seenNonces: [],
       endReason: null,
+      pvp: params.pvp ?? null,
     };
     // 满 1 人即开局的场景（单人 Boss 预留）：b 阶段固定 2 人，故 forming。
     if (cfg.maxSeats <= 1) this.start(room, params.now, cfg);
@@ -377,6 +402,7 @@ export class RoomRegistry {
     room.seenNonces.push(params.nonce);
     if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
     room.submitted.push(seat.seat);
+    room.turnIntents.push({ seat: seat.seat, intent: params.intent });
     room.lastAction = { seat: seat.seat, intent: params.intent, kind: 'manual', at: params.now };
     let advanced = false;
     if (room.submitted.length >= room.seats.length) {
@@ -387,9 +413,33 @@ export class RoomRegistry {
     return ok({ room, advanced });
   }
 
+  /**
+   * 推进回合：清空本回合提交，turn+1。
+   * P4-2d：若房间带 1v1 战斗态，先按双方意图结算一回合（可能分出胜负 → settled）。
+   */
   private advanceTurn(room: RoomState, now: number, cfg: RoomConfig): void {
+    if (room.pvp && !room.pvp.finished) {
+      const rng = Math.random;
+      const actions = room.turnIntents
+        .map((t) => ({ seat: t.seat, intent: parsePvpIntent(t.intent) }))
+        .filter((a): a is { seat: number; intent: NonNullable<ReturnType<typeof parsePvpIntent>> } => a.intent !== null);
+      // 有意图才能推进；超时代放的座位已在 tick 里补过意图。
+      if (actions.length > 0) {
+        const res = applyPvpTurn(room.pvp, actions, rng);
+        if ('value' in res) {
+          room.pvp = res.value;
+          if (res.value.finished) {
+            room.status = 'settled';
+            room.endReason = 'pvp_finished';
+            room.deadlineAt = 0;
+            this.finishQuota(room, true);
+          }
+        }
+      }
+    }
     room.turn += 1;
     room.submitted = [];
+    room.turnIntents = [];
     room.deadlineAt = now + cfg.roundTimeoutMs;
   }
 
@@ -430,9 +480,17 @@ export class RoomRegistry {
     rng: Rng,
     report: TickReport,
   ): void {
-    const intent = this.policy.pick({ roomId: room.roomId, seat: seat.seat, turn: room.turn }, rng);
+    let intent: string | null;
+    // P4-2d：pvp 房间代放要生成合法战斗意图（从有 PP 的技能里随机挑 / 逃跑）。
+    if (room.pvp && !room.pvp.finished) {
+      const picked = pickPvpIntent(room.pvp, seat.seat, rng);
+      intent = picked === null ? null : encodePvpIntent(picked);
+    } else {
+      intent = this.policy.pick({ roomId: room.roomId, seat: seat.seat, turn: room.turn }, rng);
+    }
     if (!intent) return;
     room.submitted.push(seat.seat);
+    room.turnIntents.push({ seat: seat.seat, intent });
     room.lastAction = { seat: seat.seat, intent, kind, at: now };
     if (kind === 'autopilot') report.autopiloted += 1;
     else report.timedOut += 1;

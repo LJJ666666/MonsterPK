@@ -1324,3 +1324,74 @@ if (s.bossId) { s.rewards = null; pushLog(s, '讨伐完成，本次伤害已记�
 - 剧情解锁 Boss 门槛是 `unlockAreaId` 预留字段，**未实装判定**（F09）。
 - 前端只有「讨伐」入口弹窗 + 战斗页伤害条，不参与任何裁决。
 
+## 26. P4-2d 玩家对战 1v1（2026-11-07）
+
+### 26.1 归属：1v1 不新增状态域
+
+1v1 战斗态**挂房间态**（`RoomState.pvp`），不另起一套回合同步机制。原因是 P4-2b
+已经把「掉线 / 超时 / 托管 / 座位 / quota / 广播」做成了房间层通用能力，1v1 只填
+「双方意图仲裁 + 战斗结算」，复用 `submitIntent` / `advanceTurn` / `tick` / `autoSubmit`。
+
+- 写个人档仍是 `commitState()`（唯一入口）；1v1 结算写**双方档各一次**，各自 CAS / revision，
+  互不覆盖。
+- 战斗态的串行化键 = `withRoomLock(roomId)`；`pvp/create` 用 `withSlotLock(slot)` →
+  `withRoomLock(roomId)` 的固定锁顺序，避免与结算路径死锁。
+
+### 26.2 双方镜像战斗态（`game/pvp.ts`）
+
+与单人战斗 `BattleState`（玩家 vs 服务端 AI）的关键差异：1v1 双方都是玩家，各自的
+「敌人」就是对方 active 幻兽，因此 `PvpState` 需要两侧镜像 `sides: [PvpSide, PvpSide]`。
+
+- `createPvpState()`：从双方存档镜像化队伍 + 建立 PP + 活体校验。
+- `applyPvpTurn(state, actions, rng)`：按优先度 / 速度决定先手 → `applySideAction` 双方结算 →
+  回合末伤害 → 自动换人 → 判定胜负。**复用 `rules.ts` 的 `executeMoveAction` / `computeDamage` /
+  `getSpeed` / `canMove` / `alive` / `findFirstAliveIndex` / `pickUsableMove` / `processEndOfTurn`**，
+  不重写战斗公式。RNG 注入可单测复现，生产用 `Math.random`。
+- 定位 side 用 `seatOf(side)`（`userId` 比较），**不能用 `sides.indexOf(side)`**：
+  `applySideAction` 会复制 side（`{...side}`），对象引用失效后 `indexOf` 返回 -1，
+  会把结果写到 `sides[-1]`（bug_log §31.2）。
+
+### 26.3 意图编码与回合推进点
+
+pvp 意图编码为 `move:<moveId>` / `switch:<0..5>` / `flee` 字符串（`encodePvpIntent` /
+`parsePvpIntent` 互为逆运算）。为了保持房间内核 intent 协议兼容，`validIntent` 正则从
+`^[A-Za-z0-9_\-]+$` 放宽为 `^[A-Za-z0-9_:\-]+$`（只加冒号），不破坏既有 kernel E2E。
+
+回合推进点 = 房间内核的 `advanceTurn`：`submitIntent` 双方交齐 → 收集 `turnIntents` →
+`applyPvpTurn` 结算一回合；超时代放走 `tick` → `autoSubmit` → `pickPvpIntent`（复用
+`pickUsableMove` 随机挑可用技能）。
+
+### 26.4 按接收者裁剪的 pvp 视图
+
+`pvpViewFor(state, viewerUserId)`：己方完整队伍（含 moveIds / 六维 / PP），对方仅 active
+公开信息（specId / hp / status）。**不泄露对方未上场成员与技能 PP**。`RoomView.pvp`
+只在 pvp 模式有值。
+
+### 26.5 结算触发时机与幂等
+
+pvp 分出胜负既可能发生在 `submitIntent`（双方手动交齐），也可能发生在 `tick`（超时代放），
+所以 `maybeSettlePvp` 在 `applyRoomIntent` / `tickRoom` / `sweepRooms` 三处调用。判定靠
+`pvpSettled` 标记 + `settlePvpRoom` 幂等，`attachPvp` 拒绝重复挂载。
+
+结算只回写队伍 HP / 异常，**不产经验 / 金钱 / 捕获**（奖励与排位分归台账 F02 / F15）。
+
+### 26.6 接口与伪上报
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/pvp/create` | `{ slot }`，房主创建 1v1 房间（仅建房） |
+| POST | `/api/pvp/:roomId/join` | `{ slot }`，对手加入，满员 active 时读双方存档生成 `PvpState` 并 `attachPvp` |
+
+- 请求体出现 `winner` / `hp` / `damage` / `fled` 等真值字段 → **400 `PVP_INPUT_FORBIDDEN`**。
+- 进房必须有在线 WS（`ROOM_WS_REQUIRED` 409，复用 P4-2b）；无队伍 404 `PVP_NO_PARTY`。
+- 越权 `roomId` 一律 404；满员 join 409（`ROOM_FULL` / `ROOM_CLOSED`）。
+
+### 26.7 边界
+
+- **不改 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**，不加 Prisma 迁移（1v1 不写个人档新字段，
+  战斗态是内存态、挂在房间上）。
+- 循环依赖规避：`room.ts` → `pvp.ts`（`publishRoom`）与 `pvp.ts` → `room.ts`（`settlePvpRoom`
+  调用方）会成环，故 `room.ts` 里用动态 `import('./pvp')` 触发结算。
+- 无排位分、无观战、无 2v2、无跨服匹配（F15）。
+
+

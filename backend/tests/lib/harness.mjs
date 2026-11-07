@@ -234,7 +234,7 @@ export async function forgeToken(payload, { expiresInMs = 3_600_000 } = {}) {
  * @param {string[]} prefixes
  * @param {{dryRun?: boolean}} opts
  */
-export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_', 'p42c_'], opts = {}) {
+export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_', 'p42c_', 'p42d_'], opts = {}) {
   loadBackendEnv();
   const { PrismaClient } = await import('@prisma/client');
   const prisma = new PrismaClient();

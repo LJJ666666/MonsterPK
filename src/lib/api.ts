@@ -178,6 +178,20 @@ export const api = {
   bossRank: (bossId: string, limit = 20) =>
     request(`/api/boss/${encodeURIComponent(bossId)}/rank?limit=${limit}`),
 
+  // ───────────────────── P4-2d 玩家对战 1v1（双方意图由服务端裁决）─────────────────────
+  /** 房主创建 1v1 房间：只传 slot，队伍 / 胜负 / HP 全在服务端。 */
+  pvpCreate: (body: { slot: number }) =>
+    request("/api/pvp/create", { method: "POST", body: JSON.stringify(body) }),
+  /** 对手加入 1v1 房间：只传 roomId + slot，双方队伍由服务端读取。 */
+  pvpJoin: (roomId: string, body: { slot: number }) =>
+    request(`/api/pvp/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify(body) }),
+  /** 提交一个回合意图（1v1 用 move:tackle / switch:1 / flee），服务端双方交齐后推进。 */
+  roomAction: (roomId: string, intent: string, nonce: string) =>
+    request(`/api/room/${encodeURIComponent(roomId)}/action`, {
+      method: "POST",
+      body: JSON.stringify({ intent, nonce }),
+    }),
+
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**
    * 治疗 / 战斗外道具 / 进化 / 学招 / 队伍整理 / 移动。

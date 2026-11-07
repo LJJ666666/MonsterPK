@@ -222,6 +222,10 @@ function validRoomId(v: unknown): string | undefined {
 function validTokenField(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 && v.length <= 64 && TOKEN_FIELD_PATTERN.test(v) ? v : undefined;
 }
+/** P4-2d：pvp 回合意图允许冒号（move:tackle / switch:1），nonce 仍用严格字段。 */
+function validIntentField(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[A-Za-z0-9_:\-]+$/.test(v) ? v : undefined;
+}
 
 /** 解析并校验客户端消息：长度 → JSON → 形状 → 白名单类型，四层都拒绝未知输入。 */
 export function parseClientMessage(
@@ -265,7 +269,7 @@ export function parseClientMessage(
       return { ok: false, code: 'BAD_SHAPE', reason: '房间意图格式不正确' };
     }
     const action = obj.action as 'intent' | 'autopilot_on' | 'autopilot_off';
-    const intent = validTokenField(obj.intent);
+    const intent = validIntentField(obj.intent);
     if (action === 'intent' && intent === undefined) {
       return { ok: false, code: 'BAD_SHAPE', reason: '缺少回合意图' };
     }

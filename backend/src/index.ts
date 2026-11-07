@@ -13,6 +13,7 @@ import { wildRoutes } from './modules/wild';
 import { rankRoutes, rankStats } from './modules/rank';
 import { roomRoutes, roomStats } from './modules/room';
 import { bossRoutes, bossHealthStats } from './modules/boss';
+import { pvpRoutes } from './modules/pvp';
 import { contentStats } from './game/content';
 import { getSessionStats, battles, wilds } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
@@ -94,6 +95,7 @@ fastify.register(wildRoutes);
 fastify.register(rankRoutes);
 fastify.register(roomRoutes);
 fastify.register(bossRoutes);
+fastify.register(pvpRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 registerRealtime(fastify);

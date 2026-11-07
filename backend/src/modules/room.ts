@@ -97,6 +97,7 @@ export function tickRoom(roomId: string, now = Date.now()): void {
   const report = emptyReport();
   rooms.tick(roomId, now, Math.random, report);
   if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
+    maybeSettlePvp(roomId);
     publishRoom(roomId);
   }
 }
@@ -105,9 +106,25 @@ export function tickRoom(roomId: string, now = Date.now()): void {
 export function sweepRooms(now = Date.now()): TickReport {
   const report = rooms.sweep(now, Math.random);
   for (const id of new Set([...report.changedRoomIds, ...report.abandoned])) {
+    maybeSettlePvp(id);
     publishRoom(id);
   }
   return report;
+}
+
+/**
+ * P4-2d：房间刚分出胜负（pvp 结束 → settled）时，触发写双方档。
+ * 动态 import 避免 room ↔ pvp 模块顶层循环依赖；幂等由 room.pvpSettled 标记保证。
+ */
+function maybeSettlePvp(roomId: string): void {
+  const room = rooms.get(roomId);
+  if (!room || !room.pvp || !room.pvp.finished || room.pvpSettled) return;
+  room.pvpSettled = true;
+  void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(() => {
+    // 结算失败不阻断广播；下次心跳 / 意图提交会重试（pvpSettled 已置位，这里回滚以允许重试）。
+    const r = rooms.get(roomId);
+    if (r) r.pvpSettled = false;
+  });
 }
 
 export function roomStats() {
@@ -200,6 +217,7 @@ export async function applyRoomIntent(params: {
       now: params.now ?? Date.now(),
     });
     if ('code' in res) return fail(res.code, res.reason);
+    maybeSettlePvp(params.roomId);
     publishRoom(res.value.room);
     return { ok: true, value: rooms.view(res.value.room, params.userId) };
   });
@@ -273,7 +291,8 @@ const createSchema = z.object({
 
 const joinSchema = z.object({}).strip();
 const intentSchema = z.object({
-  intent: z.string().min(1).max(64).regex(/^[A-Za-z0-9_\-]+$/),
+  // P4-2d：pvp 意图带冒号（move:tackle / switch:1 / flee）。
+  intent: z.string().min(1).max(64).regex(/^[A-Za-z0-9_:\-]+$/),
   nonce: z.string().min(1).max(64).regex(/^[A-Za-z0-9_\-]+$/),
 }).strip();
 const autopilotSchema = z.object({

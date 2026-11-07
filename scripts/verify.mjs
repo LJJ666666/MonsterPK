@@ -60,12 +60,15 @@ const STAGES = [
   { id: 'e2e:p42b', name: 'E2E 房间内核（P4-2b）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42b'], need: 'backend', timeout: 300_000 },
   // P4-2c：单人 Boss 讨伐 + 伤害榜 E2E（伤害只认服务端结算、次数按账号、榜只读）。
   { id: 'e2e:p42c', name: 'E2E 单人 Boss 讨伐（P4-2c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42c'], need: 'backend', timeout: 300_000 },
+  // P4-2d：1v1 玩家对战 E2E（双方意图服务端裁决、结算写双方档各一次）。
+  { id: 'e2e:p42d', name: 'E2E 1v1 玩家对战（P4-2d）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42d'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p41', name: '375px 共享野怪 UI（P4-1）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p41.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p42a', name: '375px 只读派生榜 UI（P4-2a）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42a.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p42c', name: '375px 讨伐 UI（P4-2c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42c.mjs'], need: 'both', timeout: 300_000 },
+  { id: 'smoke:p42d', name: '375px 1v1 对战 UI（P4-2d）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42d.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -74,8 +77,8 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d'],
   docs: ['docs:doc', 'docs:memory'],
 };
 

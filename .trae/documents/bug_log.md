@@ -725,3 +725,47 @@ Boss 在途名额必须在战斗态 TTL 过期时释放，但 `BattleRegistry.sw
 3. **`BOSS_DAILY_LIMIT` env 只能下调**：`Math.min(内容表, env)`。
    如果做成 env 优先，一次配错就能把限次 Boss 变成无限刷。
 
+## 31. P4-2d 玩家对战 1v1 的坑（2026-11-07）
+
+### 31.1 pvp 意图里的冒号被房间内核 intent 正则拒了
+
+房间内核 `validIntent` 原正则 `^[A-Za-z0-9_\-]+$` 只放行字母数字下划线连字符，
+而 pvp 意图是 `move:tackle` / `switch:1`，冒号被拒。**修法**：正则放宽为
+`^[A-Za-z0-9_:\-]+$`（只加冒号），`wsProtocol.ts` 的 `validIntentField` 同步放宽。
+不破坏既有 kernel E2E（kernel 意图不含冒号）。
+
+### 31.2 `sides.indexOf(side)` 写空，胜负 / 换人 / 全灭全判错
+
+`applyPvpTurn` 里 `applySideAction` 会复制 side（`{...side}`），返回的是新对象；
+`state.sides.indexOf(side)` 拿原引用去查，永远 -1，结果写到 `sides[-1]`，
+导致「逃跑判负 `winnerUserId` 错误 / 换人 activeIndex 不切换 / 全灭不判胜」。
+**修法**：改用 `seatOf(side)`（`side.userId === s0.userId ? 0 : 1`）按 seat 精确定位，
+回合末与自动换人也改成按 seat 循环。这类「对象复制后引用失效」在镜像态里尤其隐蔽，
+凡是对 `sides` 做 `indexOf` 定位都要换成 `seatOf`。
+
+### 31.3 结算后双方 revision 断言忘了 await
+
+E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`。**修法**：补 `await`。
+凡涉及 revision 的断言都要 `await`，否则拿到的永远是 Promise 对象。
+
+### 31.4 满员房间 join 返回的是 ROOM_CLOSED 不是 ROOM_FULL
+
+房间满员后 status 已 active，`join` 先查 `status !== 'forming'` 返回 `ROOM_CLOSED`。
+这是合理业务行为（不是 bug），E2E 断言放宽为 `ROOM_FULL || ROOM_CLOSED`。同理，
+冒烟里「无 WS」的 outsider 也会先命中 `ROOM_WS_REQUIRED`，测满员必须先给 outsider 开 WS。
+
+### 31.5 冒烟断言 `placeholder` 当 innerText 读
+
+`<input placeholder="输入房间号加入">` 的 placeholder **不会出现在 `innerText` 里**，
+冒烟用 `txt().indexOf('输入房间号加入')` 永远 false。**修法**：改断言「加入」按钮的
+`textContent`，或直接查 input 的 `placeholder` 属性，不要拿 innerText 找 placeholder。
+
+### 31.6 两条不是缺陷但容易误判的设计边界
+
+1. **1v1 结算不发奖励**：只回写队伍 HP / 异常，不产经验 / 金钱 / 捕获。奖励与排位分
+   归台账 F02 / F15，现在不写、未来再补，不要在结算里顺手发奖。
+2. **`pvpSettled` 标记是幂等关键**：分出胜负既可能在 `submitIntent` 也可能在 `tick`，
+   `maybeSettlePvp` 三处调用靠 `pvpSettled` 保证只结算一次；若去掉这个标记，
+   双方档会被重复 `commitState` 覆盖 revision。
+
+

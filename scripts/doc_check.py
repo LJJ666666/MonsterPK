@@ -43,14 +43,14 @@ future_text = text(future_path) if future_path.exists() else ""
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（306 / 122 / 44 / 19 / 62 / 30 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 115 / 24）",
-     all(x in memory_text for x in ["**306**", "**122**", "**44**", "**19/19**", "**62**",
+    ("MEMORY.md 写入最终数字（321 / 122 / 44 / 19 / 62 / 30 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 16 / 115 / 27）",
+     all(x in memory_text for x in ["**321**", "**122**", "**44**", "**19/19**", "**62**",
                                     "**41**", "**25**", "**48**", "**50**", "**30**",
-                                    "**39**", "**43**", "115", "**17/17**", "**13/13**",
-                                    "**15/15**", "**25/25**"])),
+                                    "**39**", "**43**", "**16**", "115", "**17/17**", "**13/13**",
+                                    "**15/15**", "**27/27**"])),
     ("MEMORY.md 记录降级与旧意图下线",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P4-2d", "下一步 P4-2d" in memory_text),
+    ("MEMORY.md 下一步为 P4-2e", "下一步 P4-2e" in memory_text),
     ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
     ("MEMORY.md 记录 P4-0 写入并发控制",
      "写入并发控制（P4-0）" in memory_text and "REVISION_CONFLICT" in memory_text and "slotLock.ts" in memory_text),
@@ -63,18 +63,19 @@ checks = [
      and all(x in plan_text for x in [
          "全员掉线", "不扣次数", "可选", "ROUND_TIMEOUT_MS", "AUTOPILOT_OFFER_MS",
          "ALL_OFFLINE_GRACE_MS", "hold", "commit", "release", "pickUsableMove",
-         "roomId", "P4-2a", "P4-2e", "d~e 仍为排期", "同一 token 同一设备",
+         "roomId", "P4-2a", "P4-2e", "e 仍为排期", "同一 token 同一设备",
          "playerLevel", "SCHEMA_VERSION", "共享存储"])),
     ("任务表已拆 P4-2 五阶段并写明排期状态",
      all(f"| P4-2{c} |" in task_text for c in "abcde")
      and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 记 P4-2a / P4-2b / P4-2c 实现与下一步 P4-2d",
+    ("MEMORY.md 记 P4-2a / P4-2b / P4-2c / P4-2d 实现与下一步 P4-2e",
      "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "P4-2c ✅" in memory_text
-     and "下一步 P4-2d" in memory_text
+     and "P4-2d ✅" in memory_text and "下一步 P4-2e" in memory_text
      and "P4-2_多人玩法排期_2026-11-07.md" in memory_text
      and "GET /api/rank" in memory_text and "effectiveStats" in memory_text
      and "RoomRegistry" in memory_text and "quota" in memory_text
-     and "BossDamageEvent" in memory_text and "applySettlementToSave" in memory_text),
+     and "BossDamageEvent" in memory_text and "applySettlementToSave" in memory_text
+     and "RoomState.pvp" in memory_text and "pvpViewFor" in memory_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
     ("每日日志记 P4-2a 实现", "P4-2a 只读派生榜" in log_text and "E2E_P42A_OK" in log_text),
     ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
@@ -115,7 +116,7 @@ checks = [
     ("任务表记 P4-2a ✅ 与 39/17 验收",
      "**✅ 已实现（2026-11-07）**" in task_text
      and "E2E_P42A_OK" in task_text and "UI_SMOKE_P42A_OK" in task_text),
-    ("任务表下一步为 P4-2d", "下一步建议" in task_text and "下一步 P4-2d" in task_text),
+    ("任务表下一步为 P4-2e", "下一步建议" in task_text and "下一步 P4-2e" in task_text),
     ("P4-1 关键文件齐全",
      all((ROOT / p).exists() for p in [
          "backend/src/lib/wildRegistry.ts",
@@ -204,9 +205,9 @@ checks = [
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
     # ——— P4-2 未来规划台账与口径修正 ———
-    ("未来规划台账存在且 F01~F13 齐全",
+    ("未来规划台账存在且 F01~F15 齐全",
      future_path.exists()
-     and all(f"F{n:02d}" in future_text for n in range(1, 14))
+     and all(f"F{n:02d}" in future_text for n in range(1, 16))
      and "最终是要设计偿还的" in future_text and "不阻塞" in future_text),
     ("台账 F04：账号等级 + 宠物等级帽 + 当前为占位偏差",
      all(x in future_text for x in [
@@ -308,6 +309,43 @@ checks = [
     ("测试账号清理前缀含 p42c_",
      "p42c_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
     ("每日日志记 P4-2c 实现", "P4-2c" in log_text and "E2E_P42C_OK" in log_text),
+
+    # ——— P4-2d 玩家对战 1v1 ———
+    ("规范含 §26 1v1 对战（镜像态 / 意图 / 裁剪 / 结算幂等）",
+     "## 26. P4-2d 玩家对战 1v1" in spec_text
+     and all(x in spec_text for x in [
+         "RoomState.pvp", "PvpSide", "applyPvpTurn", "encodePvpIntent", "pvpViewFor",
+         "PVP_INPUT_FORBIDDEN", "settlePvpRoom", "pvpSettled", "seatOf", "sides"])),
+    ("bug_log 含 §17 ~ §31", all(f"## {n}." in bug_text for n in range(17, 32))),
+    ("任务表记 P4-2d ✅ 与 16/15 验收",
+     "**✅ 已实现（2026-11-07）**" in task_text
+     and "E2E_P42D_OK" in task_text and "UI_SMOKE_P42D_OK" in task_text
+     and "RoomState.pvp" in task_text),
+    ("排期文档记 P4-2d 已实现与实现记录",
+     "P4-2d 玩家对战 1v1 — ✅ 已实现" in plan_text
+     and "E2E_P42D" in plan_text and "sides" in plan_text
+     and "pvpViewFor" in plan_text and "不发奖励" in plan_text),
+    ("台账记 F15 1v1 对战奖励 / 排位分",
+     "F15" in future_text and "排位分" in future_text and "settlePvpRoom" in future_text),
+    ("verify 已注册 e2e:p42d 与 smoke:p42d",
+     "e2e:p42d" in verify_text and "smoke:p42d" in verify_text
+     and '"e2e:p42d"' in pkg_text and "ui_smoke_p42d.mjs" in verify_text),
+    ("P4-2d 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/pvp.ts",
+         "backend/src/modules/pvp.ts",
+         "backend/tests/pvp.test.ts",
+         "backend/tests/e2e_p42d_pvp.mjs",
+         "scripts/ui_smoke_p42d.mjs",
+         "src/lib/pvp.ts",
+         "src/components/PvpModal.tsx"])),
+    ("pvp 意图正则放宽冒号且视图按接收者裁剪",
+     "[A-Za-z0-9_:\\-]" in text(ROOT / "backend" / "src" / "lib" / "roomRegistry.ts")
+     and "pvpViewFor" in text(ROOT / "backend" / "src" / "game" / "pvp.ts")
+     and "viewerUserId" in text(ROOT / "backend" / "src" / "game" / "pvp.ts")),
+    ("测试账号清理前缀含 p42d_",
+     "p42d_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
+    ("每日日志记 P4-2d 实现", "P4-2d" in log_text and "E2E_P42D_OK" in log_text),
 ]
 
 for name, ok, *detail in checks:

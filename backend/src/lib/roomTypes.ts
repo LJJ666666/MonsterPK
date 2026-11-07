@@ -6,6 +6,8 @@
  * owner key 为 `roomId`，写入一律经 `withRoomLock()` 串行。
  */
 
+import type { PvpState } from '../game/pvp.js';
+
 export type RoomMode = 'kernel' | 'pvp' | 'coop';
 export const ROOM_MODES: readonly RoomMode[] = ['kernel', 'pvp', 'coop'];
 
@@ -102,6 +104,8 @@ export type RoomState = {
   deadlineAt: number;
   /** 本回合已提交意图的座位号。全员提交或超时后清空并推进 turn。 */
   submitted: number[];
+  /** P4-2d：本回合各座位提交的意图（与 submitted 同步；pvp 推进时用）。 */
+  turnIntents: { seat: number; intent: string }[];
   lastAction: RoomAction | null;
   quota: RoomQuota | null;
   /** 全员掉线的起始时刻；有人在线即为 null。 */
@@ -109,6 +113,10 @@ export type RoomState = {
   /** 已消费的意图 nonce（限长），防重放。 */
   seenNonces: string[];
   endReason: string | null;
+  /** P4-2d：1v1 战斗态（仅 pvp 模式有值）。挂在房间态上，写经 withRoomLock 串行。 */
+  pvp?: PvpState | null;
+  /** P4-2d：pvp 分出胜负后是否已写回双方档（防重复结算）。 */
+  pvpSettled?: boolean;
 };
 
 /** 下发视图：不含 tokenDigest / connectionId / 他人 userId / 次数余量。 */
@@ -133,7 +141,12 @@ export type RoomView = {
   quota: { key: string; state: RoomQuotaState } | null;
   endReason: string | null;
   updatedAt: number;
+  /** P4-2d：按接收者裁剪的 1v1 战斗视图（仅 pvp 模式有值）。 */
+  pvp: PvpView | null;
 };
+
+/** P4-2d：1v1 战斗的只读视图（按接收者裁剪，由 game/pvp.ts::pvpViewFor 生成）。 */
+export type PvpView = ReturnType<typeof import('../game/pvp.js')['pvpViewFor']>;
 
 export type QuotaUsage = { held: number; committed: number };
 

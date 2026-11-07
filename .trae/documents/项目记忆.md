@@ -68,5 +68,5 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **P3-2 ✅（11-07）**：治疗/战斗外道具/进化/学招/队伍整理/移动/新档全部改由服务端判定并 `commitState(source='action')` 写档（纯逻辑 `game/mutations.ts` 35 例单测），前端删光本地写档代码；补 HP/状态回归校验、全灭惩罚上移、内容双源收口。
 - **P4-0 ✅（11-07，P4 前置）**：整包 PUT 与意图强制 `revision` + 槽位锁。证据：后端 **212**、新增 `e2e:p4` **39/39 `E2E_P4_OK`**、前端 **86**、`verify` **18/18**（44.0s）。**下一步 P4-1 共享野怪实例**。
 - **11-07 两项缺陷已修 ✅**：①个体值 `initMin` 与内容表上限反向（144 项）、进化 `remapByBounds` 清零差异 → `initMin=种族值`、`initMax=max(initStatsMax, base+4)`；②`MONEY` 混装格式错与越界 → 拆 `_FORMAT`(400)/`_RANGE`(封号)。见 bug_log §21/§22。
-- **Git**：`fe159eb`→`bb04998`→`2f2c8b7`→`bbb1853`→`4acbd53`→`61a37c9`→`fd6d36b`→`04a35a8`（P3-2，顺序即 P0~P3-2），均已推送。回滚点 `git tag -l 'rollback-*'`（pre/post 成对，均在远端）。`dev.db`/`.env` 已 gitignore。
+- **Git**：`fe159eb`→`bb04998`→`2f2c8b7`→`bbb1853`→`4acbd53`→`61a37c9`→`fd6d36b`→`04a35a8`→`93c1c50`（P0~P4-0），均已推送；回滚点 `rollback-*` pre/post 成对在远端。`dev.db`/`.env` 已 gitignore。
 - **回家交接**：`HANDOFF.md` 含 clone/环境重建/记忆恢复/话术/验收/坑 + `check_home_env.py`、`doc_check.py`。11-07 已在 `D://MyJob//MonsterPK` 重建并 `ENV_CHECK_OK`。

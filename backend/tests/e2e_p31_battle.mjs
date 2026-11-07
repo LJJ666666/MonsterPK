@@ -164,7 +164,13 @@ async function main() {
 
   check('敌方来自服务端主题表', b1.enemy?.specId === 'sprout_owl' || ['sprout_owl'].includes(b1.enemy?.specId)
     || typeof b1.enemy?.specId === 'string', String(b1.enemy?.specId));
-  check('敌方等级在开局区间内', b1.enemy?.level >= 2 && b1.enemy?.level <= 2, String(b1.enemy?.level));
+  // 等级浮动与前端 gen.ts 一致：基础区间 [2,2] + 精英 2 / 稀有 3 / 随机 0~1，上限 6。
+  // 原先断言 === 2 会因浮动随机失败（约 60% 概率），这里按真实规则校验区间与标签一致性。
+  check('敌方等级在开局区间内（含精英/稀有浮动）',
+    b1.enemy?.level >= 2 && b1.enemy?.level <= 6, String(b1.enemy?.level));
+  check('敌方等级浮动与遭遇标签一致',
+    /^(野生|精英|稀有)/.test(String(b1.log?.[0] ?? '').replace('遭遇：', '')),
+    String(b1.log?.[0]));
   check('队伍取自服务端存档', Array.isArray(b1.party) && b1.party.length === 2 && b1.party[0].id === 'p1',
     JSON.stringify((b1.party ?? []).map((m) => m.id)));
   check('开局下发 PP 表', !!b1.ppByMonster && Object.keys(b1.ppByMonster).length >= 2);

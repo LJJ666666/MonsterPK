@@ -66,5 +66,5 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7；路由 `/`、
 - **P4-2a ✅**：四榜只读派生；战力六维和用 `maxHp`、**不代表实战强弱**、公式待定、装备走 `effectiveStats`；证据 `e2e:p42a` **39** / `ui_smoke_p42a` **17/17**；`SCHEMA_VERSION`/迁移未动（§23/§28）。
 - **P4-2b ✅（11-07）**：房间内核（`RoomRegistry` + `withRoomLock` + `room.state` + quota 三段式 + 同 token 重连 + 可选托管 + 超时随机代放）；`verify` **23/23 `VERIFY_OK`**、后端 **280** / 前端 **114**、`e2e:p42b` **43**、`roomRegistry` 18 + `roomLock` 5 去锁 + `roomProtocol` 8 + 前端 9；未动 schema/迁移（§24/§29）。
 - **P4-2 c~e 📋**：`c 单人 Boss 伤害排名（append-only 事件 + 只读榜 + 限次，先还 F12）→ d 1v1 PVP → e 共斗/副本`。伤害只能来自服务端结算产物；野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**（F10/§22.7）。契约 `P4-2_多人玩法排期_2026-11-07.md`。**下一步 P4-2c**。
-- **Git**：`fe159eb`→`2f2c8b7`→…→`277c4b2`(排期)→`f7fa187`(战力口径)→`25b6168`(P4-2a) 均已推送；回滚点 `rollback-20261107-pre-p41`/`rollback-20261107-post-p41` 与 pre/post `p42-plan`/`p42a` 成对在远端。`dev.db`/`.env` gitignore。
+- **Git**：`fe159eb`→`2f2c8b7`→…→`25b6168`(P4-2a)→`d73624e`(P4-2b) 均已推送；`rollback-20261107-pre-p41`/`rollback-20261107-post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b` 成对在远端。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py` / `doc_check.py`；11-07 已在本机重建并 `ENV_CHECK_OK`。

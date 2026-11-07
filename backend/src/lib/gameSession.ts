@@ -19,7 +19,12 @@ import type { AuthorityState } from './authority';
 export const SESSION_TTL_MS = 10 * 60 * 1000;
 export const SESSION_SLOTS = [1, 2, 3] as const;
 
-export type SessionSource = 'hydrate' | 'put' | 'intent' | 'battle';
+/**
+ * 状态写入来源。
+ * `action` = P3-2 的服务端存档写操作（治疗 / 道具 / 进化 / 学招 / 队伍整理 / 移动），
+ * 由 `modules/mutations.ts` 在服务端算完后写入，客户端只收快照。
+ */
+export type SessionSource = 'hydrate' | 'put' | 'intent' | 'battle' | 'action';
 
 export type GameSessionState = {
   userId: string;

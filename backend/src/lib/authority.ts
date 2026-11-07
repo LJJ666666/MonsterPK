@@ -16,6 +16,7 @@
  *    GG 修改器改内存、加速器改节奏、战斗过程 HP/PP 伪造仍需 P3 客户端瘦终端化根治。
  */
 import type { PendingIntent } from './settlements';
+import { INITIAL_INVENTORY } from '../game/content.js';
 
 export type ResourceDigest = {
   money: number;
@@ -226,6 +227,67 @@ export function compareDigest(actual: ResourceDigest, expected: ResourceDigest):
 }
 
 /**
+ * P3-2：队伍个体状态校验（HP / 异常状态）。
+ *
+ * 资源摘要 `digestOf` 只覆盖金钱、道具、持有数、等级经验、首通与挂机，
+ * **不包含 HP 与异常状态**。于是「客户端把 HP 改回满 / 把烧伤清掉」在普通整包 PUT 里
+ * 没有任何痕迹：资源没变富，`compareDigest` 直接放行——等于免费治疗。
+ *
+ * P3-2 之后所有治疗都必须由服务端产生（`/api/game/heal`、战斗结算、道具接口），
+ * 所以普通 PUT 里只接受两个方向：
+ *   · HP 下降或不变；
+ *   · 异常状态变差或不变（解异常同样走服务端）。
+ * 变差方向仍然放行，避免玩家在同步失败时被卡死。
+ *
+ * 返回值是第一条违规（没有则 null）。
+ */
+export function checkPartyStateRegression(
+  prevRaw: string | null | undefined,
+  nextRaw: string,
+): DigestViolation | null {
+  if (!prevRaw) return null;
+  let prev: any;
+  let next: any;
+  try {
+    prev = JSON.parse(prevRaw);
+    next = JSON.parse(nextRaw);
+  } catch {
+    return null; // 解析失败交给上层结构校验
+  }
+  if (!prev?.party || !next?.party) return null;
+
+  const prevById = new Map<string, any>();
+  for (const m of Array.isArray(prev.party) ? prev.party : []) {
+    if (m && typeof m.id === 'string') prevById.set(m.id, m);
+  }
+  const nextList = Array.isArray(next.party) ? next.party : [];
+  for (const m of nextList) {
+    if (!m || typeof m.id !== 'string') continue;
+    const before = prevById.get(m.id);
+    if (!before) continue; // 新 id：由持有数/捕获校验兜底
+    const prevHp = typeof before.hp === 'number' ? before.hp : 0;
+    const nextHp = typeof m.hp === 'number' ? m.hp : 0;
+    if (nextHp > prevHp) {
+      return {
+        code: 'AUTHORITY_HP_INCREASE',
+        reason: `幻兽 ${m.id} 的 HP 从 ${prevHp} 提升到 ${nextHp}，治疗必须经服务端结算`,
+        path: `party.${m.id}.hp`,
+      };
+    }
+    const prevStatus = typeof before.status === 'string' ? before.status : 'none';
+    const nextStatus = typeof m.status === 'string' ? m.status : 'none';
+    if (prevStatus !== 'none' && nextStatus === 'none') {
+      return {
+        code: 'AUTHORITY_STATUS_CLEARED',
+        reason: `幻兽 ${m.id} 的异常状态 ${prevStatus} 被清除，治疗必须经服务端结算`,
+        path: `party.${m.id}.status`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * 「新游戏 / 重置存档」重建基线的准入校验。
  * 自动同步是整包 PUT，无法分辨「玩家点了重新开始」和「外挂造了份存档」。
  * 前端只在这两个动作里标记 rebase，服务端要求这份存档确实像初始档：
@@ -234,7 +296,8 @@ export function compareDigest(actual: ResourceDigest, expected: ResourceDigest):
  */
 export const FRESH_SAVE_TEMPLATE = {
   moneyMax: 0,
-  inventory: { capsule_basic: 6, capsule_prism: 1, potion_small: 3 } as Record<string, number>,
+  /** 初始背包从内容表取（真源 src/game/data.ts::INITIAL_INVENTORY），不再手抄一份。 */
+  inventory: INITIAL_INVENTORY as Record<string, number>,
   partyMax: 1,
   levelMax: 5,
   stepsMax: 0,

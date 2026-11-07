@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   digestOf, compareDigest, parseAuthority, freshAuthority, serializeAuthority,
-  advanceAuthority, checkFreshSave,
+  advanceAuthority, checkFreshSave, checkPartyStateRegression,
 } from '../src/lib/authority.ts';
 
 function save(overrides: Record<string, unknown> = {}) {
@@ -114,4 +114,36 @@ test('checkFreshSave：只放行真正的初始档', () => {
   assert.equal(checkFreshSave(raw({ money: 0, party: [{ ...save().party[0], level: 99 }] })).ok, false);
   assert.equal(checkFreshSave(raw({ money: 0, clearedAreas: { a: { level: 30 } } })).ok, false);
   assert.equal(checkFreshSave('bad-json').ok, false);
+});
+
+// —— P3-2：HP / 异常状态回归校验 ——
+// 资源摘要不含 HP，若不单独拦，客户端把血改满、把烧伤清掉都能通过普通整包 PUT。
+
+test('checkPartyStateRegression：HP 增加被判违规', () => {
+  const prev = raw();
+  const next = JSON.stringify({ ...save(), party: [{ ...save().party[0], hp: 30 }] });
+  const shrunk = JSON.stringify({ ...save(), party: [{ ...save().party[0], hp: 5 }] });
+  assert.equal(checkPartyStateRegression(shrunk, next)?.code, 'AUTHORITY_HP_INCREASE');
+  assert.equal(checkPartyStateRegression(shrunk, shrunk), null, 'HP 不变应放行');
+  assert.equal(checkPartyStateRegression(prev, shrunk), null, 'HP 下降应放行');
+});
+
+test('checkPartyStateRegression：异常状态被清除判违规', () => {
+  const burned = JSON.stringify({ ...save(), party: [{ ...save().party[0], status: 'burn' }] });
+  const clean = JSON.stringify({ ...save(), party: [{ ...save().party[0], status: 'none' }] });
+  const poisoned = JSON.stringify({ ...save(), party: [{ ...save().party[0], status: 'poison' }] });
+  assert.equal(checkPartyStateRegression(burned, clean)?.code, 'AUTHORITY_STATUS_CLEARED');
+  assert.equal(checkPartyStateRegression(burned, poisoned), null, '状态变化（未治愈）应放行');
+  assert.equal(checkPartyStateRegression(clean, clean), null);
+});
+
+test('checkPartyStateRegression：没有前档 / 坏 JSON 直接放行（交给其它校验）', () => {
+  assert.equal(checkPartyStateRegression(null, raw()), null);
+  assert.equal(checkPartyStateRegression('bad-json', raw()), null);
+  assert.equal(checkPartyStateRegression(raw(), 'bad-json'), null);
+});
+
+test('checkPartyStateRegression：新 id 不参与比较（捕获由持有数校验兜底）', () => {
+  const next = JSON.stringify({ ...save(), party: [{ ...save().party[0], id: 'new1', hp: 30 }] });
+  assert.equal(checkPartyStateRegression(raw(), next), null);
 });

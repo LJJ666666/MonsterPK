@@ -7,7 +7,7 @@ import { clampSaveTimestamps } from '../lib/serverClock';
 import { banAccount, BAN_CODE } from '../lib/account';
 import {
   digestOf, compareDigest, parseAuthority, freshAuthority,
-  advanceAuthority, checkFreshSave, type AuthorityState,
+  advanceAuthority, checkFreshSave, checkPartyStateRegression, type AuthorityState,
 } from '../lib/authority';
 import { checkIntentDelta } from '../lib/settlements';
 import { gameSessions } from './sessionBus';
@@ -149,6 +149,10 @@ export async function saveRoutes(fastify: FastifyInstance) {
       } else {
         // —— 分支 3：普通整包 PUT，单调比对（客户端资源不得更富）——
         const violations = compareDigest(actual, authority.expected);
+        // P3-2：HP 与异常状态不在资源摘要里，单独校验「只能变差」——
+        // 否则改存档把血改满、把烧伤清掉都能通过（治疗已全部上移服务端）。
+        const stateViolation = checkPartyStateRegression(rec?.data, dataToStore);
+        if (stateViolation) violations.push(stateViolation);
         if (violations.length > 0) {
           req.log.warn({ userId, slot, kind: 'authority_mismatch', violations }, '存档资源增量未经服务端裁决，已拒绝（不封号）');
           return reply.code(400).send({

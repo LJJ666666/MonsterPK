@@ -125,4 +125,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ battleId, slot }),
     }),
+
+  // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
+  /**
+   * 治疗 / 战斗外道具 / 进化 / 学招 / 队伍整理 / 移动。
+   * 客户端只发意图 ID，服务端判定并写档，返回新存档整包（data）。
+   */
+  gameOp: (op: string, body: Record<string, unknown>) =>
+    request(`/api/game/${encodeURIComponent(op)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

@@ -148,6 +148,18 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [showTestMenu, setShowTestMenu] = useState(false);
   const [dexSelectedSpecId, setDexSelectedSpecId] = useState<string | null>(null);
   const [dexSearchQuery, setDexSearchQuery] = useState("");
+  /** P3-2：服务端拒绝写操作时的提示（治疗/道具/进化/队伍整理都可能是 400）。 */
+  const [notice, setNotice] = useState<string | null>(null);
+
+  /**
+   * 统一处理服务端写操作的结果：成功就清提示，失败把服务端中文原因显示在顶部。
+   * 这些操作没有本地降级——服务端拒绝就是真的没做成，不能在本地「假装成功」。
+   */
+  const runOp = async (fn: () => Promise<{ ok: boolean; reason?: string }>) => {
+    const res = await fn();
+    setNotice(res.ok ? null : res.reason ?? "操作失败，请稍后重试");
+    return res.ok;
+  };
 
   const maxPlayerLevel = useMemo(() => {
     const s = useGameStore.getState()[`save${slot}` as keyof ReturnType<typeof useGameStore.getState>] as any;
@@ -280,9 +292,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               <PixelButton
                 tone="muted"
                 disabled={save.party.length <= 1}
-                onClick={() => {
-                  useGameStore.getState().movePartyToBox(selected);
-                  setSelected(null);
+                onClick={async () => {
+                  if (await runOp(() => useGameStore.getState().movePartyToBox(selected))) setSelected(null);
                 }}
               >
                 存入电脑
@@ -290,10 +301,9 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               <PixelButton
                 tone="danger"
                 disabled={save.party.length <= 1}
-                onClick={() => {
+                onClick={async () => {
                   if (confirm(`确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`)) {
-                    useGameStore.getState().releaseMonster(m.id);
-                    setSelected(null);
+                    if (await runOp(() => useGameStore.getState().releaseMonster(m.id))) setSelected(null);
                   }
                 }}
               >
@@ -342,10 +352,32 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   };
 
   const renderBag = () => {
-    const healableParty = party.map((m, idx) => ({ m, idx })).filter(({ m }) => m.hp < m.maxHp);
+    /**
+     * P3-2：背包里能「对谁用」全部按内容表判定——回复看缺不缺血、
+     * 解药看状态是否匹配、进化石看这只幻兽的进化条件。
+     * 这只是 UI 过滤，真正的判定在服务端（`game/mutations.ts`）。
+     */
+    const usableTargets = (itemId: ItemId, spec: (typeof ITEM_SPECS)[ItemId]) => {
+      const entries = party.map((m, idx) => ({ m, idx }));
+      if (spec.kind === "heal") return entries.filter(({ m }) => m.hp > 0 && m.hp < m.maxHp);
+      if (spec.kind === "status_heal") {
+        const cures = ((spec as any).cures ?? []) as string[];
+        return entries.filter(({ m }) => m.status !== "none" && cures.includes(m.status));
+      }
+      if (spec.kind === "evolution") {
+        return entries.filter(({ m }) =>
+          MONSTER_SPECS[m.specId]?.evolutions?.some(
+            (e) => e.condition.type === "item" && e.condition.itemId === itemId,
+          ),
+        );
+      }
+      return [];
+    };
     const filteredInv = invEntries.filter((x) => {
       if (bagFilter === "all") return true;
-      if (bagFilter === "heal") return x.spec.kind === "heal";
+      if (bagFilter === "heal") {
+        return x.spec.kind === "heal" || x.spec.kind === "status_heal" || x.spec.kind === "evolution";
+      }
       if (bagFilter === "item") return x.spec.kind === "capture";
       return false;
     });
@@ -389,19 +421,23 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                    : `特殊道具`}
                 </div>
               </div>
-              {x.spec.kind === "heal" && healableParty.length > 0 && (
-                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                  {healableParty.map(({ m, idx }) => (
-                    <button
-                      key={m.id}
-                      onClick={() => useItemOutsideBattle(x.id as ItemId, idx)}
-                      className="shrink-0 whitespace-nowrap border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] px-2 py-1 text-[10px] text-[color:var(--text)]"
-                    >
-                      对 <MonsterName m={m} /> 使用
-                    </button>
-                  ))}
-                </div>
-              )}
+              {(() => {
+                const targets = usableTargets(x.id as ItemId, x.spec);
+                if (targets.length === 0) return null;
+                return (
+                  <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                    {targets.map(({ m, idx }) => (
+                      <button
+                        key={m.id}
+                        onClick={() => void runOp(() => useItemOutsideBattle(x.id as ItemId, idx))}
+                        className="shrink-0 whitespace-nowrap border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] px-2 py-1 text-[10px] text-[color:var(--text)]"
+                      >
+                        对 <MonsterName m={m} /> 使用
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           ))}
           {filteredInv.length === 0 && <div className="text-sm text-[color:var(--muted)]">当前分类下没有物品。</div>}
@@ -418,9 +454,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             {(Object.values(LOCATIONS) as typeof LOCATIONS[LocationId][]).map((loc) => (
               <button
                 key={loc.id}
-                onClick={() => {
-                  travelTo(loc.id);
-                  setMapView("detail");
+                onClick={async () => {
+                  if (await runOp(() => travelTo(loc.id))) setMapView("detail");
                 }}
                 className={`border-2 p-3 text-left flex justify-between items-center ${loc.id === currentLocation.id ? "border-[color:var(--accent)] bg-[color:var(--panel2)]" : "border-[color:var(--stroke)] bg-[color:var(--bg2)]"}`}
               >
@@ -612,9 +647,11 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         
         <div className="grid gap-3">
           {currentLocation.hasCenter && (
-            <PixelButton tone="primary" onClick={() => {
-              healAll();
-              setDialog({ name: "护士", text: "欢迎来到恢复中心！你的伙伴们已经完全恢复了活力。" });
+            <PixelButton tone="primary" onClick={async () => {
+              // P3-2：是否在恢复中心、回多少血都由服务端判定，本地不再自己回满。
+              if (await runOp(healAll)) {
+                setDialog({ name: "护士", text: "欢迎来到恢复中心！你的伙伴们已经完全恢复了活力。" });
+              }
             }}>
               恢复中心 (免费治疗)
             </PixelButton>
@@ -967,19 +1004,17 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               <PixelButton
                 tone="primary"
                 disabled={save.party.length >= 6}
-                onClick={() => {
-                  useGameStore.getState().moveBoxToParty(boxSelected);
-                  setBoxSelected(null);
+                onClick={async () => {
+                  if (await runOp(() => useGameStore.getState().moveBoxToParty(boxSelected))) setBoxSelected(null);
                 }}
               >
                 移入队伍
               </PixelButton>
               <PixelButton
                 tone="danger"
-                onClick={() => {
+                onClick={async () => {
                   if (confirm(`确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`)) {
-                    useGameStore.getState().releaseMonster(m.id);
-                    setBoxSelected(null);
+                    if (await runOp(() => useGameStore.getState().releaseMonster(m.id))) setBoxSelected(null);
                   }
                 }}
               >
@@ -1043,6 +1078,12 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
 
       {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
+
+      {notice && (
+        <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/15 px-4 py-2 text-xs text-[color:var(--danger)]">
+          {notice}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col">

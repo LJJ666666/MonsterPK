@@ -21,6 +21,7 @@
  *   这两条链路不再有任何生产调用方，直接删除，不留兼容开关。
  */
 import { digestOf, type ResourceDigest, type DigestViolation, type AuthorityState } from './authority';
+import { IDLE_CONFIG, ITEM_SPECS } from '../game/content.js';
 
 export const INTENT_TYPES = [
   'idle_start', 'idle_claim', 'idle_cancel',
@@ -59,23 +60,21 @@ export type PendingIntent = {
   idleStart?: { areaId: string; level: number; startedAtMs: number };
 };
 
-// —— 服务端持有的内容常量（与前端 src/game/data.ts / idle.ts 保持一致）——
-// 改前端价格或挂机参数时必须同步这里，否则经济裁决会与商店显示不一致。
-export const ITEM_PRICES: Record<string, number> = {
-  capsule_basic: 200, capsule_prism: 600, capsule_ultra: 1200, capsule_master: 100000,
-  potion_small: 300, potion_medium: 700, potion_large: 1500, potion_max: 2500,
-  heal_antidote: 100, heal_paralyze: 200, heal_awake: 250, heal_burn: 250, heal_ice: 250,
-  berry_oran: 100, berry_sitrus: 800, berry_lum: 600,
-  stone_fire: 2100, stone_water: 2100, stone_leaf: 2100, stone_thunder: 2100,
-  amulet_coin: 10000, exp_share: 50000,
-};
+// —— 经济常量：全部来自内容表，不再手抄 ——
+// P3-2 之前这里是两份手抄副本（ITEM_PRICES 与挂机参数），注释写着「改前端必须同步」。
+// 漏同步的后果是「商店显示价与扣款不一致」或「挂机显示收益与到账不一致」，而且不会有任何测试报错。
+// 现在价格取 `ITEM_SPECS[id].price`，挂机参数取 `IDLE_CONFIG`，两者都由 gen:content 从
+// `src/game/data.ts` 生成，`check:content` 会在漂移时直接失败。
 
-/** 服务端挂机参数（与 src/game/idle.ts 一致）。 */
-export const IDLE_CAP_MINUTES = 8 * 60;
-const CAPSULE_ROLL_MINUTES = 20;
-const CAPSULE_DROP_CHANCE = 0.15;
-const IDLE_MONEY_BASE = 1.5;
-const IDLE_MONEY_PER_LEVEL = 0.15;
+/** 道具价格（派生自内容表，禁止在服务端再写一份价格表）。 */
+export function itemPrice(itemId: string): number | undefined {
+  const item: any = ITEM_SPECS[itemId];
+  const price = item?.price;
+  return typeof price === 'number' && Number.isFinite(price) ? price : undefined;
+}
+
+/** 挂机上限（分钟），与前端展示同源。 */
+export const IDLE_CAP_MINUTES = IDLE_CONFIG.capMinutes;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
@@ -90,15 +89,15 @@ function parseSave(raw: string): any {
 /** 服务端挂机结算：时钟与 RNG 都在这里，客户端 idle.startedAt 完全不参与。 */
 export function settleIdleServer(level: number, minutes: number, rng: () => number) {
   const effective = clamp(Math.floor(minutes), 0, IDLE_CAP_MINUTES);
-  const money = Math.floor(effective * (IDLE_MONEY_BASE + level * IDLE_MONEY_PER_LEVEL));
+  const money = Math.floor(effective * (IDLE_CONFIG.moneyBase + level * IDLE_CONFIG.moneyPerLevel));
   const capsules: Record<string, number> = {};
-  const rolls = Math.floor(effective / CAPSULE_ROLL_MINUTES);
+  const rolls = Math.floor(effective / IDLE_CONFIG.rollMinutes);
   const pool: Array<{ id: string; weight: number }> = [{ id: 'capsule_basic', weight: 100 }];
   if (level >= 10) pool.push({ id: 'capsule_prism', weight: 28 });
   if (level >= 20) pool.push({ id: 'capsule_ultra', weight: 14 });
   const total = pool.reduce((s, x) => s + x.weight, 0);
   for (let i = 0; i < rolls; i++) {
-    if (rng() >= CAPSULE_DROP_CHANCE) continue;
+    if (rng() >= IDLE_CONFIG.dropChance) continue;
     let r = rng() * total;
     let picked = pool[0].id;
     for (const entry of pool) {
@@ -183,7 +182,7 @@ export function decideIntent(type: IntentType, payload: Record<string, unknown>,
   // —— c 经济：商店购买；价格表由服务端持有 ——
   if (type === 'shop_buy') {
     const itemId = typeof payload.itemId === 'string' ? payload.itemId : '';
-    const price = ITEM_PRICES[itemId];
+    const price = itemPrice(itemId);
     if (price === undefined) return { ok: false, reason: '该道具无法购买' };
     const amount = clamp(int(payload.amount, 1), 1, 99);
     const cost = price * amount;

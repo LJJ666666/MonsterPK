@@ -1,17 +1,21 @@
 import type { ItemId } from "@/game/types";
+import { IDLE_CONFIG } from "@/game/data";
 
-/** 离线挂机的累积上限（分钟）。超过部分不再产出。 */
-export const IDLE_CAP_MINUTES = 8 * 60;
+/**
+ * 挂机参数的唯一真源是 `data.ts::IDLE_CONFIG`（服务端内容表由它生成）。
+ * 这里只做「展示用」的换算，不参与任何结算——收益由服务端按服务端时钟结算。
+ */
+export const IDLE_CAP_MINUTES = IDLE_CONFIG.capMinutes;
 
 /** 每累计这么多分钟，进行一次捕获器掉落判定。 */
-const CAPSULE_ROLL_MINUTES = 20;
+const CAPSULE_ROLL_MINUTES = IDLE_CONFIG.rollMinutes;
 
 /** 单次判定掉落捕获器的概率。整体期望偏低，挂机只是补贴。 */
-const CAPSULE_DROP_CHANCE = 0.15;
+const CAPSULE_DROP_CHANCE = IDLE_CONFIG.dropChance;
 
 /** 每分钟金币 = IDLE_MONEY_BASE + 区域难度 × IDLE_MONEY_PER_LEVEL */
-const IDLE_MONEY_BASE = 1.5;
-const IDLE_MONEY_PER_LEVEL = 0.15;
+const IDLE_MONEY_BASE = IDLE_CONFIG.moneyBase;
+const IDLE_MONEY_PER_LEVEL = IDLE_CONFIG.moneyPerLevel;
 
 /**
  * 捕获器掉落池。区域难度越高，越高级的捕获器才会进入池子，

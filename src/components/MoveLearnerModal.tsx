@@ -1,12 +1,15 @@
-import React from "react";
+import { useState } from "react";
 import { useGameStore } from "@/stores/useGameStore";
 import { MONSTER_SPECS, MOVE_SPECS } from "@/game/data";
 import PixelButton from "./PixelButton";
-import type { MonsterInstance, MoveId } from "@/game/types";
+import type { MonsterInstance } from "@/game/types";
 
 export function MoveLearnerModal() {
   const save = useGameStore((s) => s[`save${s.slot}` as keyof typeof s]) as any;
   const resolvePendingMove = useGameStore((s) => s.resolvePendingMove);
+  // P3-2：学招/替换/放弃都在服务端校验（待学列表、技能栏位、要替换的技能是否真的在身上）。
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (!save) return null;
 
@@ -18,6 +21,13 @@ export function MoveLearnerModal() {
   const newMoveId = learningMonster.pendingMoves[0];
   const newMove = MOVE_SPECS[newMoveId];
 
+  const act = async (fn: () => Promise<{ ok: boolean; reason?: string }>) => {
+    setBusy(true);
+    const res = await fn();
+    setBusy(false);
+    if (!res.ok) setError(res.reason ?? "学招请求失败");
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
       <div className="w-full max-w-sm border-4 border-[color:var(--stroke)] bg-[color:var(--bg)] p-4 shadow-2xl">
@@ -27,6 +37,12 @@ export function MoveLearnerModal() {
         <div className="mb-4 text-center text-sm text-[color:var(--muted)]">
           但是它只能学会 4 个技能。<br/>请选择一个要遗忘的技能，或者放弃学习。
         </div>
+
+        {error && (
+          <div className="mb-3 border-2 border-[color:var(--danger)] px-2 py-1 text-xs text-[color:var(--danger)]">
+            {error}
+          </div>
+        )}
 
         <div className="mb-4 border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2">
           <div className="text-xs text-[color:var(--accent)] mb-1">新技能</div>
@@ -50,7 +66,8 @@ export function MoveLearnerModal() {
             return (
               <button
                 key={id}
-                onClick={() => resolvePendingMove(learningMonster.id, id, newMoveId)}
+                disabled={busy}
+                onClick={() => void act(() => resolvePendingMove(learningMonster.id, id, newMoveId))}
                 className="block w-full border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2 text-left active:bg-[color:var(--panel2)]"
               >
                 <div className="flex items-center justify-between">
@@ -73,7 +90,8 @@ export function MoveLearnerModal() {
           <PixelButton
             tone="muted"
             className="w-full"
-            onClick={() => resolvePendingMove(learningMonster.id, null, newMoveId)}
+            disabled={busy}
+            onClick={() => void act(() => resolvePendingMove(learningMonster.id, null, newMoveId, { discard: true }))}
           >
             放弃学习 {newMove.name}
           </PixelButton>

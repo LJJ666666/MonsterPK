@@ -558,3 +558,87 @@ export function attemptCapture(
   const shakes = chance > 0.7 ? 3 : chance > 0.45 ? 2 : 1;
   return { ok: roll(chance, rng), chance, shakes };
 }
+
+// —— 进化（P3-2：此前只在客户端 rules.ts 里算，服务端只能靠存档校验兜底）——
+
+/**
+ * 把个体值/成长率按「原种族区间内的相对位置」映射到新种族的区间。
+ *
+ * 这样进化不会把个体差异抹平（早年 `oldMax <= oldMin` 时直接返回 newMin，
+ * 等于把每只幻兽的个体值统一归零，已随上下限修复一并解决）。
+ */
+function remapByBounds(value: number, oldMin: number, oldMax: number, newMin: number, newMax: number): number {
+  if (oldMax <= oldMin) return newMin;
+  const t = clamp((value - oldMin) / (oldMax - oldMin), 0, 1);
+  return Math.round(newMin + t * (newMax - newMin));
+}
+
+/**
+ * 进化一只幻兽（服务端权威）。
+ *
+ * 与前端 `src/game/rules.ts::evolveMonsterInstance` 逐项一致，由
+ * `tests/battleEngine.test.ts` 对照。**调用方必须先确认「这次进化是被允许的」**
+ * （等级触发 / 道具条件匹配），本函数只负责把数值算出来。
+ */
+export function evolveMonsterInstance(monster: ServerMonster, targetSpecId: string): ServerMonster {
+  const fromSpec = MONSTER_SPECS[monster.specId];
+  const toSpec = MONSTER_SPECS[targetSpecId];
+  if (!toSpec) return { ...monster, pendingEvolution: undefined };
+
+  const fromBounds = getMonsterStatBounds(fromSpec.id);
+  const toBounds = getMonsterStatBounds(toSpec.id);
+
+  const initStats: StatBlock = {
+    hp: remapByBounds(monster.initStats.hp, fromBounds.initMin.hp, fromBounds.initMax.hp, toBounds.initMin.hp, toBounds.initMax.hp),
+    atk: remapByBounds(monster.initStats.atk, fromBounds.initMin.atk, fromBounds.initMax.atk, toBounds.initMin.atk, toBounds.initMax.atk),
+    def: remapByBounds(monster.initStats.def, fromBounds.initMin.def, fromBounds.initMax.def, toBounds.initMin.def, toBounds.initMax.def),
+    spAtk: remapByBounds(monster.initStats.spAtk, fromBounds.initMin.spAtk, fromBounds.initMax.spAtk, toBounds.initMin.spAtk, toBounds.initMax.spAtk),
+    spDef: remapByBounds(monster.initStats.spDef, fromBounds.initMin.spDef, fromBounds.initMax.spDef, toBounds.initMin.spDef, toBounds.initMax.spDef),
+    spd: remapByBounds(monster.initStats.spd, fromBounds.initMin.spd, fromBounds.initMax.spd, toBounds.initMin.spd, toBounds.initMax.spd),
+  };
+
+  const growthRates: StatBlock = {
+    hp: remapByBounds(monster.growthRates.hp, fromBounds.gMin.hp, fromBounds.gMax.hp, toBounds.gMin.hp, toBounds.gMax.hp),
+    atk: remapByBounds(monster.growthRates.atk, fromBounds.gMin.atk, fromBounds.gMax.atk, toBounds.gMin.atk, toBounds.gMax.atk),
+    def: remapByBounds(monster.growthRates.def, fromBounds.gMin.def, fromBounds.gMax.def, toBounds.gMin.def, toBounds.gMax.def),
+    spAtk: remapByBounds(monster.growthRates.spAtk, fromBounds.gMin.spAtk, fromBounds.gMax.spAtk, toBounds.gMin.spAtk, toBounds.gMax.spAtk),
+    spDef: remapByBounds(monster.growthRates.spDef, fromBounds.gMin.spDef, fromBounds.gMax.spDef, toBounds.gMin.spDef, toBounds.gMax.spDef),
+    spd: remapByBounds(monster.growthRates.spd, fromBounds.gMin.spd, fromBounds.gMax.spd, toBounds.gMin.spd, toBounds.gMax.spd),
+  };
+
+  const levelups = Math.max(0, monster.level - 1);
+  const maxHp = initStats.hp + growthRates.hp * levelups;
+
+  // 进化保留当前血量比例，但不复活（倒下仍是倒下）。
+  const hpRatio = monster.maxHp > 0 ? monster.hp / monster.maxHp : 1;
+  const hp = monster.hp <= 0 ? 0 : clamp(Math.round(hpRatio * maxHp), 1, maxHp);
+
+  const learned = Array.from(new Set(
+    toSpec.learnset.filter((x) => x.level === monster.level).map((x) => x.moveId),
+  ));
+  const moveIds = [...(monster.moveIds ?? [])];
+  const pendingMoves = [...(monster.pendingMoves ?? [])];
+  for (const m of learned) {
+    if (moveIds.includes(m) || pendingMoves.includes(m)) continue;
+    if (moveIds.length < 4) moveIds.push(m);
+    else pendingMoves.push(m);
+  }
+
+  return {
+    ...monster,
+    specId: toSpec.id,
+    element: toSpec.element,
+    initStats,
+    growthRates,
+    maxHp,
+    hp,
+    atk: initStats.atk + growthRates.atk * levelups,
+    def: initStats.def + growthRates.def * levelups,
+    spAtk: initStats.spAtk + growthRates.spAtk * levelups,
+    spDef: initStats.spDef + growthRates.spDef * levelups,
+    spd: initStats.spd + growthRates.spd * levelups,
+    moveIds: Array.from(new Set(moveIds)),
+    pendingMoves,
+    pendingEvolution: undefined,
+  };
+}

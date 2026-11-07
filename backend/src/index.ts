@@ -8,6 +8,7 @@ import { saveRoutes } from './modules/save';
 import { actionRoutes } from './modules/actions';
 import { sessionRoutes } from './modules/session';
 import { battleRoutes } from './modules/battle';
+import { gameRoutes } from './modules/game';
 import { contentStats } from './game/content';
 import { getSessionStats, battles } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
@@ -70,6 +71,7 @@ fastify.register(saveRoutes);
 fastify.register(actionRoutes);
 fastify.register(sessionRoutes);
 fastify.register(battleRoutes);
+fastify.register(gameRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 registerRealtime(fastify);

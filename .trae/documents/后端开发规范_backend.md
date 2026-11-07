@@ -762,3 +762,94 @@ nonce 每次新发不触发重放。`capture` 同型（采信 `baseRate` / `enem
 前后端同步，`numericRules.test.ts` 用硬断言钉住（稀有度 ×0.92、等级压制上限 +10%）。
 
 **教训**：删掉一个入口之前，先确认它承载的规则有没有别的落点。这次差点连规则一起删了。
+
+
+## 20. P3-2 瘦终端：存档写操作全面上移（2026-11-07）
+
+P3-1c 之后战斗过程已经在服务端，但**其余所有会改存档的操作仍然在客户端算**，
+算完整包 PUT，服务端只做「资源不得更富」的单调比对。这条链路留了三个面：
+① 客户端可以跨地点免费回满；② 进化后的六维由客户端决定；③ 战斗外道具效果是客户端写的。
+本节记录把这些操作搬到服务端之后的契约。
+
+### 20.1 唯一写入口的最终形态
+
+| 写入来源 | 入口 | 说明 |
+|---|---|---|
+| 战斗结算 | `POST /api/battle/action` → `commitState(source='battle')` | P3-1 |
+| 意图裁决 | `POST /api/actions/:type` → 客户端应用后带 nonce PUT | P1-2（仅剩 idle / shop / admin_test） |
+| **存档写操作** | **`POST /api/game/:op` → `commitState(source='action')`** | **P3-2 新增** |
+| 新档 / 导入 | `POST /api/game/new_game` 与 `PUT ?rebase=1` | P3-2b：新档由服务端生成 |
+
+`commitState()` 仍是唯一写库入口。`POST /api/game/:op` 的响应直接返回整包 `data`，
+客户端 `importSaveJson(data, slot, { keepBattle: true })` 应用，并 `suppressNextUpload()`
+抑制一次回传。
+
+### 20.2 操作清单与拒绝码
+
+统一 `POST /api/game/:op`，body 只有意图 ID（`slot` 必填）：
+
+| op | body | 服务端判定 | 主要拒绝码（400，不封号） |
+|---|---|---|---|
+| `heal` | — | 当前 `LOCATIONS[locationId].hasCenter` | `NO_HEAL_CENTER` |
+| `use_item` | `itemId` + `monsterId`/`partyIndex` | 内容表 `ITEM_SPECS` 的 kind / heal / cures / 进化条件 | `ITEM_UNKNOWN` `ITEM_NOT_ENOUGH` `ITEM_NOT_USABLE` `MONSTER_FAINTED` `STATUS_NOT_MATCH` `EVOLUTION_NOT_APPLICABLE` |
+| `evolve` | `monsterId` + `accept` | `pendingEvolution.targetId` 必须在该种族 `evolutions` 里 | `NO_PENDING_EVOLUTION` `EVOLUTION_TARGET_INVALID` |
+| `learn_move` | `monsterId` + `newMoveId` + `oldMoveId`/`discard` | `newMoveId` 必须在 `pendingMoves`；替换目标必须在 `moveIds`；栏位 <4 才能直接学 | `MOVE_NOT_PENDING` `MOVE_SLOTS_FULL` `MOVE_NOT_KNOWN` |
+| `move_to_box` / `move_to_party` / `release` | 下标或 `monsterId` | 队伍 1~6 只 | `PARTY_TOO_SMALL` `PARTY_FULL` `MONSTER_NOT_FOUND` |
+| `travel` | `locationId` | 地点在内容表 | `LOCATION_UNKNOWN` |
+| `new_game` | `playerName` + `starterSpecId` + `overwrite` | 御三家取内容表 `STARTERS`；已有档需显式 `overwrite` | `NAME_INVALID` `STARTER_INVALID` `SAVE_EXISTS`(409) |
+
+**战斗中一律拒绝**（`BATTLE_IN_PROGRESS`）：否则治疗/换药会绕过服务端战斗的 HP 真值。
+
+### 20.3 HP 与异常状态：摘要盲区必须单独堵
+
+`digestOf()` 覆盖金钱 / 道具 / 持有数 / 等级经验 / 首通 / 挂机，**不包含 HP 与状态**。
+所以「把 HP 改回满」「把烧伤清掉」在普通整包 PUT 里毫无痕迹：资源没变富，
+`compareDigest` 直接放行，等于免费治疗。
+
+P3-2 增加 `checkPartyStateRegression(prevRaw, nextRaw)`（`lib/authority.ts`），
+用于**分支 3（普通整包 PUT）**，规则是「只能变差」：
+
+- `hp` 增加 → `AUTHORITY_HP_INCREASE`
+- 旧 `status !== 'none'` 而新 `status === 'none'` → `AUTHORITY_STATUS_CLEARED`
+
+变差方向（掉血、中毒）仍然放行，避免玩家在同步失败时被卡死。
+
+### 20.4 全灭惩罚也上移了
+
+`leaveBattle` 里的「回满 + 送回最近恢复点」原本是客户端逻辑——不点离开就能逃掉惩罚。
+现在由 `modules/battle.ts::applySettlement` 在 `result === 'player_fainted'` 时直接落档，
+客户端只关界面。
+
+### 20.5 新档由服务端生成
+
+`createNewSave()`（`game/mutations.ts`）用服务端 RNG 掷初始幻兽，背包取内容表
+`INITIAL_INVENTORY`，出生地取 `START_LOCATION_ID`，直接 `freshAuthority` 建基线。
+客户端只提交「名字 + 选哪只御三家」。
+
+副作用：服务端生成的新档**必须能通过自己的 `checkFreshSave`**（由单测钉住）——
+初始资源模板和生成逻辑是同一份常量，改一处不会漂移。
+
+### 20.6 内容双源收口
+
+| 原双源 | 现在 |
+|---|---|
+| `settlements.ts::ITEM_PRICES` 手抄价目表 | 派生 `itemPrice(id) = ITEM_SPECS[id].price` |
+| `settlements.ts` 挂机参数 vs `src/lib/idle.ts` | 唯一真源 `data.ts::IDLE_CONFIG` → 内容表 |
+| `authority.ts::FRESH_SAVE_TEMPLATE.inventory` 手抄 | 取 `INITIAL_INVENTORY` |
+| 前端 `defaultInventory()` / `newGame()` 拼接 | 服务端 `createNewSave()` |
+
+`npm run check:content` 会在 `data.ts` 改了但内容表没重生成时失败。
+**改内容相关常量后必须 `cd backend && npm run gen:content` 并一起提交。**
+
+### 20.7 仍然存在的边界（明确记录，不是遗漏）
+
+1. **旧档回滚竞态**：服务端写完档后，若客户端在窗口内把**旧档**整包 PUT 上来，
+   因为「更穷」属于允许方向，服务端会接受并回滚这次写入。当前靠
+   `commitState` 广播 + `suppressNextUpload` 把窗口压到很小，根治办法是普通 PUT
+   带 `revision` 前置条件（P3-2b 后续）。**在那之前不要在前端手动触发整包上传。**
+2. **`travel` 只校验地点合法**：地图可达性依赖尚未上移的走路系统，客户端仍可
+   「跳到任意已存在的城镇」。影响仅是省掉走路（步数无收益），P4 地图服务再收口。
+3. **减少成员/幻兽仍可由普通 PUT 达成**（持有数下降属于自损方向）。放生已上移，
+   但如果客户端直接删掉队伍成员，服务端会接受。根治同上（整包 PUT 逐字段白名单）。
+4. **`migrateSaveState`** 在版本升级时会改本地档并上传，可能与 HP 校验冲突。
+   开发阶段无老用户，暂按「真出现再处理」。

@@ -158,6 +158,21 @@ function applySettlement(row: SaveRow, state: BattleState): string {
     }
   }
 
+  // 全灭：送回最近的恢复点并回满。此前这是客户端 `leaveBattle` 里的本地逻辑——
+  // 意味着「不点离开按钮」或「改客户端」就能避免惩罚，而且回满结果由客户端写进存档。
+  // P3-2 起由服务端在结算时直接落档，客户端只负责关掉战斗界面。
+  if (state.result === 'player_fainted') {
+    const heal = typeof next.lastHealLocationId === 'string' && next.lastHealLocationId
+      ? next.lastHealLocationId
+      : next.locationId;
+    next.party = (Array.isArray(next.party) ? next.party : []).map((m: any) => ({
+      ...m,
+      hp: m.maxHp,
+      status: 'none',
+    }));
+    if (typeof heal === 'string' && heal) next.locationId = heal;
+  }
+
   next.lastSavedAt = new Date().toISOString();
   return JSON.stringify(next);
 }

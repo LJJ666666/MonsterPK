@@ -374,3 +374,63 @@ permanent 只是**不再重传**，并没有把本地存档回滚回服务端认
 
 **教训**：「请求被拒」和「客户端的错误状态被修正」是两件事。前者只需要不重试，
 后者才真正让玩家回到可用状态。只做前者，玩家就卡在中间。
+
+
+## 25. P3-2 挖出的四处「本地权威」残留（2026-11-07 杰哥拍板「一切以服务器为主」）
+
+杰哥的原话：「把以往仅前端的处理一并找出来优化掉，一切都是以服务器为主」。
+按这个口径把客户端还剩下的写档逻辑过了一遍，四处都不算 bug 单点，而是同一类问题：
+**操作在客户端算完，服务端只看到结果，于是结果本身没有可信来源。**
+
+### 25.1 治疗可以在任何地方回满
+
+`healAll()` 只改本地 store，不看 `locationId`，也不问服务端。任何界面能调它就能回满；
+更彻底一点，玩家把存档里的 `locationId` 改成 `town_starter` 再调一次，同样成立
+（`travelTo` 也只在本地改）。
+
+修：`POST /api/game/heal`，服务端查 `LOCATIONS[locationId].hasCenter` 才回满，
+写档并广播。客户端不再有回满逻辑。
+
+### 25.2 进化后的六维是客户端算的
+
+`useItemOutsideBattle` / `resolvePendingEvolution` 都调前端 `evolveMonsterInstance`：
+个体值/成长率按区间重映射、血量按比例保留、新学会的技能……全在客户端。
+`saveValidator` 只能校验「数值像不像这个等级该有的」，没法证明「这次进化真的发生过」。
+
+修：`evolveMonsterInstance` 复制到 `backend/src/game/rules.ts`（与前端逐项一致，
+由 `battleEngine.test.ts` 对照），进化只走 `/api/game/evolve` 与 `/api/game/use_item`；
+`pendingEvolution.targetId` 必须命中内容表里的 `evolutions`，否则
+`EVOLUTION_TARGET_INVALID`。
+
+### 25.3 HP 根本不在权威摘要里
+
+这是排查时最意外的一条：`digestOf()` 从来没把 `party[].hp` 算进去，因为 P1-2 时代
+战斗在客户端，服务端刻意不管 HP。但 P3-1c 之后 HP 已经是服务端真值了，
+「客户端把血改满」仍然能整包 PUT 通过——资源一点没变富。
+
+修：新增 `checkPartyStateRegression()`，在分支 3 里额外要求 HP 只能下降、
+异常状态不能凭空清除。`e2e:p32` 有一条用例直接断言「客户端自改 HP 不被接受」。
+**教训：上移真值的时候，要顺手把真值从「允许客户端改」的通道里摘出去，
+否则它只是换了个地方存在，并没有变成权威。**
+
+### 25.4 解药和进化石在背包里根本没有入口
+
+`useItemOutsideBattle` 里写了 `kind === 'status_heal'` 之外的分支（`evolution`），
+但 `Camp.tsx` 的背包只对 `kind === 'heal'` 渲染「对 XX 使用」按钮。
+也就是说：P1-3 声称「进化石可用」，实际玩家只能靠升级弹窗进化，
+买来的石头和解药在 UI 上是死道具；`bagFilter === 'heal'` 也把这两类过滤掉了。
+
+修：背包按内容表推导「能对谁用」——回复看缺不缺血、解药看状态是否匹配、
+进化石看这只幻兽有没有对应的 `item` 进化条件；三类都进「药品」分类。
+
+### 25.5 顺带发现：`discard` 语义缺失
+
+`MoveLearnerModal` 的「放弃学习」传的是 `oldMoveId: null`，但服务端 `learn_move`
+在 `oldMoveId === null` 时的语义是「栏位没满就直接学会」，两者撞车会让放弃学习
+变成 `MOVE_SLOTS_FULL`。补 `discard: true` 分支：只从 `pendingMoves` 移除，不动技能栏。
+
+### 25.6 全灭惩罚原本可以「不点离开」逃掉
+
+`leaveBattle` 里做「回满 + 送回最近恢复点」。只要不点离开、直接刷新页面（战斗态不进存档），
+惩罚就不生效。现在结算时服务端直接写档。**凡是「惩罚」语义的逻辑都不能放客户端**，
+不然它同时是一个「可以不放行」的可选项。

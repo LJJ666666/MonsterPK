@@ -93,7 +93,7 @@ export type SessionStatePayload = {
   data: string;
   updatedAt: number;
   schemaVersion: string;
-  source: 'hydrate' | 'put' | 'intent' | 'battle';
+  source: 'hydrate' | 'put' | 'intent' | 'battle' | 'action';
   online: number;
 };
 

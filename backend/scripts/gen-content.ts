@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ELEMENT_LABEL, ITEM_SPECS, LOCATIONS, MONSTER_SPECS, MOVE_SPECS, THEME_TABLE, TYPE_CHART,
+  ELEMENT_LABEL, IDLE_CONFIG, INITIAL_INVENTORY, ITEM_SPECS, LOCATIONS, MONSTER_SPECS,
+  MOVE_SPECS, START_LOCATION_ID, STARTERS, THEME_TABLE, TYPE_CHART,
 } from '../../src/game/data.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,10 @@ const payload = {
   locations: LOCATIONS,
   elementLabel: ELEMENT_LABEL,
   typeChart: TYPE_CHART,
+  starters: STARTERS,
+  startLocationId: START_LOCATION_ID,
+  initialInventory: INITIAL_INVENTORY,
+  idleConfig: IDLE_CONFIG,
 };
 
 // 生成 .ts 而不是 .json：tsc 会把 .ts 一起编译进 dist，json 不会（避免 build 后运行时缺文件）。

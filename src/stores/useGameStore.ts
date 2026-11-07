@@ -1,12 +1,11 @@
 import { create } from "zustand";
 import { persist, StateStorage, createJSONStorage } from "zustand/middleware";
-import { ITEM_SPECS, MONSTER_SPECS, STARTERS } from "@/game/data";
-import type { BattleState, EncounterTheme, ItemId, MonsterInstance, SaveData, LocationId, MoveId } from "@/game/types";
-import { createInstance, evolveMonsterInstance } from "@/game/rules";
-import { SCHEMA_VERSION, SAVE_VERSION, migrateSaveState } from "@/stores/saveVersion";
-import { markRebase } from "@/lib/rebase";
+import { ITEM_SPECS, STARTERS } from "@/game/data";
+import type { BattleState, EncounterTheme, ItemId, SaveData, LocationId, MoveId } from "@/game/types";
+import { SCHEMA_VERSION, migrateSaveState } from "@/stores/saveVersion";
 import type { IntentResult } from "@/lib/intents";
 import { battleApi, canUseServerBattle, toBattleState, toFailure, type ActionInput } from "@/lib/battleApi";
+import { runGameOp, type MutationOp } from "@/lib/gameApi";
 
 /**
  * P1-2：关键随机与经济结算统一走服务端裁决。
@@ -84,6 +83,35 @@ async function refreshSaveFromServer(slot: number): Promise<void> {
   }
 }
 
+/**
+ * P3-2：把服务端写操作返回的整包存档应用回本地。
+ *
+ * 为什么不走 PUT 校验链路：服务端已经在 `commitState` 里落库并广播了自己的权威态，
+ * 本地这份只是渲染副本。先 `suppressNextUpload()` 抑制一次自动上传，避免刚写完
+ * 又原样传回去（那会多一次 revision 和一次广播）。
+ */
+async function applyServerSave(slot: number, data: string): Promise<void> {
+  const { suppressNextUpload } = await import("@/lib/sync");
+  suppressNextUpload();
+  useGameStore.getState().importSaveJson(data, slot as 1 | 2 | 3, { keepBattle: true });
+}
+
+/** P3-2：所有「会改存档」的操作统一走这里，失败只回报文，不做任何本地补偿。 */
+async function serverOp(
+  get: () => GameState,
+  op: MutationOp,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; reason?: string }> {
+  const state = get();
+  const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+  if (!save) return { ok: false, reason: "请先创建或导入存档" };
+  const res = await runGameOp(op, { slot: state.slot, ...body });
+  // strict:false 下判别联合不收窄，用 in 判字段（bug_log §18）。
+  if (!res.ok) return { ok: false, reason: "reason" in res ? res.reason : "操作失败" };
+  await applyServerSave(state.slot, res.data);
+  return { ok: true };
+}
+
 type GameState = {
   slot: 1 | 2 | 3;
   save1: SaveData | null;
@@ -93,9 +121,12 @@ type GameState = {
   
   setSlot: (slot: 1 | 2 | 3) => void;
   leaveBattle: () => void;
-  newGame: (playerName: string, starterSpecId: (typeof STARTERS)[number]) => void;
+  newGame: (
+    playerName: string,
+    starterSpecId: (typeof STARTERS)[number],
+  ) => Promise<{ ok: boolean; reason?: string }>;
   resetSave: (slotToReset?: 1 | 2 | 3) => void;
-  travelTo: (locationId: LocationId) => void;
+  travelTo: (locationId: LocationId) => Promise<{ ok: boolean; reason?: string }>;
   importSaveJson: (
     json: string,
     targetSlot?: 1 | 2 | 3,
@@ -110,8 +141,8 @@ type GameState = {
   flee: () => void;
   /** P3-1c：刷新/断线重连后取回服务端仍存活的战斗（战斗态不进存档）。 */
   resumeBattle: () => Promise<void>;
-  healAll: () => void;
-  useItemOutsideBattle: (itemId: ItemId, partyIndex: number) => void;
+  healAll: () => Promise<{ ok: boolean; reason?: string }>;
+  useItemOutsideBattle: (itemId: ItemId, partyIndex: number) => Promise<{ ok: boolean; reason?: string }>;
   buyItem: (itemId: ItemId, amount: number) => Promise<void>;
 
   /** 派遣挂机到某个已首通区域（服务端时钟裁决）。 */
@@ -121,11 +152,16 @@ type GameState = {
   /** 放弃本次挂机派遣，不结算收益。 */
   cancelIdle: () => Promise<void>;
 
-  movePartyToBox: (partyIndex: number) => void;
-  moveBoxToParty: (boxIndex: number) => void;
-  releaseMonster: (id: string) => void;
-  resolvePendingMove: (monsterId: string, oldMoveId: MoveId | null, newMoveId: MoveId) => void;
-  resolvePendingEvolution: (monsterId: string, accept: boolean) => void;
+  movePartyToBox: (partyIndex: number) => Promise<{ ok: boolean; reason?: string }>;
+  moveBoxToParty: (boxIndex: number) => Promise<{ ok: boolean; reason?: string }>;
+  releaseMonster: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  resolvePendingMove: (
+    monsterId: string,
+    oldMoveId: MoveId | null,
+    newMoveId: MoveId,
+    opts?: { discard?: boolean },
+  ) => Promise<{ ok: boolean; reason?: string }>;
+  resolvePendingEvolution: (monsterId: string, accept: boolean) => Promise<{ ok: boolean; reason?: string }>;
 
   // 测试功能
   testOHKO: boolean;
@@ -142,32 +178,20 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function defaultInventory(): Record<ItemId, number> {
-  const inv: Partial<Record<ItemId, number>> = {};
-  for (const id of Object.keys(ITEM_SPECS) as ItemId[]) {
-    inv[id] = 0;
-  }
-  inv.capsule_basic = 6;
-  inv.capsule_prism = 1;
-  inv.potion_small = 3;
-  return inv as Record<ItemId, number>;
-}
-
 function pushLog(battle: BattleState, lines: string[]) {
   const log = [...battle.log, ...lines].slice(-60);
   return { ...battle, log };
-}
-
-function consumeItem(inv: Record<ItemId, number>, itemId: ItemId) {
-  const qty = inv[itemId] ?? 0;
-  if (qty <= 0) return { ok: false as const, inv };
-  return { ok: true as const, inv: { ...inv, [itemId]: qty - 1 } };
 }
 
 /*
  * 2026-11-07：本地降级战斗（beginLocalEncounter）已删除。
  * 断网不再本地开打——本地战果必然被服务端拒绝，只会制造「打完不认」和同步死循环。
  * 战斗入口只剩 startEncounter 里的服务端路径。
+ *
+ * 2026-11-07（P3-2）：本地「改存档」的业务逻辑也全部删除——治疗、战斗外道具、
+ * 进化、学招、队伍整理、移动都改调 `/api/game/*`，由服务端判定并写档。
+ * 现在前端只剩三类写本地状态的入口：新建/导入存档（rebase 明确授权）、
+ * 服务端快照应用（importSaveJson）、测试菜单开关（纯 UI 标记，随开局上报给服务端判定）。
  */
 
 const customStorage: StateStorage = {
@@ -222,51 +246,25 @@ export const useGameStore = create<GameState>()(
             /* 已超时/已结束都无所谓，服务端会自己回收 */
           });
         }
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (state.battle?.result === "player_fainted" && save) {
-          // 全灭惩罚：回到最近的恢复点，并恢复所有队伍状态
-          const party = save.party.map((m) => ({ ...m, hp: m.maxHp, status: "none" as const }));
-          set({ 
-            battle: null,
-            [`save${state.slot}`]: { 
-              ...save, 
-              party, 
-              locationId: save.lastHealLocationId, 
-              lastSavedAt: nowIso() 
-            } 
-          } as any);
-        } else {
-          set({ battle: null });
-        }
+        // P3-2：全灭惩罚（回满 + 送回最近恢复点）已由服务端在结算时写档，
+        // 这里不再改存档，只关闭战斗界面。
+        set({ battle: null });
       },
 
-      newGame: (playerName, starterSpecId) => {
+      newGame: async (playerName, starterSpecId) => {
         const { slot } = get();
-        const starter = createInstance(starterSpecId, 5);
-        // 强制去重，防止因为旧版代码缓存等不可控因素导致的初始重复技能
-        if (starter.moveIds) {
-          starter.moveIds = Array.from(new Set(starter.moveIds));
-        }
-        
-        const save: SaveData = {
-          version: SAVE_VERSION,
+        // P3-2b：整份新档由服务端生成（初始幻兽的个体值、初始背包都在服务端掷），
+        // 客户端只提交「名字 + 选哪只御三家」。不再本地 createInstance + rebase。
+        const res = await runGameOp("new_game", {
+          slot,
           playerName,
-          money: 0,
-          steps: 0,
-          locationId: "town_starter",
-          lastHealLocationId: "town_starter",
-          visitedLocationIds: ["town_starter"],
-          party: [starter],
-          box: [],
-          inventory: defaultInventory(),
-          collection: {
-            [starterSpecId]: { seen: true, captured: true, timesCaptured: 1, seenLocations: ["town_starter"] },
-          },
-          lastSavedAt: nowIso(),
-        };
-        set({ [`save${slot}`]: save, battle: null } as any);
-        // P1-2-d：新档必须重建服务端权威基线，否则旧基线会把初始化资源判成「凭空增加」。
-        markRebase();
+          starterSpecId,
+          // 前端在「新建旅程」里已经让玩家确认过覆盖，这里显式授权。
+          overwrite: true,
+        });
+        if (!res.ok) return { ok: false, reason: "reason" in res ? res.reason : "创建存档失败" };
+        await applyServerSave(slot, res.data);
+        return { ok: true };
       },
 
       resetSave: (slotToReset) => {
@@ -274,14 +272,9 @@ export const useGameStore = create<GameState>()(
         set({ [`save${s}`]: null, battle: null } as any);
       },
 
-      travelTo: (locationId) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        const visited = save.visitedLocationIds?.includes(locationId)
-          ? save.visitedLocationIds
-          : [...(save.visitedLocationIds ?? []), locationId];
-        set({ [`save${state.slot}`]: { ...save, locationId, visitedLocationIds: visited, lastSavedAt: nowIso() } } as any);
+      travelTo: async (locationId) => {
+        // P3-2：地点合法性由服务端判（地图可达性等 P4 上移），本地只发意图。
+        return serverOp(get, "travel", { locationId });
       },
 
       importSaveJson: (json, targetSlot, opts) => {
@@ -412,47 +405,19 @@ export const useGameStore = create<GameState>()(
         await runServerBattleAction(set, get, { type: "move", moveId });
       },
 
-      healAll: () => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        const party = save.party.map((m) => ({ ...m, hp: m.maxHp, status: "none" as const }));
-        set({ [`save${state.slot}`]: { ...save, party, lastHealLocationId: save.locationId, lastSavedAt: nowIso() } } as any);
+      healAll: async () => {
+        // P3-2：治疗从「客户端回满」改成「服务端确认你在恢复中心再回满」。
+        // 以前这个函数在任何地点都能调，等于无限免费回血。
+        return serverOp(get, "heal", {});
       },
 
-      useItemOutsideBattle: (itemId, partyIndex) => {
+      useItemOutsideBattle: async (itemId, partyIndex) => {
+        // P3-2：道具消耗、回复量、解异常、进化石条件与进化后数值全在服务端算。
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        const item = ITEM_SPECS[itemId];
-        const cur = save.party[partyIndex];
-        if (!cur) return;
-
-        // P1-3：进化石此前买了用不了。只有内容表配置了 item 进化条件的幻兽才消耗石头并进化；
-        // 没有匹配条件时原样返回，避免玩家白扔道具。进化不改等级/经验/捕获数，
-        // 因此只是一次合法的道具消耗，自动同步的单调比对会放行。
-        if (item.kind === "evolution") {
-          const spec = MONSTER_SPECS[cur.specId];
-          const evo = spec?.evolutions?.find(
-            (e) => e.condition.type === "item" && e.condition.itemId === itemId
-          );
-          if (!evo) return;
-          const consumed = consumeItem(save.inventory, itemId);
-          if (!consumed.ok) return;
-          const party = save.party.slice();
-          party[partyIndex] = evolveMonsterInstance(cur, evo.targetId);
-          set({ [`save${state.slot}`]: { ...save, inventory: consumed.inv, party, lastSavedAt: nowIso() } } as any);
-          return;
-        }
-
-        if (item.kind !== "heal") return;
-        const consumed = consumeItem(save.inventory, itemId);
-        if (!consumed.ok) return;
-        if (cur.hp <= 0) return;
-        const healed = Math.min(cur.maxHp, cur.hp + (item.heal ?? 0));
-        const party = save.party.slice();
-        party[partyIndex] = { ...cur, hp: healed };
-        set({ [`save${state.slot}`]: { ...save, inventory: consumed.inv, party, lastSavedAt: nowIso() } } as any);
+        const target = save?.party[partyIndex];
+        if (!target) return { ok: false, reason: "找不到这只幻兽" };
+        return serverOp(get, "use_item", { itemId, monsterId: target.id });
       },
 
       buyItem: async (itemId, amount) => {
@@ -538,125 +503,22 @@ export const useGameStore = create<GameState>()(
         });
       },
 
-      movePartyToBox: (partyIndex: number) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        if (save.party.length <= 1) return;
-        const m = save.party[partyIndex];
-        if (!m) return;
-        const party = save.party.filter((_, i) => i !== partyIndex);
-        const box = [...save.box, m];
-        set({ [`save${state.slot}`]: { ...save, party, box, lastSavedAt: nowIso() } } as any);
-      },
+      movePartyToBox: async (partyIndex) => serverOp(get, "move_to_box", { partyIndex }),
 
-      moveBoxToParty: (boxIndex: number) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        if (save.party.length >= 6) return;
-        const m = save.box[boxIndex];
-        if (!m) return;
-        const box = save.box.filter((_, i) => i !== boxIndex);
-        const party = [...save.party, m];
-        set({ [`save${state.slot}`]: { ...save, party, box, lastSavedAt: nowIso() } } as any);
-      },
+      moveBoxToParty: async (boxIndex) => serverOp(get, "move_to_party", { boxIndex }),
 
-      releaseMonster: (id: string) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-        const inParty = save.party.some(m => m.id === id);
-        if (inParty && save.party.length <= 1) return;
+      releaseMonster: async (id) => serverOp(get, "release", { monsterId: id }),
 
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            party: save.party.filter(m => m.id !== id),
-            box: save.box.filter(m => m.id !== id),
-            lastSavedAt: nowIso()
-          }
-        } as any);
-      },
+      resolvePendingMove: async (monsterId, oldMoveId, newMoveId, opts) =>
+        serverOp(get, "learn_move", {
+          monsterId,
+          oldMoveId,
+          newMoveId,
+          ...(opts?.discard ? { discard: true } : {}),
+        }),
 
-      resolvePendingMove: (monsterId, oldMoveId, newMoveId) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-
-        const updateMonster = (m: MonsterInstance) => {
-          if (m.id !== monsterId) return m;
-          const pendingMoves = (m.pendingMoves ?? []).filter(id => id !== newMoveId);
-          let moveIds = [...m.moveIds];
-          if (oldMoveId !== null) {
-            const idx = moveIds.indexOf(oldMoveId);
-            if (idx !== -1) {
-              moveIds[idx] = newMoveId;
-            }
-          }
-          return { ...m, pendingMoves, moveIds };
-        };
-
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            party: save.party.map(updateMonster),
-            box: save.box.map(updateMonster),
-            lastSavedAt: nowIso()
-          }
-        } as any);
-      },
-
-      resolvePendingEvolution: (monsterId, accept) => {
-        const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
-        if (!save) return;
-
-        const updateMonster = (m: MonsterInstance) => {
-          if (m.id !== monsterId) return m;
-          const pending = m.pendingEvolution;
-          if (!pending) return m;
-          if (!accept) return { ...m, pendingEvolution: undefined };
-
-          const evolved = evolveMonsterInstance(m, pending.targetId);
-          return evolved;
-        };
-
-        const party = save.party.map(updateMonster);
-        const box = save.box.map(updateMonster);
-
-        const evolvedMonster = [...party, ...box].find((m) => m.id === monsterId);
-        const evolvedSpecId = evolvedMonster?.specId;
-
-        let collection = save.collection;
-        if (evolvedSpecId) {
-          const prev = save.collection[evolvedSpecId];
-          const seenLocations = prev?.seenLocations?.includes(save.locationId)
-            ? prev.seenLocations
-            : [...(prev?.seenLocations ?? []), save.locationId];
-          collection = {
-            ...save.collection,
-            [evolvedSpecId]: {
-              seen: true,
-              captured: true,
-              // 进化只登记图鉴「已见过/已获得」，不增加捕获计数：
-              // 捕获次数是服务端裁决资源，客户端自行 +1 会被权威摘要判成伪造捕获。
-              timesCaptured: prev?.timesCaptured ?? 0,
-              seenLocations,
-            },
-          };
-        }
-
-        set({
-          [`save${state.slot}`]: {
-            ...save,
-            party,
-            box,
-            collection,
-            lastSavedAt: nowIso(),
-          },
-        } as any);
-      },
+      resolvePendingEvolution: async (monsterId, accept) =>
+        serverOp(get, "evolve", { monsterId, accept }),
 
       testOHKO: false,
       testMaxStats: false,

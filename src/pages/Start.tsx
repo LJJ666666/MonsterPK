@@ -336,9 +336,14 @@ export default function Start() {
                   <div className="mt-1.5">捕获胶囊 ×6 · 棱镜胶囊 ×1 · 小型修复剂 ×3</div>
                 </div>
                 <PixelButton
-                  onClick={() => {
+                  onClick={async () => {
                     const name = playerName.trim() || "旅行者";
-                    newGame(name, starter);
+                    // P3-2b：新档由服务端生成，客户端只提交名字与初始幻兽。
+                    const res = await newGame(name, starter);
+                    if (!res.ok) {
+                      setErr(res.reason ?? "创建存档失败");
+                      return;
+                    }
                     setOpen(false);
                     navigate("/camp");
                   }}

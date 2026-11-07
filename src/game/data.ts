@@ -796,6 +796,38 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
 
 export const STARTERS = ["sprout_owl", "ember_marmot", "tide_newt"] as const;
 
+/** 新档的出生城镇。 */
+export const START_LOCATION_ID = "town_starter";
+
+/**
+ * 新档初始背包（服务端据此校验「新档不该带更多东西」，也据此生成新档）。
+ * 改这里等于改全服初始资源，服务端 `checkFreshSave` 的上限会跟着变。
+ */
+export const INITIAL_INVENTORY: Record<string, number> = {
+  capsule_basic: 6,
+  capsule_prism: 1,
+  potion_small: 3,
+};
+
+/**
+ * 挂机（派遣）参数——服务端与前端展示共用的唯一真源。
+ *
+ * P3-2 之前服务端 `settlements.ts` 手抄了一份同样的常量，注释里写着「改前端必须同步这里」，
+ * 这种双源一旦漏改就是「界面显示的收益和实际到账不一致」。现在由 `gen:content` 一并
+ * 生成到服务端内容表，`check:content` 会拦下漂移。
+ */
+export const IDLE_CONFIG = {
+  /** 离线挂机累积上限（分钟）。 */
+  capMinutes: 8 * 60,
+  /** 每累计这么多分钟做一次捕获器掉落判定。 */
+  rollMinutes: 20,
+  /** 单次判定掉落概率。 */
+  dropChance: 0.15,
+  /** 每分钟金币 = moneyBase + 区域难度 × moneyPerLevel。 */
+  moneyBase: 1.5,
+  moneyPerLevel: 0.15,
+};
+
 export const THEME_TABLE: Record<string, string[]> = {
   grass: ["sprout_owl", "leaf_bug", "fluff_dog", "fairy_sprite"],
   cave: ["rock_golem", "iron_bird", "spark_mouse", "scale_drake", "mud_pig"],

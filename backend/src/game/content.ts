@@ -96,6 +96,24 @@ export const THEME_TABLE: Record<string, string[]> = CONTENT.themes;
 export const LOCATIONS: Record<string, any> = CONTENT.locations;
 export const ELEMENT_LABEL: Record<string, string> = CONTENT.elementLabel;
 
+/** 初始幻兽候选（新档只能从这里选）。 */
+export const STARTERS: string[] = CONTENT.starters;
+
+/** 新档出生城镇。 */
+export const START_LOCATION_ID: string = CONTENT.startLocationId;
+
+/** 新档初始背包（同时是 rebase 的上限模板）。 */
+export const INITIAL_INVENTORY: Record<string, number> = CONTENT.initialInventory;
+
+/** 挂机参数（真源 src/game/data.ts::IDLE_CONFIG）。 */
+export const IDLE_CONFIG: {
+  capMinutes: number;
+  rollMinutes: number;
+  dropChance: number;
+  moneyBase: number;
+  moneyPerLevel: number;
+} = CONTENT.idleConfig;
+
 /** 属性克制表：缺省 1 倍。 */
 export const TYPE_CHART: Record<string, Partial<Record<string, number>>> = CONTENT.typeChart;
 

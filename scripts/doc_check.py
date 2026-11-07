@@ -34,18 +34,30 @@ spec_text = text(DOCS / "后端开发规范_backend.md")
 pkg_text = text(ROOT / "backend" / "package.json")
 root_pkg_text = text(ROOT / "package.json")
 handoff_text = text(ROOT / "HANDOFF.md")
+verify_text = text(ROOT / "scripts" / "verify.mjs")
 
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（160 / 81 / 34 / 24 / 48 / 114 / 15）",
-     all(x in memory_text for x in ["**160**", "**81**", "**34**", "**24**", "**48**", "114", "**15/15**"])),
+    ("MEMORY.md 写入最终数字（199 / 81 / 34 / 24 / 48 / 50 / 114 / 15）",
+     all(x in memory_text for x in ["**199**", "**81**", "**34**", "**24**", "**48**", "50", "114", "**15/15**"])),
     ("MEMORY.md 记录降级与旧意图下线",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P3-2", "下一步 P3-2" in memory_text),
+    ("MEMORY.md 下一步为 P4", "下一步 P4" in memory_text),
+    ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
     ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
-    ("bug_log 含 §17 ~ §24", all(f"## {n}." in bug_text for n in (17, 18, 19, 20, 21, 22, 23, 24))),
+    ("bug_log 含 §17 ~ §25", all(f"## {n}." in bug_text for n in (17, 18, 19, 20, 21, 22, 23, 24, 25))),
+    ("规范含 §20 服务端存档写操作", "## 20. P3-2 瘦终端" in spec_text and "20.7" in spec_text),
+    ("verify 已注册 e2e:p32", "e2e:p32" in verify_text),
+    ("P3-2 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/mutations.ts",
+         "backend/src/modules/game.ts",
+         "backend/tests/mutations.test.ts",
+         "backend/tests/e2e_p32_mutations.mjs",
+         "src/lib/gameApi.ts",
+     ])),
     ("规范含 §19.5 降级决策与 §19.6 意图下线",
      "### 19.5" in spec_text and "### 19.6" in spec_text),
     ("任务表 P2-2 ✅ 与 24/24 已回填", "P2-2 ✅" in task_text and "24/24" in task_text),

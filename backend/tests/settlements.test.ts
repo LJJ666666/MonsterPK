@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { digestOf, freshAuthority, type AuthorityState } from '../src/lib/authority.ts';
 import {
   settleIdleServer, decideIntent, checkIntentDelta,
-  ITEM_PRICES, INTENT_TYPES, type DecisionContext,
+  itemPrice, INTENT_TYPES, type DecisionContext,
 } from '../src/lib/settlements.ts';
 
 const NOW = Date.parse('2026-11-06T06:00:00.000Z');
@@ -116,8 +116,8 @@ test('capture / battle_reward 不在意图白名单里（防止有人重新加�
 
 test('shop_buy：价格取服务端表，客户端改价无效；金币不足拒绝', () => {
   const r = decideIntent('shop_buy', { itemId: 'capsule_prism', amount: 2, price: 1 }, ctx());
-  assert.equal(r.pending?.result?.cost, ITEM_PRICES.capsule_prism * 2);
-  assert.equal(r.pending?.allow.exact?.money, -ITEM_PRICES.capsule_prism * 2);
+  assert.equal(r.pending?.result?.cost, itemPrice('capsule_prism') * 2);
+  assert.equal(r.pending?.allow.exact?.money, -itemPrice('capsule_prism') * 2);
   assert.equal(r.pending?.allow.exact?.inventory?.capsule_prism, 2);
   assert.equal(decideIntent('shop_buy', { itemId: 'capsule_master', amount: 99 }, ctx()).ok, false);
   assert.equal(decideIntent('shop_buy', { itemId: 'not_an_item', amount: 1 }, ctx()).ok, false);
@@ -132,7 +132,7 @@ test('shop_buy 提交：少扣钱（白嫖）会被精确增量核对拒绝', ()
   });
   assert.ok(checkIntentDelta(base, free, p).some((v) => v.code === 'DELTA_MONEY'));
   const good = delta(base, {
-    money: base.money - ITEM_PRICES.capsule_prism * 2,
+    money: base.money - itemPrice('capsule_prism') * 2,
     inventory: { ...base.inventory, capsule_prism: (base.inventory.capsule_prism ?? 0) + 2 },
   });
   assert.deepEqual(checkIntentDelta(base, good, p), []);

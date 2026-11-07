@@ -52,6 +52,7 @@ const STAGES = [
   { id: 'e2e:p21', name: 'E2E 实时通道（P2-1）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p21'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p22', name: 'E2E 在线权威态（P2-2）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p22'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p31', name: 'E2E 服务端战斗（P3-1）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p31'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:p32', name: 'E2E 服务端存档写操作（P3-2）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p32'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（114 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -63,7 +64,7 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c'],
   docs: ['docs:doc', 'docs:memory'],
 };

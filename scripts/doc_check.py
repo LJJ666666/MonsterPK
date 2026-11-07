@@ -35,6 +35,8 @@ pkg_text = text(ROOT / "backend" / "package.json")
 root_pkg_text = text(ROOT / "package.json")
 handoff_text = text(ROOT / "HANDOFF.md")
 verify_text = text(ROOT / "scripts" / "verify.mjs")
+plan_path = DOCS / "P4-2_多人玩法排期_2026-11-07.md"
+plan_text = text(plan_path) if plan_path.exists() else ""
 
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
@@ -52,6 +54,20 @@ checks = [
      "SESSION_REPLACED" in memory_text and "WildRegistry" in memory_text and "P4-1 ✅" in memory_text),
     ("MEMORY.md 记录 P4-1 回滚点",
      "rollback-20261107-pre-p41" in memory_text and "rollback-20261107-post-p41" in memory_text),
+    ("P4-2 排期契约文档齐全（口径 / 参数 / 五阶段 / 边界）",
+     plan_path.exists()
+     and all(x in plan_text for x in [
+         "全员掉线", "不扣次数", "可选", "ROUND_TIMEOUT_MS", "AUTOPILOT_OFFER_MS",
+         "ALL_OFFLINE_GRACE_MS", "hold", "commit", "release", "pickUsableMove",
+         "roomId", "P4-2a", "P4-2e", "未开工", "同一 token 同一设备",
+         "playerLevel", "SCHEMA_VERSION", "共享存储"])),
+    ("任务表已拆 P4-2 五阶段并写明排期状态",
+     all(f"| P4-2{c} |" in task_text for c in "abcde")
+     and "排期已定" in task_text and "不扣次数" in task_text),
+    ("MEMORY.md 记 P4-2 口径与下一步 P4-2a",
+     "P4-2 📋 排期" in memory_text and "下一步 P4-2a" in memory_text
+     and "P4-2_多人玩法排期_2026-11-07.md" in memory_text),
+    ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
     ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
     ("bug_log 含 §17 ~ §27", all(f"## {n}." in bug_text for n in range(17, 28))),

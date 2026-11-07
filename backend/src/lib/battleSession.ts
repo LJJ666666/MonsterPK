@@ -80,14 +80,22 @@ export class BattleRegistry {
 
   /** 回收超时战斗；返回清理数量。 */
   sweep(now: number, ttl = BATTLE_TTL_MS): number {
-    let n = 0;
+    return this.sweepExpired(now, ttl).length;
+  }
+
+  /**
+   * P4-2c：回收超时战斗并**返回被回收的战斗态**，让调用方释放 Boss 的在途次数。
+   * 单独开一个方法而不是改 `sweep()` 的返回类型：既有调用方与单测依赖 `number`。
+   */
+  sweepExpired(now: number, ttl = BATTLE_TTL_MS): BattleState[] {
+    const cleaned: BattleState[] = [];
     for (const [id, state] of [...this.byId]) {
       if (now - state.updatedAt <= ttl) continue;
       this.byId.delete(id);
       this.byKey.delete(battleKey(state.userId, state.slot));
-      n += 1;
+      cleaned.push(state);
     }
-    return n;
+    return cleaned;
   }
 
   stats(): BattleStats {

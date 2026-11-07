@@ -198,6 +198,8 @@ export async function cleanupAccounts(usernames = []) {
     if (ids.length > 0) {
       const r = await prisma.intentLog.deleteMany({ where: { userId: { in: ids } } });
       intents = r.count;
+      // P4-2c：Boss 伤害事件没有外键，账号删除不会级联，必须显式清。
+      await prisma.bossDamageEvent.deleteMany({ where: { userId: { in: ids } } });
       await prisma.user.deleteMany({ where: { id: { in: ids } } });
     }
     return { users: ids.length, intents };
@@ -232,7 +234,7 @@ export async function forgeToken(payload, { expiresInMs = 3_600_000 } = {}) {
  * @param {string[]} prefixes
  * @param {{dryRun?: boolean}} opts
  */
-export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_'], opts = {}) {
+export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_', 'p42c_'], opts = {}) {
   loadBackendEnv();
   const { PrismaClient } = await import('@prisma/client');
   const prisma = new PrismaClient();
@@ -251,6 +253,7 @@ export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_
     if (ids.length > 0) {
       const r = await prisma.intentLog.deleteMany({ where: { userId: { in: ids } } });
       intents = r.count;
+      await prisma.bossDamageEvent.deleteMany({ where: { userId: { in: ids } } });
       await prisma.user.deleteMany({ where: { id: { in: ids } } });
     }
     return { users: ids.length, intents, names: targets.map((u) => u.username) };

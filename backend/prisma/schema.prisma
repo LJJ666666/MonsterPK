@@ -81,3 +81,25 @@ model IntentLog {
   @@unique([userId, slot, nonce])
   @@index([userId, slot, createdAt])
 }
+
+// Boss 伤害事件（P4-2c）：**append-only**，一行 = 一次有效讨伐的结算结果。
+// - 伤害值只来自服务端战斗态（`BattleState.damageDealt`），客户端上报一律不用；
+// - `battleId` 唯一索引保证「同一场战斗重复结算 / 重复上报不叠加」；
+// - 每日次数真值 = 本表该用户当日该 Boss 的行数（内存只记在途 hold，重启不重置次数）；
+// - 不建 User 关联：封号清理不删历史伤害记录，查询时再按 User 过滤封号/管理员。
+model BossDamageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  slot      Int
+  bossId    String
+  // 周期键：固定 UTC+8 自然日 YYYY-MM-DD；周期结算规则待台账 F01 细化
+  periodKey String
+  damage    Int
+  // 结算结果：enemy_fainted / player_fainted（逃跑不写事件）
+  result    String
+  battleId  String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([bossId, periodKey, damage])
+  @@index([userId, bossId, periodKey])
+}

@@ -35,6 +35,7 @@ vi.mock("@/lib/api", () => ({
     battleAction: vi.fn(),
     battleCurrent: vi.fn(),
     battleAbandon: vi.fn(),
+    bossStart: vi.fn(),
     getSave: vi.fn(async () => ({ data: null })),
   },
 }));

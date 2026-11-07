@@ -9,6 +9,7 @@ import { GameSessionRegistry, type SessionStats } from '../lib/gameSession';
 import { BattleRegistry } from '../lib/battleSession';
 import { WildRegistry } from '../lib/wildRegistry';
 import { RoomRegistry } from '../lib/roomRegistry';
+import { BossQuotaLedger } from '../lib/bossQuota';
 
 /** 在线 WebSocket 连接登记表（P2-1 已在用）。 */
 export const wsRegistry = new WsRegistry();
@@ -20,6 +21,11 @@ export const battles = new BattleRegistry();
 export const wilds = new WildRegistry();
 /** P4-2b 房间状态域（roomId）：纯逻辑 + 可替换 storage，P5-1 迁共享存储时只换 adapter。 */
 export const rooms = new RoomRegistry();
+/**
+ * P4-2c Boss 每日次数的「在途闸」：只记已开局未结算的名额，
+ * 已用次数真值在 `BossDamageEvent`（进程重启不会重置次数）。
+ */
+export const bossQuota = new BossQuotaLedger();
 
 /** 把一条服务端消息发给该账号的所有在线连接；返回实际送达条数。 */
 export function broadcastToUser(userId: string, data: string): number {

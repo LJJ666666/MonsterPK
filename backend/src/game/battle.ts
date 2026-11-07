@@ -20,6 +20,7 @@ import {
   initBattlePP, pickUsableMove, processEndOfTurn, roll,
   type Rng,
 } from './rules.js';
+import { createBossEnemy, type BossSpec } from './boss.js';
 
 export type BattleResult = 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted';
 
@@ -54,6 +55,18 @@ export type BattleState = {
   updatedAt: number;
   /** P4-1b：关联的共享野怪实例 id；普通随机遭遇为 null。 */
   wildId?: string | null;
+  /**
+   * P4-2c：单人 Boss 讨伐。有值即为 Boss 战：
+   *  - 敌方由 `game/boss.ts` 内容表生成（固定等级 + HP 倍率）；
+   *  - 禁止捕获；逃跑 = 放弃（不记伤害、不扣次数）；
+   *  - 结束时把 `damageDealt` 作为唯一伤害真值写入 append-only 事件。
+   */
+  bossId?: string | null;
+  bossName?: string | null;
+  /** 开局时占用的次数键（含日期与账号）。结算/放弃时用它精确释放，跨午夜也不会漏。 */
+  bossQuotaKey?: string | null;
+  /** 本场对敌方造成的累计伤害（服务端按敌方 HP 差累计，客户端上报无效）。 */
+  damageDealt: number;
 };
 
 export type BattleAction =
@@ -135,6 +148,11 @@ export function createBattle(params: {
    * 不再现场掷骰 —— 这样所有客户端看到的「这一只」确实是同一只。
    */
   wild?: { wildId: string; speciesId: string; level: number; label: string };
+  /**
+   * P4-2c：单人 Boss 战。给了 spec 就不再走随机遭遇：
+   * 敌方由内容表生成，`areaName` / `theme` 以 Boss 定义为准（路由层不会再传错）。
+   */
+  boss?: { spec: BossSpec; quotaKey?: string };
 }): BattleState {
   const { rng, now } = params;
   if (!Array.isArray(params.party) || params.party.length === 0) {
@@ -146,21 +164,23 @@ export function createBattle(params: {
   const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, 60);
   const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, 60);
   const level = levelMin + Math.floor(rng() * (levelMax - levelMin + 1));
-  const { enemy, label } = params.wild
-    ? {
-        enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
-        label: params.wild.label,
-      }
-    : generateEncounter(params.theme, level, rng, params.themes);
+  const { enemy, label } = params.boss
+    ? { enemy: createBossEnemy(params.boss.spec, rng), label: params.boss.spec.name }
+    : params.wild
+      ? {
+          enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
+          label: params.wild.label,
+        }
+      : generateEncounter(params.theme, level, rng, params.themes);
 
   const party = params.party.map((m) => ({ ...m }));
   return {
     id: params.id,
     userId: params.userId,
     slot: params.slot,
-    theme: params.theme,
-    areaName: params.areaName,
-    areaId: params.areaId ?? null,
+    theme: params.boss ? params.boss.spec.theme : params.theme,
+    areaName: params.boss ? params.boss.spec.name : params.areaName,
+    areaId: params.boss ? null : (params.areaId ?? null),
     levelMin,
     levelMax,
     turn: 1,
@@ -180,6 +200,10 @@ export function createBattle(params: {
     startedAt: now,
     updatedAt: now,
     wildId: params.wild?.wildId ?? null,
+    bossId: params.boss?.spec.bossId ?? null,
+    bossName: params.boss?.spec.name ?? null,
+    bossQuotaKey: params.boss?.quotaKey ?? null,
+    damageDealt: 0,
   };
 }
 
@@ -263,6 +287,14 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
   s.finished = true;
   s.result = result;
   if (result === 'enemy_fainted') {
+    // P4-2c：Boss 讨伐不发经验 / 金钱。Boss 的产出是「伤害榜上的记录」，
+    // 奖励规则待台账 F02；这里若照常发奖，等于每天可稳定刷一笔资源，且与后续奖励设计冲突。
+    if (s.bossId) {
+      const bossName = MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId;
+      s.rewards = null;
+      pushLog(s, [`${bossName} 倒下了。`, '讨伐完成，本次伤害已记入伤害榜。']);
+      return s;
+    }
     const { expGain, moneyGain, hasExpShare } = computeRewards(s.enemy.level, inventory);
     const party = s.party.map((m) => ({ ...m }));
     if (hasExpShare) {
@@ -288,7 +320,7 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
 }
 
 /** 回合推进：玩家的一个动作 + 敌方的应对。 */
-export function applyBattleAction(
+function applyBattleActionInner(
   state: BattleState,
   action: BattleAction,
   ctx: { inventory: Record<string, number>; rng: Rng; now: number; testOHKO?: boolean },
@@ -343,6 +375,7 @@ export function applyBattleAction(
     if (!item) throw new BattleError('ITEM_UNKNOWN', '未知道具');
 
     if (action.type === 'capture' || item.kind === 'capture') {
+      if (s.bossId) throw new BattleError('BOSS_UNCATCHABLE', '讨伐目标无法捕获');
       if (item.kind !== 'capture') throw new BattleError('ITEM_NOT_CAPTURE', '该道具不能用于捕获');
       consumeItem(s, itemId, inventory);
       const spec = MONSTER_SPECS[s.enemy.specId];
@@ -506,6 +539,29 @@ export function applyBattleAction(
   throw new BattleError('ACTION_UNKNOWN', '未知的战斗操作');
 }
 
+/**
+ * 回合推进的唯一出口：先跑状态机，再把「敌方 HP 减少量」累计到 `damageDealt`。
+ *
+ * 为什么用 HP 差而不是在伤害公式里打点：
+ *  - 公式入口有 4 处（物理 / 特殊 / 多段 / 状态技），逐处打点必然漏；
+ *  - 中毒等回合末伤害也属于玩家造成的有效输出，HP 差天然包含；
+ *  - 溢出伤害被 `applyDamage` 钳到 0，所以累计值不会超过 Boss 实际血量。
+ * 该值只在 Boss 结算时被读取，普通战斗带着它也不影响任何判定。
+ */
+export function applyBattleAction(
+  state: BattleState,
+  action: BattleAction,
+  ctx: { inventory: Record<string, number>; rng: Rng; now: number; testOHKO?: boolean },
+): BattleState {
+  const enemyHpBefore = state?.enemy?.hp ?? 0;
+  const next = applyBattleActionInner(state, action, ctx);
+  if (next && next !== state) {
+    const dealt = Math.max(0, enemyHpBefore - (next.enemy?.hp ?? 0));
+    if (dealt > 0) next.damageDealt = Math.max(0, Math.floor((next.damageDealt ?? 0) + dealt));
+  }
+  return next;
+}
+
 /** 给路由层用的只读视图：玩家队伍与敌方都下发，但只是展示快照，客户端改不了服务端状态。 */
 /**
  * P3-1c：管理员测试标记（原先前端 `testShiny / testMaxStats / testOHKO` 只在本地战斗生效，
@@ -589,6 +645,13 @@ export function battleView(s: BattleState) {
     captured: s.captured,
     consumed: s.consumed,
     actions: s.actions,
+    /**
+     * P4-2c：Boss 战标识与**本场伤害**（服务端累计，客户端只渲染）。
+     * 非 Boss 战为 null / 0；前端据此在战斗界面显示「讨伐」标题与本场伤害。
+     */
+    bossId: s.bossId ?? null,
+    bossName: s.bossName ?? null,
+    damageDealt: s.damageDealt ?? 0,
   };
 }
 

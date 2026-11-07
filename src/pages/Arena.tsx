@@ -24,7 +24,7 @@ function resultText(r: string | undefined) {
 
 export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
-  const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, resumeBattle } = useGameStore();
+  const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, resumeBattle } = useGameStore();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
   // 开局失败（断网 / 未登录 / 队伍全灭）要如实告知：现在没有本地降级，
   // 静默返回会让玩家以为按钮坏了。
@@ -213,6 +213,11 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
         </div>
         <div className="mt-1 text-xs text-[color:var(--muted)]">
           回合 {battle.turn} · {battle.theme.toUpperCase()}
+          {battle.bossId && (
+            <span className="ml-2 text-[color:var(--accent)]">
+              讨伐 · 本场伤害 {battle.damageDealt ?? 0}
+            </span>
+          )}
           {battle.serverId ? (
             <span className="ml-2 text-[color:var(--accent)]">服务端裁决</span>
           ) : (
@@ -388,12 +393,16 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       tone="primary"
                       onClick={async () => {
                         setStartError(null);
-                        const res = await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
+                        // 讨伐战要回到同一条 Boss 链路：用普通开局会把 Boss 名当成区域名，
+                        // 结果变成一场野生遭遇（theme 也还是 Boss 的主题）。
+                        const res = battle.bossId
+                          ? await startBossBattle(battle.bossId)
+                          : await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
                         if (res.ok) setPanel("moves");
                         else setStartError((res as { reason?: string }).reason ?? "无法开始战斗");
                       }}
                     >
-                      继续探索
+                      {battle.bossId ? "再次讨伐" : "继续探索"}
                     </PixelButton>
                     {startError ? (
                       <div className="w-full text-xs text-[color:var(--danger)]">{startError}</div>

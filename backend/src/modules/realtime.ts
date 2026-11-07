@@ -37,7 +37,7 @@ import {
   buildRejectResponse,
   deadAfterMs,
 } from '../lib/wsProtocol';
-import { wsRegistry, gameSessions, wilds, battles, rooms } from './sessionBus';
+import { wsRegistry, gameSessions, wilds, battles, rooms, bossQuota } from './sessionBus';
 import { publishWild } from './wild';
 import {
   publishRooms, sweepRooms, applyRoomIntent, applyRoomAutopilot,
@@ -169,7 +169,10 @@ export function registerRealtime(fastify: FastifyInstance): void {
       }
       sweepSessions(now);
       // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
-      battles.sweep(now);
+      // P4-2c：被回收的 Boss 战要放回「在途次数」，否则这次 hold 会占到进程重启。
+      for (const st of battles.sweepExpired(now)) {
+        if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
+      }
       // P4-1b：共享野怪过期换新 / 超时放回池子后，把新列表广播给所有在线客户端。
       for (const areaId of wilds.sweep(now)) {
         const spec = wilds.getAreaSpec(areaId);

@@ -12,6 +12,7 @@ import { useIsAdmin } from "@/lib/admin";
 
 import TypeChartModal from "@/components/TypeChartModal";
 import RankBoardModal from "@/components/RankBoardModal";
+import BossBoardModal from "@/components/BossBoardModal";
 
 import { MonsterName } from "@/components/MonsterName";
 
@@ -133,7 +134,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   // 测试菜单仅管理员可见（服务端判定）。普通账号即使改前端也只是看到按钮，
   // 真正写入异常存档仍会被后端风控封号。
   const isAdmin = useIsAdmin();
-  const { slot, save1, save2, save3, startEncounter, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
+  const { slot, save1, save2, save3, startEncounter, startBossBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
   const [selected, setSelected] = useState<number | null>(null);
   const [boxSelected, setBoxSelected] = useState<number | null>(null);
@@ -147,6 +148,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [bagFilter, setBagFilter] = useState<"all" | "heal" | "item" | "skill" | "quest">("all");
   const [showTypeChart, setShowTypeChart] = useState(false);
   const [showRank, setShowRank] = useState(false);
+  const [showBoss, setShowBoss] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
   const [dexSelectedSpecId, setDexSelectedSpecId] = useState<string | null>(null);
   const [dexSearchQuery, setDexSearchQuery] = useState("");
@@ -1075,15 +1077,34 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         </div>
         <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[color:var(--muted)]">
           <span className="truncate">{save.playerName} · ¥{save.money}</span>
-          <button className="flex-none text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
-            榜单
-          </button>
+          <div className="flex flex-none items-center gap-3">
+            <button className="text-[color:var(--accent)] underline" onClick={() => setShowBoss(true)}>
+              讨伐
+            </button>
+            <button className="text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
+              榜单
+            </button>
+          </div>
         </div>
       </div>
 
       {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
       {showRank && <RankBoardModal onClose={() => setShowRank(false)} />}
+      {showBoss && (
+        <BossBoardModal
+          onClose={() => setShowBoss(false)}
+          onFight={async (bossId) => {
+            // 开局成功才关弹窗并跳到战斗界面；失败（次数用完 / 队伍全灭）留在原地看原因。
+            const res = await startBossBattle(bossId);
+            if (res.ok) {
+              setShowBoss(false);
+              navigate("/arena");
+            }
+            return res;
+          }}
+        />
+      )}
 
       {notice && (
         <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/15 px-4 py-2 text-xs text-[color:var(--danger)]">

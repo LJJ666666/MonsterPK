@@ -4,7 +4,8 @@ import { ITEM_SPECS, STARTERS } from "@/game/data";
 import type { BattleState, EncounterTheme, ItemId, SaveData, LocationId, MoveId } from "@/game/types";
 import { SCHEMA_VERSION, migrateSaveState } from "@/stores/saveVersion";
 import type { IntentResult } from "@/lib/intents";
-import { battleApi, canUseServerBattle, toBattleState, toFailure, type ActionInput } from "@/lib/battleApi";
+import { battleApi, canUseServerBattle, toBattleState, toFailure, type ActionInput, type ServerBattleView } from "@/lib/battleApi";
+import { api } from "@/lib/api";
 import { runGameOp, type MutationOp } from "@/lib/gameApi";
 
 /**
@@ -135,6 +136,12 @@ type GameState = {
   exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
   
   startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string, wildId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * P4-2c：开一场单人 Boss 讨伐。
+   * 只传 bossId：Boss 等级 / HP 倍率 / 每日次数 / 敌方选招全在服务端，
+   * 前端拿到的只是一份战斗视图（和普通遭遇同一套渲染与动作入口）。
+   */
+  startBossBattle: (bossId: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   useMove: (moveId: MoveId) => Promise<void>;
   useItem: (itemId: ItemId) => Promise<void>;
   switchTo: (partyIndex: number) => void;
@@ -343,6 +350,30 @@ export const useGameStore = create<GameState>()(
             },
           });
           set({ battle: toBattleState(view) } as any);
+          return { ok: true };
+        } catch (e) {
+          const f = toFailure(e);
+          return {
+            ok: false,
+            reason: f.transient
+              ? "网络中断，战斗需要连接服务端。请检查网络后重试。"
+              : f.message,
+          };
+        }
+      },
+
+      startBossBattle: async (bossId) => {
+        const state = get();
+        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        if (!save) return { ok: false, reason: "请先创建或导入存档" };
+        if (!canUseServerBattle()) return { ok: false, reason: "尚未登录，战斗需要连接服务端" };
+        try {
+          // 只传 slot + bossId：Boss 数值、每日次数、敌方选招全由服务端决定。
+          const res = await api.bossStart({ slot: state.slot, bossId });
+          if (!res?.battle) {
+            throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
+          }
+          set({ battle: toBattleState(res.battle as ServerBattleView) } as any);
           return { ok: true };
         } catch (e) {
           const f = toFailure(e);

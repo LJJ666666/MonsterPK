@@ -168,6 +168,16 @@ export const api = {
   rankBoard: (type: string, limit = 20) =>
     request(`/api/rank/${encodeURIComponent(type)}?limit=${limit}`),
 
+  // ───────────────────── P4-2c 单人 Boss 讨伐（伤害只认服务端结算）─────────────────────
+  /** 讨伐列表 + 我的次数与今日伤害（只读）。 */
+  bossList: () => request("/api/boss"),
+  /** 开一场讨伐：只传 slot + bossId，等级 / 倍率 / 次数全在服务端。 */
+  bossStart: (body: { slot: number; bossId: string }) =>
+    request("/api/boss/start", { method: "POST", body: JSON.stringify(body) }),
+  /** 只读伤害榜（当日），只接受 limit。 */
+  bossRank: (bossId: string, limit = 20) =>
+    request(`/api/boss/${encodeURIComponent(bossId)}/rank?limit=${limit}`),
+
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**
    * 治疗 / 战斗外道具 / 进化 / 学招 / 队伍整理 / 移动。

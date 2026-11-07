@@ -228,10 +228,15 @@ async function main() {
       Array.isArray(cur.data.battle.party?.[0]?.moveIds), JSON.stringify(cur.data.battle.party?.[0] ?? null).slice(0, 200));
   } else {
     check('战斗已结束且服务端已回收（current 为空）', true);
-    // 玩家出手后敌方必定反击过，HP 不可能还满
-    check('服务端已写档：我方 HP 或金钱有变化',
-      hpAfter < 120 || (cloudSave.money ?? 0) > 1200,
-      JSON.stringify({ hp: hpAfter, money: cloudSave.money }));
+    // 玩家出手后通常敌方会反击（HP 下降）或我方击杀（金钱上升）。
+    // 但「撤退成功 / 我方全灭」这两种结束方式本来就不改 HP 与金钱（全灭是回满，
+    // P3-2 起由服务端写档），历史上有极低概率撞到，导致误报。
+    // 这里按「结算结果」豁免，而不是放宽成永远为真。
+    const endText = String(p.finalText ?? '');
+    const nonKillEnd = /撤离|撤退|失去战斗力/.test(endText);
+    check('服务端已写档：我方 HP 或金钱有变化（非击杀结束豁免）',
+      nonKillEnd || hpAfter < 120 || (cloudSave.money ?? 0) > 1200,
+      JSON.stringify({ hp: hpAfter, money: cloudSave.money, nonKillEnd, endText: endText.slice(0, 220) }));
   }
 
   report();

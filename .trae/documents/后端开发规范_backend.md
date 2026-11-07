@@ -1170,3 +1170,157 @@ export function withRoomLock<T>(roomId: string, fn: () => Promise<T>) {
 - 未来规划（周期结算、榜单奖励、单机隔离版、账号等级、装备、托管 AI 等）统一登记在
   `未来规划与技术债_2026-11-07.md`，本阶段不实现。
 
+## 25. P4-2c 单人 Boss 讨伐与伤害榜（2026-11-07）
+
+### 25.1 归属：Boss 不新增状态域
+
+单人 Boss 是**普通服务端战斗的一个特例**，owner key 仍是 `battleId`，
+次数配额挂在**账号**（`userId`）而不是槽位。所以 P4-2c 没有第五个状态域：
+
+| 资源 | owner key | 载体 |
+|---|---|---|
+| 战斗态 | `battleId` | `lib/battleSession.ts`（复用，加 `bossId` 标记） |
+| 每日次数 | `userId + bossId + 自然日` | **DB 事件行数（真值）+ 内存 hold（在途）** |
+| 伤害记录 | `battleId @unique` | `BossDamageEvent`（append-only） |
+
+三条不变式不变：客户端只发意图；写档唯一入口仍是 `commitState()`；
+**Boss 伤害从不进个人档**（`damageDealt` 只在 `BattleState` 里存在到结算为止）。
+
+### 25.2 伤害唯一真值 = 敌方 HP 差（不在公式处打点）
+
+伤害入口有 4 处（物理 / 特殊 / 多段 / 状态技），逐处打点必漏（中毒等回合末伤害、
+后续新增技能都会漏）。故 `game/battle.ts` 把原 `applyBattleAction` 改名为
+`applyBattleActionInner`，外层包一层按**敌方 HP 差**累计：
+
+```ts
+export function applyBattleAction(state, action, ctx): BattleState {
+  const enemyHpBefore = state?.enemy?.hp ?? 0;
+  const next = applyBattleActionInner(state, action, ctx);
+  if (next && next !== state) {
+    const dealt = Math.max(0, enemyHpBefore - (next.enemy?.hp ?? 0));
+    if (dealt > 0) next.damageDealt = Math.max(0, Math.floor((next.damageDealt ?? 0) + dealt));
+  }
+  return next;
+}
+```
+
+三个性质：
+
+- **不会多算**：`applyDamage` 把 HP 钳在 `[0, maxHp]`，溢出伤害天然被截，
+  累计值永远 ≤ 实际扣血。
+- **不会漏**：任何让敌人掉血的路径（含中毒/灼烧回合末结算、多段技草稿）都在这个差值里。
+- **普通战斗也累计**：`damageDealt` 只是字段，普通战斗没人读它，不影响任何判定；
+  单测钉住「普通战斗也累计但不标 Boss」。
+
+### 25.3 每日次数：DB 行数是真值，内存只记在途
+
+P4-2b 房间 quota 把 `committed` 放内存（房间是 30min 临时态）；
+**Boss 次数不能这么做** —— 它是账号级、按自然日的配额，进程重启不能重置，否则重启即刷榜。
+故拆成两半：
+
+| 组成 | 位置 | 语义 |
+|---|---|---|
+| `committed` | `SELECT count(*) FROM BossDamageEvent WHERE userId/bossId/periodKey` | 已计入的真实场次（真值） |
+| `held` | `BossQuotaLedger`（内存） | 已开局未结算的在途名额 |
+
+`hold(key, used, limit)` 同步判定 `used + inflight >= cap` 直接返回 false（429）。
+`commit()` 等价于 `release()` —— 已用由 DB 事件行数体现，内存不再记第二份账。
+
+**在途名额必须在三条路径上释放**，否则玩家「开局后拖到 TTL 过期」就能绕过次数：
+
+1. 正常结算 / 逃跑 → `settleBossRun()` 里 `commit()`
+2. 主动放弃（`POST /api/battle/abandon`）→ `release()`
+3. 战斗态 TTL 过期被心跳回收 → `BattleRegistry.sweepExpired()` 返回被回收态，
+   `realtime.ts` 心跳逐个 `if (st.bossQuotaKey) bossQuota.release(...)`
+
+> `sweep()` 保持返回 `number`（既有调用方与单测零改动），新增 `sweepExpired()`
+> 返回被回收的 `BattleState[]`；`sweep()` 内部改为 `return this.sweepExpired(now, ttl).length`。
+
+**Boss 与普通战斗互斥**：`runBattleStart` 若发现该槽位有未结束的 Boss 战，直接
+409 `BOSS_IN_PROGRESS`（否则在途名额被顶掉、次数白扣）。普通战斗之间仍允许互相覆盖（历史行为，E2E 依赖）。
+
+### 25.4 append-only 事件表与周期键
+
+```prisma
+model BossDamageEvent {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  slot       Int
+  bossId     String
+  periodKey  String   // YYYY-MM-DD，固定 UTC+8
+  damage     Int
+  result     String   // win | lose
+  battleId   String   @unique
+  createdAt  DateTime @default(now())
+}
+```
+
+- **不建 `User` 外键关联**：封号只做查询期过滤，历史伤害不删（删了榜会跳变）。
+- **`battleId @unique` 是幂等底座**：同一场战斗重复结算 / 重复上报会被 P2002 挡下，
+  `settleBossRun()` 捕获 `P2002` 视作「已记录」返回 `recorded:false`，**不叠加**。
+- **`periodKey` 用固定 UTC+8 手算**（`dayKeyOf()`，`offsetMinutes = 480`）：
+  不用 `toLocaleDateString`，避免依赖宿主机时区与 ICU 数据，跨机器结果一致。
+- **伤害榜按账号合并多槽位**：限次按账号计，若按槽位拆行，换槽位打就变成刷榜。
+  `summarizeRuns()` 先按 `userId` 聚合 `{ total, best, attempts }`，再
+  `damage desc → best desc → username → slot` 稳定排序，`limit` 钳 1~50。
+- **排除封号与管理员**：与 P4-2a 同口径（`bannedAt: null, role: { not: 'admin' }`）。
+- `damage` 经 `safeDamage()` 钳到 `[0, 1e12]`，防脏数据把排序搞坏。
+
+### 25.5 锁顺序固定，无死锁
+
+```
+withSlotLock('slot:<userId>:<slot>')  →  withSlotLock('bossq:<userId>')
+```
+
+开局 / 结算 / 放弃三条路径**同序**。次数键只按账号（不按槽位），
+是因为「同一账号两个槽位并发开局」必须被同一把锁串行，否则 `used` 会被读两次旧值。
+
+### 25.6 Boss 结算口径：不发奖励、不写首通、禁止捕获
+
+`finish()` 里 Boss 走独立分支：
+
+```ts
+if (s.bossId) { s.rewards = null; pushLog(s, '讨伐完成，本次伤害已记入伤害榜。'); return s; }
+```
+
+理由（产品口径，不是为过测试）：
+
+- Boss 产出**是榜上记录**，奖励规则待 F02 设计。若暂按普通战斗发经验/金钱，
+  等于每天白送一笔稳定资源，还会污染 `clearedAreas` 首通记录。
+- 队伍 HP / 道具消耗 / 图鉴**照常写回个人档**（通过 F12 抽出的 `applySettlementToSave()`），
+  所以「打 Boss 会掉血、会吃药」是真的，「打 Boss 给钱」是假的。
+- **禁止捕获**：`applyBattleAction` 中 `if (s.bossId) throw new BattleError('BOSS_UNCATCHABLE')`，
+  且**不扣道具**（校验在扣减之前）。Boss 不是野怪，不能被抓进队伍。
+- **逃跑 = 放弃**：`fled` 时 `release()` 在途名额、**不写事件、不上榜**。
+  否则「打一半跑」可以无限刷「最高单场伤害」。
+
+### 25.7 阈值只由服务端定
+
+- `bossDailyLimit(spec, env)`：内容表 `dailyLimit` 为基准，
+  **`BOSS_DAILY_LIMIT` env 只能下调不能上调**（`Math.min`），防止配错把限次放开。
+- `hpMultiplier` **不下发客户端**（`bossView()` 白名单字段），否则等于告诉客户端
+  「这只 Boss 该有多少血」，可被用来校验/推算服务端状态。
+- `GET /api/boss` 只返回 `used / held / remaining / my{total,best,attempts}` + `periodKey`。
+
+### 25.8 接口与伪上报
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/boss` | 三只 Boss 概览 + 我的今日数据（只读） |
+| POST | `/api/boss/start` | `{ slot, bossId }`，开一场 Boss 战 |
+| GET | `/api/boss/:bossId/rank?limit=` | 只读伤害榜（1~50） |
+
+- **`/api/boss` 与 `/api/boss/:id/rank` 没有写入口**：`POST/PUT` 一律 404。
+- 请求体出现 `damage` / `hp` / `dailyLimit` / `quota` / `rank` / `periodKey` 等真值字段
+  → **400 `BOSS_INPUT_FORBIDDEN`**（不是「忽略后悄悄生效」）；
+  未知 `bossId` → 400 `BOSS_UNKNOWN`（`getBoss()` 用 `hasOwnProperty` 防原型链）。
+- `/api/health` 加 `boss` 统计（Boss 数量 + 今日事件量按需）。
+
+### 25.9 边界
+
+- **不改 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**：Boss 不写个人档新字段，
+  `BossDamageEvent` 是独立表，与存档结构无关。
+- 本阶段**无多人同屏、无实时滚动榜、无跨周期累计奖励**（F01 / F02）。
+- 剧情解锁 Boss 门槛是 `unlockAreaId` 预留字段，**未实装判定**（F09）。
+- 前端只有「讨伐」入口弹窗 + 战斗页伤害条，不参与任何裁决。
+

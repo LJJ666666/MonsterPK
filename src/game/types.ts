@@ -300,4 +300,12 @@ export type BattleState = {
   serverParty?: MonsterInstance[];
   /** 服务端动作在途：防止连点造成重复发意图。 */
   pending?: boolean;
+  /**
+   * P4-2c 单人 Boss 讨伐：有值即为 Boss 战（禁止捕获、逃跑=放弃）。
+   * 展示用，客户端不据此做任何判定。
+   */
+  bossId?: string;
+  bossName?: string;
+  /** 本场对 Boss 造成的累计伤害（服务端累计后下发，客户端只渲染）。 */
+  damageDealt?: number;
 };

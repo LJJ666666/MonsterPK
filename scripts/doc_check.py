@@ -43,13 +43,14 @@ future_text = text(future_path) if future_path.exists() else ""
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（280 / 114 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 115 / 17 / 23）",
-     all(x in memory_text for x in ["**280**", "**114**", "**41**", "**25**", "**48**", "**50**",
-                                    "**30**", "**39**", "**43**", "115", "**17/17**", "**13/13**",
-                                    "**15/15**", "**23/23**"])),
+    ("MEMORY.md 写入最终数字（306 / 122 / 44 / 19 / 62 / 30 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 115 / 24）",
+     all(x in memory_text for x in ["**306**", "**122**", "**44**", "**19/19**", "**62**",
+                                    "**41**", "**25**", "**48**", "**50**", "**30**",
+                                    "**39**", "**43**", "115", "**17/17**", "**13/13**",
+                                    "**15/15**", "**25/25**"])),
     ("MEMORY.md 记录降级与旧意图下线",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P4-2c", "下一步 P4-2c" in memory_text),
+    ("MEMORY.md 下一步为 P4-2d", "下一步 P4-2d" in memory_text),
     ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
     ("MEMORY.md 记录 P4-0 写入并发控制",
      "写入并发控制（P4-0）" in memory_text and "REVISION_CONFLICT" in memory_text and "slotLock.ts" in memory_text),
@@ -62,16 +63,18 @@ checks = [
      and all(x in plan_text for x in [
          "全员掉线", "不扣次数", "可选", "ROUND_TIMEOUT_MS", "AUTOPILOT_OFFER_MS",
          "ALL_OFFLINE_GRACE_MS", "hold", "commit", "release", "pickUsableMove",
-         "roomId", "P4-2a", "P4-2e", "c~e 仍为排期", "同一 token 同一设备",
+         "roomId", "P4-2a", "P4-2e", "d~e 仍为排期", "同一 token 同一设备",
          "playerLevel", "SCHEMA_VERSION", "共享存储"])),
     ("任务表已拆 P4-2 五阶段并写明排期状态",
      all(f"| P4-2{c} |" in task_text for c in "abcde")
      and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 记 P4-2a / P4-2b 实现与下一步 P4-2c",
-     "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "下一步 P4-2c" in memory_text
+    ("MEMORY.md 记 P4-2a / P4-2b / P4-2c 实现与下一步 P4-2d",
+     "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "P4-2c ✅" in memory_text
+     and "下一步 P4-2d" in memory_text
      and "P4-2_多人玩法排期_2026-11-07.md" in memory_text
      and "GET /api/rank" in memory_text and "effectiveStats" in memory_text
-     and "RoomRegistry" in memory_text and "quota" in memory_text),
+     and "RoomRegistry" in memory_text and "quota" in memory_text
+     and "BossDamageEvent" in memory_text and "applySettlementToSave" in memory_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
     ("每日日志记 P4-2a 实现", "P4-2a 只读派生榜" in log_text and "E2E_P42A_OK" in log_text),
     ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
@@ -112,7 +115,7 @@ checks = [
     ("任务表记 P4-2a ✅ 与 39/17 验收",
      "**✅ 已实现（2026-11-07）**" in task_text
      and "E2E_P42A_OK" in task_text and "UI_SMOKE_P42A_OK" in task_text),
-    ("任务表下一步为 P4-2c", "下一步建议" in task_text and "下一步 P4-2c" in task_text),
+    ("任务表下一步为 P4-2d", "下一步建议" in task_text and "下一步 P4-2d" in task_text),
     ("P4-1 关键文件齐全",
      all((ROOT / p).exists() for p in [
          "backend/src/lib/wildRegistry.ts",
@@ -218,6 +221,9 @@ checks = [
      "占位派生" in text(ROOT / "backend" / "src" / "game" / "rank.ts")),
     ("任务表 P4-2a 行标注已知偏差并指向 F04",
      "已知偏差" in task_text and "F04" in task_text),
+    ("台账 F12 已标偿还、F14 登记 Boss 产出规则",
+     "F12" in future_text and "✅ 已偿还" in future_text
+     and "F14" in future_text and "不发任何奖励" in future_text),
     ("MEMORY.md 记未来规划台账与召唤师等级口径修正",
      "未来规划与技术债_2026-11-07.md" in memory_text
      and "账号等级" in memory_text and "宠物等级帽" in memory_text),
@@ -257,6 +263,51 @@ checks = [
      "p42b_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")
      and "p42b_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
     ("每日日志记 P4-2b 实现", "P4-2b 房间内核" in log_text and "E2E_P42B_OK" in log_text),
+
+    # ——— P4-2c 单人 Boss 讨伐 + 伤害榜 ———
+    ("规范含 §25 Boss 讨伐（伤害真值 / 次数 / 事件表 / 伪上报）",
+     "## 25. P4-2c 单人 Boss 讨伐与伤害榜" in spec_text
+     and all(x in spec_text for x in [
+         "BOSS_UNCATCHABLE", "BOSS_IN_PROGRESS", "BOSS_INPUT_FORBIDDEN",
+         "sweepExpired", "bossQuotaKey", "BossDamageEvent", "battleId @unique",
+         "dayKeyOf", "applySettlementToSave", "hold", "release"])),
+    ("bug_log 含 §17 ~ §30", all(f"## {n}." in bug_text for n in range(17, 31))),
+    ("任务表记 P4-2c ✅ 与 44/19 验收",
+     "**✅ 已实现（2026-11-07）**" in task_text
+     and "E2E_P42C_OK" in task_text and "UI_SMOKE_P42C_OK" in task_text),
+    ("排期文档记 P4-2c 已实现与实现记录",
+     "P4-2c 单人 Boss 挑战 + 伤害排名（限次）— ✅ 已实现" in plan_text
+     and "E2E_P42C" in plan_text
+     and "Boss 不发奖励" in plan_text and "在途名额" in plan_text),
+    ("verify 已注册 e2e:p42c 与 smoke:p42c",
+     "e2e:p42c" in verify_text and "smoke:p42c" in verify_text
+     and '"e2e:p42c"' in pkg_text),
+    ("P4-2c 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/settlement.ts",
+         "backend/src/game/boss.ts",
+         "backend/src/game/bossRank.ts",
+         "backend/src/lib/bossQuota.ts",
+         "backend/src/modules/boss.ts",
+         "backend/src/modules/saveRead.ts",
+         "backend/tests/boss.test.ts",
+         "backend/tests/settlement.test.ts",
+         "backend/tests/bossQuota.test.ts",
+         "backend/tests/e2e_p42c_boss.mjs",
+         "backend/prisma/migrations/20261107233000_add_boss_damage_event/migration.sql",
+         "scripts/ui_smoke_p42c.mjs",
+         "src/lib/boss.ts",
+         "src/lib/boss.test.ts",
+         "src/components/BossBoardModal.tsx"])),
+    ("Boss 伤害事件表与唯一索引已落 schema",
+     "model BossDamageEvent" in text(ROOT / "backend" / "prisma" / "schema.prisma")
+     and "battleId" in text(ROOT / "backend" / "prisma" / "schema.prisma")),
+    ("Boss 结算明确不发奖励（finish 分支）",
+     "s.rewards = null" in text(ROOT / "backend" / "src" / "game" / "battle.ts")
+     and "damageDealt" in text(ROOT / "backend" / "src" / "game" / "battle.ts")),
+    ("测试账号清理前缀含 p42c_",
+     "p42c_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
+    ("每日日志记 P4-2c 实现", "P4-2c" in log_text and "E2E_P42C_OK" in log_text),
 ]
 
 for name, ok, *detail in checks:

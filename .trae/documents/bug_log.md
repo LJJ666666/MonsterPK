@@ -662,3 +662,66 @@ REST `GET /api/room/:id` 再顺带惰性 `tick()`，双保险。纯内存扫描�
 3. **kernel 短阈值不是测试后门**：客户端只能选 `mode`，毫秒数一律服务端配置；
    kernel 房不产出奖励、不写个人档，与真实玩法互不影响。
 
+## 30. P4-2c 单人 Boss 讨伐（2026-11-07）
+
+### 30.1 Boss 结算白送了一笔资源（E2E 抓到：money 5000 → 5170）
+
+`finish()` 原本只有 `wild` / 普通两条奖励路径，Boss 战走的是普通分支，
+于是每次讨伐都发经验 + 金钱 + 首通覆盖。E2E「Boss 结算写回道具消耗与队伍 HP，
+但不给经验 / 金钱 / 首通」直接红：`money` 从 5000 涨到 5170。
+
+**这不只是测试问题，是产品口径问题**：Boss 产出是榜上记录，奖励待 F02 设计；
+暂按普通战斗发钱等于每天白送一笔稳定资源，长期会把经济打歪。
+**修**：`finish()` 里 Boss 走独立分支 `if (s.bossId) { s.rewards = null; ... return s; }`。
+队伍 HP / 道具消耗 / 图鉴仍照常写回个人档，只有「给钱给经验给首通」被拿掉。
+
+> 教训：**别用「复用普通分支」的心态接新玩法**。Boss / PVP / 共斗的产出规则各不相同，
+> 分支要显式穷举，用 `if / else` 而不是并列 `if`，否则以后加玩法时漏判一个就会静默发奖励。
+
+### 30.2 `sweep()` 返回 `number`，拿不到被回收的战斗态
+
+Boss 在途名额必须在战斗态 TTL 过期时释放，但 `BattleRegistry.sweep()` 只返回回收数量。
+直接改返回值会打破既有调用方与 5 个单测。
+
+**修**：新增 `sweepExpired(now, ttl): BattleState[]`，`sweep()` 改为
+`return this.sweepExpired(now, ttl).length`。既有签名零改动，`realtime.ts` 心跳改用
+`sweepExpired()` 并逐个 `release(st.bossQuotaKey)`。
+**扩展既有方法时优先「新增一个更具体的 + 老方法转发」**，比改签名便宜。
+
+### 30.3 Boss 未结束时开普通遭遇，在途名额被顶掉
+
+`runBattleStart` 原本允许同槽位新战斗覆盖旧战斗（历史行为，多个 E2E 依赖）。
+但 Boss 开局时 `bossQuota.hold()` 已占一个名额，被普通遭遇顶掉后那场 Boss 战消失，
+名额却还挂在内存里 —— 玩家白扣一次次数（直到 TTL 才释放）。
+
+**修**：`runBattleStart` 开头 `if (existing?.bossId) return 409 BOSS_IN_PROGRESS`。
+**只挡 Boss → 普通**这一个方向，普通 → 普通仍允许覆盖**（不动历史契约）。
+
+### 30.4 冒烟断言里的字段名是 `finalText` 不是 `finalTxt`
+
+375px 冒烟的 P3-1c 用例偶发失败（`hp=120, money=1200` 时「我方 HP 或金钱有变化」不成立）。
+用临时脚本复现 5 轮，全是「一击未死 + 我方满血」——**既有断言的真实偶发**，与 P4-2c 无关。
+
+第一次豁免写的是 `p.finalTxt`（字段不存在，永远 `undefined`），所以照旧红。
+**修**：字段名改 `p.finalText`，正则改 `/撤离|撤退|失去战斗力/`，并把 `endText` 一起打进失败详情。
+连跑 3 次全绿。**写豁免断言前先 `console.log` 一眼对象有哪些键**，别凭记忆拼字段名。
+
+### 30.5 新增 store 方法后，`vi.mock("@/lib/api")` 的手写 api 对象要补
+
+`useGameStore.startBossBattle()` 走 `api.bossStart`，而 `src/stores/battleFlow.test.ts`
+用 `vi.mock("@/lib/api")` 手写了整个 api 对象（没有 `importActual`），
+缺 `bossStart` 时新入口调用到 `undefined`，报 `api.bossStart is not a function`。
+
+**修**：mock 对象补 `bossStart: vi.fn()`。
+**手写 mock 不会自动跟随真实模块新增导出** —— 每次给 `lib/api.ts` 加方法，
+搜一遍 `vi.mock("@/lib/api")` 有没有手写对象。
+
+### 30.6 三条不是缺陷但容易误判的设计边界
+
+1. **Boss 也累计 `damageDealt` 之外的普通战斗伤害**：普通战斗也会累计 `damageDealt`，
+   只是没人读。不要为了「只有 Boss 才需要」加条件判断，反而给以后共斗留下不一致的真值。
+2. **`held` 不落库**：进程重启时在途名额清零（战斗态本来也丢了），
+   但 `committed` 由 DB 行数保证 —— 重启不会让次数变多，这是唯一正确的方向。
+3. **`BOSS_DAILY_LIMIT` env 只能下调**：`Math.min(内容表, env)`。
+   如果做成 env 优先，一次配错就能把限次 Boss 变成无限刷。
+

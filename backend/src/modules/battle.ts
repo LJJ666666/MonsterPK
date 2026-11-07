@@ -13,7 +13,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { parseAuthority, digestOf, type AuthorityState } from '../lib/authority';
+import { digestOf, type AuthorityState } from '../lib/authority';
 import { BATTLE_TTL_MS } from '../lib/battleSession';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import {
@@ -21,9 +21,13 @@ import {
   type BattleAction, type BattleState,
 } from '../game/battle';
 import { LOCATIONS, THEME_TABLE, contentStats } from '../game/content';
+import { bossDailyLimit, dayKeyOf, getBoss } from '../game/boss';
 import { encodeServerMessage } from '../lib/wsProtocol';
 import { commitState } from './session';
-import { broadcastToUser, gameSessions, battles, wilds } from './sessionBus';
+import { readSave } from './saveRead';
+// F12：结算写档已抽成 `game/settlement.ts` 的纯函数，普通战斗与单人 Boss 共用。
+import { applySettlementToSave } from '../game/settlement';
+import { broadcastToUser, battles, wilds, bossQuota } from './sessionBus';
 import { publishWild, resolveAreaSpec } from './wild';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
@@ -64,127 +68,6 @@ const actionSchema = z.object({
   ]),
 });
 
-type SaveRow = {
-  raw: string;
-  schemaVersion: string;
-  clientId: string | null;
-  authority: AuthorityState;
-};
-
-/** 在线时读内存权威态（最新），否则回库；两者都没有说明还没建号。 */
-async function readSave(userId: string, slot: number): Promise<SaveRow | null> {
-  const mem = gameSessions.get(userId, slot);
-  if (mem) {
-    return { raw: mem.data, schemaVersion: mem.schemaVersion, clientId: mem.clientId, authority: mem.authority };
-  }
-  const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
-  if (!rec) return null;
-  return {
-    raw: rec.data,
-    schemaVersion: rec.schemaVersion,
-    clientId: rec.clientId,
-    authority: parseAuthority(rec.authority, rec.data),
-  };
-}
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
-}
-
-/**
- * 把战斗结果写回存档：队伍 HP/经验、金钱、道具消耗、捕获入队、图鉴、首通记录。
- * 只信任服务端战斗态，不读客户端任何数值。
- */
-function applySettlement(row: SaveRow, state: BattleState): string {
-  let save: any;
-  try {
-    save = JSON.parse(row.raw);
-  } catch {
-    throw new BattleError('SAVE_UNREADABLE', '服务端存档不可用');
-  }
-  if (!save || typeof save !== 'object' || Array.isArray(save)) {
-    throw new BattleError('SAVE_UNREADABLE', '服务端存档结构异常');
-  }
-
-  const next: any = { ...save };
-
-  // 队伍：战斗内的 HP / 经验 / 等级 / 技能变化以服务端为准
-  next.party = state.party;
-
-  if (state.rewards) next.money = num(next.money) + state.rewards.moneyGain;
-
-  if (Object.keys(state.consumed).length > 0) {
-    const inv: Record<string, number> = { ...(next.inventory ?? {}) };
-    for (const [itemId, used] of Object.entries(state.consumed)) {
-      inv[itemId] = Math.max(0, num(inv[itemId]) - num(used));
-    }
-    next.inventory = inv;
-  }
-
-  // 图鉴：见过；捕获成功再记一次
-  const seenId = state.enemy.specId;
-  const seenPrev = next.collection?.[seenId] ?? {};
-  next.collection = {
-    ...(next.collection ?? {}),
-    [seenId]: {
-      seen: true,
-      captured: seenPrev.captured ?? false,
-      timesCaptured: num(seenPrev.timesCaptured),
-      seenLocations: seenPrev.seenLocations,
-    },
-  };
-
-  if (state.captured) {
-    const party = Array.isArray(next.party) ? next.party.slice() : [];
-    const box = Array.isArray(next.box) ? next.box.slice() : [];
-    if (party.length < 6) party.push(state.captured);
-    else box.push(state.captured);
-    next.party = party;
-    next.box = box;
-    const prev = next.collection[seenId] ?? {};
-    next.collection[seenId] = {
-      seen: true,
-      captured: true,
-      timesCaptured: num(prev.timesCaptured) + 1,
-      seenLocations: prev.seenLocations,
-    };
-  }
-
-  // 首通：与前端 markAreaCleared 同规则（更高难度的区域才覆盖）
-  if ((state.result === 'enemy_fainted' || state.result === 'captured') && state.areaId) {
-    const prev = next.clearedAreas?.[state.areaId];
-    if (!prev || prev.level < state.levelMax) {
-      next.clearedAreas = {
-        ...(next.clearedAreas ?? {}),
-        [state.areaId]: {
-          name: state.areaName,
-          level: state.levelMax,
-          theme: state.theme,
-          clearedAt: new Date().toISOString(),
-        },
-      };
-    }
-  }
-
-  // 全灭：送回最近的恢复点并回满。此前这是客户端 `leaveBattle` 里的本地逻辑——
-  // 意味着「不点离开按钮」或「改客户端」就能避免惩罚，而且回满结果由客户端写进存档。
-  // P3-2 起由服务端在结算时直接落档，客户端只负责关掉战斗界面。
-  if (state.result === 'player_fainted') {
-    const heal = typeof next.lastHealLocationId === 'string' && next.lastHealLocationId
-      ? next.lastHealLocationId
-      : next.locationId;
-    next.party = (Array.isArray(next.party) ? next.party : []).map((m: any) => ({
-      ...m,
-      hp: m.maxHp,
-      status: 'none',
-    }));
-    if (typeof heal === 'string' && heal) next.locationId = heal;
-  }
-
-  next.lastSavedAt = new Date().toISOString();
-  return JSON.stringify(next);
-}
-
 function broadcastBattle(userId: string, slot: number, state: BattleState) {
   broadcastToUser(userId, encodeServerMessage({
     type: 'battle.state',
@@ -216,6 +99,89 @@ function wildResultOf(result: BattleState['result']): 'captured' | 'defeated' | 
   return 'fled';
 }
 
+/**
+ * P4-2c：Boss 结算。**伤害只取 `state.damageDealt`**（服务端按敌方 HP 差累计），
+ * 客户端回包里没有任何可写入路径。
+ *
+ * 规则：
+ *  - 逃跑成功 = 放弃：释放次数、不写事件、不上榜（防止「打一半跑」反复刷最高伤害）；
+ *  - 击败 / 全灭 = 有效挑战：写一条 append-only 事件（`battleId` 唯一，重复结算不叠加），
+ *    并把在途名额转成已用（已用真值就是事件行数）；
+ *  - 事件写入失败不阻断响应：存档已经落库，玩家这一场照常结束；失败会记录日志便于排查。
+ */
+async function settleBossRun(
+  req: FastifyRequest,
+  userId: string,
+  slot: number,
+  state: BattleState,
+) {
+  const quotaKey = state.bossQuotaKey ?? null;
+  const now = Date.now();
+  const dayKey = dayKeyOf(now);
+  const bossId = state.bossId as string;
+  const damage = Math.max(0, Math.floor(state.damageDealt ?? 0));
+
+  if (state.result === 'fled') {
+    if (quotaKey) bossQuota.release(quotaKey);
+    const spec = getBoss(bossId);
+    const limit = spec ? bossDailyLimit(spec) : 0;
+    return {
+      bossId,
+      periodKey: dayKey,
+      damageDealt: damage,
+      recorded: false,
+      reason: 'fled',
+      total: 0,
+      best: 0,
+      attempts: 0,
+      quota: { limit, used: 0, remaining: limit },
+    };
+  }
+
+  let recorded = false;
+  try {
+    await prisma.bossDamageEvent.create({
+      data: {
+        userId,
+        slot,
+        bossId,
+        periodKey: dayKey,
+        damage,
+        result: String(state.result ?? 'unknown'),
+        battleId: state.id,
+      },
+    });
+    recorded = true;
+  } catch (err: any) {
+    // P2002 = battleId 已存在：同一场战斗重复结算，视为已记录，不叠加伤害。
+    if (err?.code !== 'P2002') {
+      req.log.error({ event: 'boss_damage_persist_failed', userId, bossId, battleId: state.id, err },
+        'boss damage event insert failed');
+    }
+  }
+  if (quotaKey) bossQuota.commit(quotaKey);
+
+  const agg = await prisma.bossDamageEvent.aggregate({
+    where: { userId, bossId, periodKey: dayKey },
+    _sum: { damage: true },
+    _max: { damage: true },
+    _count: { _all: true },
+  });
+  const spec = getBoss(bossId);
+  const limit = spec ? bossDailyLimit(spec) : 0;
+  const attempts = agg._count?._all ?? 0;
+  return {
+    bossId,
+    periodKey: dayKey,
+    damageDealt: damage,
+    recorded,
+    total: agg._sum?.damage ?? 0,
+    best: agg._max?.damage ?? 0,
+    attempts,
+    quota: { limit, used: attempts, remaining: Math.max(0, limit - attempts) },
+  };
+}
+
 export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   /** 开局：敌方由服务端生成，客户端只说明「在哪打」。 */
   fastify.post('/api/battle/start', { preHandler: fastify.authenticate }, async (req, reply) => {
@@ -233,6 +199,13 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags, wildId } = params;
 
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
+
+    // P4-2c：Boss 战未结束时不允许用它顶掉 —— 否则这次「在途次数」会一直挂到 TTL。
+    // 普通战斗之间仍然允许覆盖（历史行为，E2E 依赖），只拦 Boss。
+    const existing = battles.current(userId, slot);
+    if (existing?.bossId) {
+      return reply.code(409).send({ error: '讨伐尚未结束，请先完成或放弃', code: 'BOSS_IN_PROGRESS' });
+    }
 
     const row = await readSave(userId, slot);
     if (!row) return reply.code(404).send({ error: '还没有存档' });
@@ -399,7 +372,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     // 结束：服务端结算写档（这一步之后客户端再 PUT 也只能与原档一致）
     if (next.finished) {
       try {
-        const raw = applySettlement(row, next);
+        const raw = applySettlementToSave(row.raw, next);
         const authority: AuthorityState = {
           ...row.authority,
           expected: digestOf(raw),
@@ -414,6 +387,20 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           source: 'battle',
         });
         battles.drop(userId, slot);
+
+        // P4-2c：Boss 战分流。Boss 战没有 wildId，两者互斥；用 if/else 而不是并列，
+        // 避免以后加玩法时漏判「两个结算都跑了」。
+        if (next.bossId) {
+          const boss = await settleBossRun(req, userId, slot, next);
+          return {
+            ok: true,
+            battle: battleView(next),
+            revision: committed.revision,
+            settled: true,
+            boss,
+          };
+        }
+
         // P4-1b：共享野怪结算。归属三键由 WildRegistry 复核，结果跨账号广播，
         // 其他客户端会看到这只野怪变成 resolved（已捕获 / 已击败 / 已逃走）。
         const wild = next.wildId ? wilds.findByBattle(next.id) : undefined;
@@ -455,6 +442,8 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const state = battles.get(userId, parsed.data.slot, parsed.data.battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
     battles.drop(userId, parsed.data.slot);
+    // P4-2c：放弃 Boss 战 = 不扣次数（release 在途名额），也不写伤害事件。
+    if (state.bossId && state.bossQuotaKey) bossQuota.release(state.bossQuotaKey);
     // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。
     const released = wilds.release(parsed.data.battleId, Date.now());
     for (const areaId of released) {

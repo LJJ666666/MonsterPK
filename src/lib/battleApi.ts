@@ -40,6 +40,10 @@ export type ServerBattleView = {
   captured: MonsterInstance | null;
   consumed: Record<string, number>;
   actions: number;
+  /** P4-2c：Boss 战标识与本场伤害（服务端累计）。 */
+  bossId?: string | null;
+  bossName?: string | null;
+  damageDealt?: number;
 };
 
 /** 战斗接口的业务错误：区分「战斗没了」与「网络不通」，前者不能降级到本地重打。 */
@@ -93,6 +97,11 @@ export function toBattleState(view: ServerBattleView): BattleState {
     serverId: view.battleId,
     serverParty: Array.isArray(view.party) ? view.party : [],
     pending: false,
+    ...(view.bossId ? {
+      bossId: view.bossId,
+      bossName: view.bossName ?? undefined,
+      damageDealt: typeof view.damageDealt === "number" ? view.damageDealt : 0,
+    } : {}),
   };
 }
 

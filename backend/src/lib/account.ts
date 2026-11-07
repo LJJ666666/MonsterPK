@@ -13,6 +13,25 @@ import { prisma } from './prisma';
 
 /** 封号响应的机器码，前端据此弹出封号弹窗并强制登出。 */
 export const BAN_CODE = 'ACCOUNT_BANNED';
+/** P4-1a 顶号：旧会话代次的 token 一律拒绝，前端弹「已在其他设备登录」并清 token。 */
+export const SESSION_REPLACED_CODE = 'SESSION_REPLACED';
+
+/**
+ * 会话代次比对（纯函数，便于单测）。
+ * `payloadSv` 来自 JWT 的 sv；缺省（迁移前的老 token）一律视为失效，要求重新登录。
+ */
+export function checkSessionVersion(
+  payloadSv: unknown,
+  currentVersion: number,
+): { ok: true } | { ok: false; code: 'SESSION_REPLACED'; reason: string } {
+  if (typeof payloadSv !== 'number' || !Number.isInteger(payloadSv)) {
+    return { ok: false, code: SESSION_REPLACED_CODE, reason: '登录状态已更新，请重新登录' };
+  }
+  if (payloadSv !== currentVersion) {
+    return { ok: false, code: SESSION_REPLACED_CODE, reason: '账号已在其他设备登录，本设备已下线' };
+  }
+  return { ok: true };
+}
 
 /** 解析 ADMIN_USERNAMES：逗号分隔、去空白、忽略空项、大小写不敏感。 */
 export function parseAdminUsernames(raw: string | undefined): Set<string> {
@@ -41,6 +60,8 @@ export type AccountState = {
   isAdmin: boolean;
   banned: boolean;
   banReason: string | null;
+  /** P4-1a 当前登录代次；认证守卫据此拒绝旧设备的 token。 */
+  sessionVersion: number;
 };
 
 /**
@@ -50,10 +71,10 @@ export type AccountState = {
 export async function getAccountState(userId: string): Promise<AccountState> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, role: true, bannedAt: true, banReason: true },
+    select: { id: true, username: true, role: true, bannedAt: true, banReason: true, sessionVersion: true },
   });
   if (!user) {
-    return { exists: false, userId, username: null, isAdmin: false, banned: false, banReason: null };
+    return { exists: false, userId, username: null, isAdmin: false, banned: false, banReason: null, sessionVersion: 0 };
   }
   return {
     exists: true,
@@ -62,6 +83,7 @@ export async function getAccountState(userId: string): Promise<AccountState> {
     isAdmin: user.role === 'admin' || isAdminUsername(user.username),
     banned: user.bannedAt !== null,
     banReason: user.banReason ?? null,
+    sessionVersion: user.sessionVersion,
   };
 }
 

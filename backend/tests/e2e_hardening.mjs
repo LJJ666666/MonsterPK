@@ -415,22 +415,26 @@ async function main() {
     !!snap && typeof snap.revision === 'number' && typeof snap.data === 'string',
     snap ? `revision=${snap.revision}` : 'no message');
 
-  // 连接数上限：ws2 + 2 = 3，第 4 条 429
+  // P4-1a 顶号：第 2 条连接不再被 429 拒绝，而是把前一条踢下线
   const ws3 = await openWs({ token: wsAcc.token });
+  keepAlive.push(ws3);
+  const bye2 = await waitMsg(ws2, (m) => m.type === 'bye' && m.code === 'SESSION_REPLACED', 2_000);
+  suite.check('同账号第 2 条连接顶掉前一条（bye SESSION_REPLACED）',
+    ws3.ok === true && !!bye2, `status=${ws3.status} bye=${bye2?.code}`);
+
   const ws4 = await openWs({ token: wsAcc.token });
-  keepAlive.push(ws3, ws4);
-  const ws5 = await openWs({ token: wsAcc.token });
-  suite.check('同账号第 4 条连接 → 429 TOO_MANY_CONNECTIONS',
-    ws5.ok === false && ws5.status === 429 && ws5.data?.code === 'TOO_MANY_CONNECTIONS',
-    `status=${ws5.status} code=${ws5.data?.code}`);
+  keepAlive.push(ws4);
+  const bye3 = await waitMsg(ws3, (m) => m.type === 'bye' && m.code === 'SESSION_REPLACED', 2_000);
+  suite.check('连续顶号：始终只有最新一条连接在线',
+    ws4.ok === true && !!bye3, `status=${ws4.status} bye=${bye3?.code}`);
 
   // 断开后可重连
   await closeWs(ws4);
   const ws6 = await openWs({ token: wsAcc.token });
-  suite.check('关闭一条连接后可重新连接', ws6.ok === true, `status=${ws6.status}`);
+  suite.check('关闭连接后可重新连接', ws6.ok === true, `status=${ws6.status}`);
   keepAlive.push(ws6);
 
-  // 限流：先腾出连接名额（否则下面新建的是第 4 条，直接被 429 拒掉，测不到限流）
+  // 限流：顶号后单账号只有一条连接，不必再「腾名额」（新连接会顶掉 ws6）
   for (const c of [ws2, ws3, ws6]) await closeWs(c);
 
   // 限流：1 秒内 25 条

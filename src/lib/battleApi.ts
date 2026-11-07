@@ -103,6 +103,8 @@ export type StartInput = {
   areaId?: string;
   levelMin: number;
   levelMax: number;
+  /** P4-1b：指定共享野怪实例 id。 */
+  wildId?: string;
   testFlags?: { testShiny?: boolean; testMaxStats?: boolean; testOHKO?: boolean };
 };
 
@@ -123,6 +125,7 @@ export const battleApi = {
       areaId: input.areaId ?? null,
       levelMin: input.levelMin,
       levelMax: input.levelMax,
+      ...(input.wildId ? { wildId: input.wildId } : {}),
       ...(input.testFlags ? { testFlags: input.testFlags } : {}),
     });
     if (!res?.battle) throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });

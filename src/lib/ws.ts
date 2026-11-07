@@ -4,7 +4,10 @@
 import { useEffect, useState } from "react";
 import { api, API_BASE, UNAUTHORIZED_EVENT, BANNED_EVENT, BAN_CODE } from "./api";
 import { getToken, isTokenValid } from "./auth";
-import { SESSION_STATE_EVENT, type SessionStateMessage } from "./sessionState";
+import { SESSION_STATE_EVENT, WILD_STATE_EVENT, type SessionStateMessage, type WildStateMessage } from "./sessionState";
+import {
+  SESSION_REPLACED_CODE, notifySessionReplaced,
+} from "./sessionReplaced";
 
 // 用数字常量而不是 WebSocket.OPEN：本模块会被 vitest 在 Node 环境里 import，
 // 那里没有全局 WebSocket，顶层引用静态常量会直接抛错。
@@ -52,6 +55,16 @@ export function isSessionStateMessage(m: ServerEnvelope | null): m is SessionSta
     && Number.isFinite(m.revision)
     && typeof m.data === "string"
     && typeof m.updatedAt === "number";
+}
+
+/** P4-1b：校验共享野怪快照形状；脏包不派发，避免把假的野怪塞进 UI。 */
+export function isWildStateMessage(m: ServerEnvelope | null): m is WildStateMessage {
+  return !!m
+    && m.type === "wild.state"
+    && typeof m.areaId === "string"
+    && typeof m.revision === "number"
+    && Number.isFinite(m.revision)
+    && Array.isArray(m.monsters);
 }
 
 export type WsPhase =
@@ -113,6 +126,12 @@ let lastMessageAt = 0;
 let everOpened = false;
 let started = false;
 let stopped = true;
+/**
+ * P4-1a：被顶号时的 token。只要本地还是这枚 token，就拒绝再次建连——
+ * 否则用户不点弹窗直接刷新页面，会重新握手把新设备踢下线，形成互相顶号死循环。
+ * 重新登录会换一枚新 token（sv 不同），自然解除这个闸门。
+ */
+let replacedToken: string | null = null;
 
 function clearTimers() {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -185,6 +204,13 @@ async function handleHandshakeFailure() {
     await api.me();
     scheduleRetry();
   } catch (e: any) {
+    if (e?.code === SESSION_REPLACED_CODE) {
+      replacedToken = getToken();
+      setPhase("unauthorized", "账号已在其他设备登录");
+      stopRealtime();
+      notifySessionReplaced();
+      return;
+    }
     if (e?.code === BAN_CODE) {
       setPhase("unauthorized", "账号已被封号");
       stopRealtime();
@@ -242,8 +268,19 @@ function connect() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(SESSION_STATE_EVENT, { detail: m }));
       }
+    } else if (isWildStateMessage(m)) {
+      // P4-1b：共享野怪状态也是全量快照，只转发，由 lib/wild.ts 维护视图。
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(WILD_STATE_EVENT, { detail: m }));
+      }
     } else if (m.type === "error") {
       setPhase("online", m.reason);
+    } else if (m.type === "bye" && m.code === SESSION_REPLACED_CODE) {
+      // P4-1a 顶号：立刻停掉实时通道（不重连），弹窗由 App 的 SessionGate 统一展示。
+      replacedToken = getToken();
+      stopRealtime();
+      notifySessionReplaced(m.reason);
+      setPhase("unauthorized", m.reason ?? "账号已在其他设备登录");
     } else if (m.type === "bye" && m.code === BAN_CODE) {
       // 会话期被封：复用 P1-1b 的全局封号弹窗并强制登出，绝不继续重连
       window.dispatchEvent(
@@ -292,6 +329,12 @@ function onAuthLost() {
  */
 export function startRealtime(): void {
   const token = getToken();
+  // P4-1a：还是被顶号那枚 token → 绝不重建连接（防互相顶号死循环）。
+  if (replacedToken && token === replacedToken) {
+    stopRealtime();
+    setPhase("unauthorized", "账号已在其他设备登录");
+    return;
+  }
   if (!token || !isTokenValid(token)) {
     stopRealtime();
     setPhase("idle");

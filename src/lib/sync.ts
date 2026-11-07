@@ -330,6 +330,19 @@ export async function syncOnLogin(slot: number): Promise<void> {
 
 // —— 启动自动同步：订阅 store 变更，防抖上传当前槽位；并监听网络恢复 ——
 let started = false;
+
+/**
+ * P4-1a 顶号：立刻停掉一切上传动作并丢弃离线队列。
+ * api.request 层的只读下线态是硬闸；这里把待发任务清干净，避免弹窗确认后
+ * 残留的 debounce / 离线队列在重新登录瞬间把旧改动发出去。
+ */
+export function stopAutoSync(): void {
+  cancelPendingUpload();
+  offlineQueue.length = 0;
+  revisionProbes.clear();
+  setPhase("idle");
+}
+
 export function startAutoSync(): void {
   if (started) return;
   started = true;

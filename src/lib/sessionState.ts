@@ -5,6 +5,8 @@
  * 都要读写「已见 revision / 是否有意图在途」，彼此之间不互相 import。
  */
 export const SESSION_STATE_EVENT = "mpk:session-state";
+/** P4-1b 共享野怪：服务端全量广播的区域野怪列表。 */
+export const WILD_STATE_EVENT = "mpk:wild-state";
 
 export type SessionStateMessage = {
   type: "session.state";
@@ -15,6 +17,26 @@ export type SessionStateMessage = {
   schemaVersion: string;
   source: "hydrate" | "put" | "intent" | "battle" | "action";
   online: number;
+};
+
+/** P4-1b：共享野怪的公开视图（不含归属 userId，避免泄露他人账号）。 */
+export type WildMonsterView = {
+  id: string;
+  areaId: string;
+  speciesId: string;
+  name: string;
+  level: number;
+  label: string;
+  status: "available" | "claimed" | "resolved";
+  result: "captured" | "defeated" | "fled" | null;
+  expiresAt: number;
+};
+
+export type WildStateMessage = {
+  type: "wild.state";
+  areaId: string;
+  revision: number;
+  monsters: WildMonsterView[];
 };
 
 /** 每个槽位最近一次「已被本地认可」的权威态版本号（-1 = 尚未建立基线）。 */
@@ -57,6 +79,20 @@ export function setRevision(slot: number, revision: number): void {
 /** 登出时清空所有槽位的版本号，避免下一个账号继承。 */
 export function forgetAllRevisions(): void {
   for (const k of Object.keys(lastSeen)) delete lastSeen[k as any];
+}
+
+/**
+ * P4-1a 顶号：被顶设备进入「只读下线态」。
+ * 一旦置位，api.request 会拒绝发出任何业务请求（含 GET），
+ * 保证本地未上传的改动不会被偷偷同步上去 —— 杰哥定的口径是不合并、直接下线。
+ * 重新登录（setToken）时复位。
+ */
+let suspended = false;
+export function isSessionSuspended(): boolean {
+  return suspended;
+}
+export function setSessionSuspended(value: boolean): void {
+  suspended = value;
 }
 
 export function shouldApplySnapshot(m: SessionStateMessage): boolean {

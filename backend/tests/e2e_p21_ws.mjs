@@ -7,7 +7,7 @@
  *  - ping → pong 回显；连接登记与注销体现在 /api/health 的 ws 统计
  *  - 无 token / 篡改 token / 非法 Origin / 错误路径 → 明确拒绝
  *  - 封号账号 → 403 ACCOUNT_BANNED（与 REST 守卫同一口径）
- *  - 单账号连接上限 429、关闭后可重连、跨账号隔离
+ *  - P4-1a 顶号：单账号单连接、bye SESSION_REPLACED、旧 token REST/WS 双失效、跨账号隔离
  *  - 坏 JSON / 未知类型 / 数组 / 速率限制 / 超长消息
  *  - 断线重连拿到新的 connectionId；原有 REST 接口不回归
  * 输出：逐例 [PASS]/[FAIL]，末尾汇总；任一失败以 exit 1 结束。
@@ -213,30 +213,57 @@ async function main() {
     data: { bannedAt: null, banReason: null },
   });
 
-  // ——————————————— C. 连接数上限与登记清理 ———————————————
+  // ——————————————— C. P4-1a 顶号：同账号只允许一条在线连接 ———————————————
   const multi = await freshUser('multi');
-  const conns = [];
-  for (let i = 0; i < 3; i++) conns.push(await openWs({ token: multi.token }));
-  check('同一账号 3 条连接均成功', conns.every((x) => x.ok === true), JSON.stringify(conns.map((x) => x.status)));
-  const h3 = await request('/api/health');
-  check('health 统计到 3 条连接', h3.data?.ws?.connections >= 3, JSON.stringify(h3.data));
+  const firstConn = await openWs({ token: multi.token });
+  check('同一账号第 1 条连接成功', firstConn.ok === true, JSON.stringify({ status: firstConn.status }));
+  const hBefore = await request('/api/health');
+  const before = hBefore.data?.ws?.connections ?? 0;
 
-  const fourth = await openWs({ token: multi.token });
-  check('第 4 条连接 → 429 TOO_MANY_CONNECTIONS',
-    fourth.status === 429 && fourth.data?.code === 'TOO_MANY_CONNECTIONS', JSON.stringify({ status: fourth.status, data: fourth.data }));
+  const takeover = await openWs({ token: multi.token });
+  check('第 2 条连接成功（后来者赢，不再 429 拒绝）', takeover.ok === true,
+    JSON.stringify({ status: takeover.status, data: takeover.data }));
+  await sleep(250);
+  const bye = firstConn.messages.find((m) => m.type === 'bye');
+  check('旧连接收到 bye SESSION_REPLACED', bye?.code === 'SESSION_REPLACED', JSON.stringify(bye));
+  check('旧连接已被服务端关闭', firstConn.ws.readyState === 3, `readyState=${firstConn.ws.readyState}`);
+  const hAfter = await request('/api/health');
+  check('顶号后连接总数不增长（旧连接已注销）', hAfter.data?.ws?.connections === before,
+    JSON.stringify({ before, after: hAfter.data?.ws?.connections }));
 
   const other = await freshUser('other');
   const otherConn = await openWs({ token: other.token });
-  check('其它账号不受该连接上限影响', otherConn.ok === true, JSON.stringify({ status: otherConn.status }));
+  check('其它账号不受顶号影响', otherConn.ok === true, JSON.stringify({ status: otherConn.status }));
   await closeWs(otherConn.ws);
 
-  await closeWs(conns[0].ws);
+  // 重新登录 → 会话代次递增：旧 token 的 REST 与 WS 双双失效，防「刷新页面又把新设备顶掉」
+  const relogin = await request('/api/auth/login', {
+    method: 'POST', body: { username: multi.username, password: PASSWORD },
+  });
+  const newToken = relogin.data?.token;
+  check('重新登录成功且签发新 token', relogin.status === 200 && !!newToken && newToken !== multi.token,
+    JSON.stringify({ status: relogin.status }));
+  const oldMe = await request('/api/auth/me', { token: multi.token });
+  check('旧 token REST → 403 SESSION_REPLACED',
+    oldMe.status === 403 && oldMe.data?.code === 'SESSION_REPLACED', JSON.stringify(oldMe));
+  const newMe = await request('/api/auth/me', { token: newToken });
+  check('新 token REST 正常', newMe.status === 200, JSON.stringify(newMe));
+  const oldWsAgain = await openWs({ token: multi.token });
+  check('旧 token 无法再建 WS → 403 SESSION_REPLACED',
+    oldWsAgain.status === 403 && oldWsAgain.data?.code === 'SESSION_REPLACED',
+    JSON.stringify({ status: oldWsAgain.status, data: oldWsAgain.data }));
+  await sleep(200);
+  check('重新登录即时踢掉旧 WS 连接',
+    takeover.messages.some((m) => m.type === 'bye' && m.code === 'SESSION_REPLACED'),
+    JSON.stringify(takeover.messages.slice(-3)));
+
+  await closeWs(takeover.ws);
+  await closeWs(firstConn.ws);
   await sleep(250);
-  const retryConn = await openWs({ token: multi.token });
-  check('关闭一条后新连接可建立（登记表已清理）', retryConn.ok === true, JSON.stringify({ status: retryConn.status, data: retryConn.data }));
+  const retryConn = await openWs({ token: newToken });
+  check('新 token 可正常建连（登记表已清理）', retryConn.ok === true,
+    JSON.stringify({ status: retryConn.status, data: retryConn.data }));
   await closeWs(retryConn.ws);
-  await closeWs(conns[1].ws);
-  await closeWs(conns[2].ws);
   await sleep(250);
 
   // ——————————————— D. 消息协议边界 ———————————————

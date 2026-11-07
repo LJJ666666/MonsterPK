@@ -22,6 +22,9 @@ model User {
   bannedAt  DateTime?
   // 封号中文原因（展示给客户端弹窗）
   banReason String?
+  // P4-1a 登录代次（顶号）：每次注册/登录 +1 并写进 JWT 的 sv。
+  // 认证守卫比对 sv，旧设备 token 立刻失效，避免「刷新页面又把新设备顶掉」的死循环。
+  sessionVersion Int @default(0)
   createdAt DateTime @default(now())
   saves     Save[]
   bans      BanRecord[]

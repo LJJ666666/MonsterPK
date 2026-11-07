@@ -5,7 +5,7 @@
  * 覆盖：
  *  - 连接建立时 hydrate：hello 能力声明 + 主动下发 session.state 全量快照
  *  - 服务端写入（PUT / 意图裁决）统一经会话态：revision 单调递增并广播给同账号所有连接
- *  - 多端一致：两条连接都收到同一份权威快照；GET /api/save 以内存权威态为准
+ *  - P4-1a 顶号：单账号单连接、旧连接收到 bye；GET /api/save 以内存权威态为准
  *  - 上行不能写状态：伪造 session.state 被 UNKNOWN_TYPE 拒绝并关闭，DB/会话态不变
  *  - session.resync 只请求重推；断线后会话按 TTL 保留、重连拿到最新快照
  *  - 在线状态查询 /api/session 与 health.sessions；REST 回归
@@ -174,15 +174,19 @@ async function main() {
     s1.status === 200 && s1.data?.online === true && s1.data?.revision === rev1
       && s1.data?.connections >= 1, JSON.stringify(s1.data));
 
+  // P4-1a 顶号：同账号只允许一条在线连接。第 2 条握手成功，第 1 条被即时踢下线。
   const b = await openWs(token);
   await waitMsg(b, isHello);
   const snapB = await waitMsg(b, isState);
-  check('连接 B 同样收到权威快照（多端 hydrate 一致）',
+  check('顶号后新连接同样 hydrate 到最新权威快照',
     !!snapB && snapB.revision === rev1 && snapB.data === snapA?.data,
     JSON.stringify(snapB && { revision: snapB.revision }));
+  const byeA = await waitMsg(a, (m) => m?.type === 'bye', 2_000);
+  check('旧连接收到 bye SESSION_REPLACED',
+    byeA?.code === 'SESSION_REPLACED', JSON.stringify(byeA));
   const s2 = await session(token);
-  check('/api/session：两条连接均已登记',
-    s2.status === 200 && s2.data?.connections >= 2, JSON.stringify(s2.data?.connections));
+  check('/api/session：顶号后只登记 1 条连接',
+    s2.status === 200 && s2.data?.connections === 1, JSON.stringify(s2.data?.connections));
 
   // ——— C. 服务端写入 → revision 递增 → 广播给所有连接 ———
   const spent = clone(base);
@@ -193,15 +197,14 @@ async function main() {
   check('PUT 合法消耗 → 200 且 revision 严格递增',
     second.status === 200 && rev2 > rev1, `rev1=${rev1} rev2=${rev2}`);
 
-  const pushA = await waitMsg(a, stateAfter(rev1));
-  const pushB = await waitMsg(b, stateAfter(rev1));
-  check('连接 A 收到变更广播（revision / source / data 正确）',
+  const pushA = await waitMsg(b, stateAfter(rev1));
+  check('唯一活跃连接收到变更广播（revision / source / data 正确）',
     !!pushA && pushA.revision === rev2 && pushA.source === 'put'
       && JSON.parse(pushA.data).money === 1100,
     JSON.stringify(pushA && { revision: pushA.revision, source: pushA.source }));
-  check('连接 B 收到同一份权威快照（多端一致）',
-    !!pushB && pushB.revision === rev2 && pushB.data === pushA?.data,
-    JSON.stringify(pushB && { revision: pushB.revision }));
+  const stalePushes = a.queue.filter((m) => isState(m) && m.revision > rev1);
+  check('被顶号下线的旧连接不再收到任何状态广播',
+    stalePushes.length === 0, JSON.stringify(stalePushes.map((m) => m.revision)));
 
   const g2 = await get(token);
   check('GET /api/save 以在线权威态为准（revision / data 与广播一致）',
@@ -209,24 +212,25 @@ async function main() {
     JSON.stringify(g2.data && { revision: g2.data.revision }));
 
   // ——— D. 上行协议：只请求重推，不能写状态 ———
-  a.ws.send(JSON.stringify({ type: 'session.resync' }));
-  const resync = await waitMsg(a, isState);
+  b.ws.send(JSON.stringify({ type: 'session.resync' }));
+  const resync = await waitMsg(b, isState);
   check('session.resync → 服务端重推当前快照（不回 pong）',
-    !!resync && resync.revision === rev2 && !a.queue.some((m) => m.type === 'pong'),
+    !!resync && resync.revision === rev2 && !b.queue.some((m) => m.type === 'pong'),
     JSON.stringify(resync && { revision: resync.revision }));
 
-  const c = await openWs(token);
-  await waitMsg(c, isHello);
-  await waitMsg(c, isState);
-  c.ws.send(JSON.stringify({
+  b.ws.send(JSON.stringify({
     type: 'session.state', slot: 1, revision: 999,
     data: JSON.stringify(Object.assign(clone(spent), { money: 9_999_999 })),
   }));
-  const err = await waitMsg(c, (m) => m?.type === 'error', 2_000);
+  const err = await waitMsg(b, (m) => m?.type === 'error', 2_000);
   await sleep(150);
   check('伪造 session.state 上行 → error UNKNOWN_TYPE 并关闭连接',
-    err?.code === 'UNKNOWN_TYPE' && c.closeCode === 1008,
-    JSON.stringify({ code: err?.code, closeCode: c.closeCode }));
+    err?.code === 'UNKNOWN_TYPE' && b.closeCode === 1008,
+    JSON.stringify({ code: err?.code, closeCode: b.closeCode }));
+  // 伪造上行会让这条连接被关掉，E/F 段重新建一条活跃连接。
+  const c = await openWs(token);
+  await waitMsg(c, isHello);
+  await waitMsg(c, isState);
   const gAfterForge = await get(token);
   check('伪造上行未写入服务端状态（revision / 金币不变）',
     gAfterForge.data?.revision === rev2 && JSON.parse(gAfterForge.data.data).money === 1100,
@@ -237,7 +241,7 @@ async function main() {
   const buy = await intent(token, 'shop_buy', { itemId: 'capsule_prism', amount: 1 }, spent, nonce);
   check('shop_buy 意图裁决 200（服务端价格表）',
     buy.status === 200 && buy.data?.ok === true, JSON.stringify(buy.data));
-  const pushIntentA = await waitMsg(a, stateAfter(rev2));
+  const pushIntentA = await waitMsg(c, stateAfter(rev2));
   const rev3 = pushIntentA?.revision;
   check('意图登记广播 source=intent 且 revision 递增',
     !!pushIntentA && pushIntentA.source === 'intent' && rev3 > rev2,
@@ -251,19 +255,19 @@ async function main() {
   const rev4 = committed.data?.revision;
   check('带 intentNonce 提交结算 → 200 且 revision 再递增',
     committed.status === 200 && rev4 > rev3, `rev3=${rev3} rev4=${rev4}`);
-  const pushCommitB = await waitMsg(b, stateAfter(rev3));
-  check('提交结果广播给另一条连接（data 与服务端权威态一致）',
+  const pushCommitB = await waitMsg(c, stateAfter(rev3));
+  check('提交结果广播给活跃连接（data 与服务端权威态一致）',
     !!pushCommitB && pushCommitB.revision === rev4 && JSON.parse(pushCommitB.data).money === 500,
     JSON.stringify(pushCommitB && { revision: pushCommitB.revision }));
 
   // ——— F. 断线 / 重连 / 会话保留 ———
+  await closeWs(c);
   await closeWs(b);
   await sleep(150);
   const sAfterClose = await session(token);
   check('断线后在线连接数下降',
     sAfterClose.status === 200 && sAfterClose.data?.connections < s2.data?.connections,
     JSON.stringify(sAfterClose.data?.connections));
-  await closeWs(a);
   await sleep(150);
   const sOffline = await session(token);
   check('最后一条连接断开后会话按 TTL 保留（online=false 但 revision 仍在）',

@@ -52,6 +52,8 @@ export type BattleState = {
   actions: number;
   startedAt: number;
   updatedAt: number;
+  /** P4-1b：关联的共享野怪实例 id；普通随机遭遇为 null。 */
+  wildId?: string | null;
 };
 
 export type BattleAction =
@@ -128,6 +130,11 @@ export function createBattle(params: {
   themes: Record<string, string[]>;
   now: number;
   rng: Rng;
+  /**
+   * P4-1b：命中共享野怪实例时，敌方种族 / 等级 / 标签由实例决定，
+   * 不再现场掷骰 —— 这样所有客户端看到的「这一只」确实是同一只。
+   */
+  wild?: { wildId: string; speciesId: string; level: number; label: string };
 }): BattleState {
   const { rng, now } = params;
   if (!Array.isArray(params.party) || params.party.length === 0) {
@@ -139,7 +146,12 @@ export function createBattle(params: {
   const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, 60);
   const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, 60);
   const level = levelMin + Math.floor(rng() * (levelMax - levelMin + 1));
-  const { enemy, label } = generateEncounter(params.theme, level, rng, params.themes);
+  const { enemy, label } = params.wild
+    ? {
+        enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
+        label: params.wild.label,
+      }
+    : generateEncounter(params.theme, level, rng, params.themes);
 
   const party = params.party.map((m) => ({ ...m }));
   return {
@@ -167,6 +179,7 @@ export function createBattle(params: {
     actions: 0,
     startedAt: now,
     updatedAt: now,
+    wildId: params.wild?.wildId ?? null,
   };
 }
 

@@ -11,8 +11,22 @@ export const BANNED_EVENT = "mpk:banned";
 export const BAN_CODE = "ACCOUNT_BANNED";
 
 import { clearToken } from "./auth";
+import { isSessionSuspended } from "./sessionState";
+import {
+  SESSION_REPLACED_CODE, SESSION_REPLACED_EVENT, notifySessionReplaced,
+} from "./sessionReplaced";
+
+export { SESSION_REPLACED_EVENT };
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
+  // P4-1a：被顶号后本设备进入只读下线态，任何业务请求都不再发出。
+  // 放在最前面比逐个调用点加判断可靠：自动同步、意图、写操作、战斗动作全部覆盖，
+  // 也不会把本地未上传的改动偷偷同步上去。登录/注册接口必须放行，否则无法重新登录。
+  if (isSessionSuspended() && !path.startsWith("/api/auth/")) {
+    throw Object.assign(new Error("账号已在其他设备登录，本设备已下线"), {
+      status: 403, code: SESSION_REPLACED_CODE,
+    });
+  }
   const token = localStorage.getItem("mpk_token");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -32,6 +46,11 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
     err.status = res.status; // 供调用方区分 404（该槽位无存档）与真实故障
     err.code = data && data.code; // 供调用方识别 ACCOUNT_BANNED / REVISION_CONFLICT 等业务码
     err.body = data; // P4：409 冲突时带着服务端当前存档，客户端就地自愈要用
+    if (res.status === 403 && data?.code === SESSION_REPLACED_CODE) {
+      // P4-1a 顶号：旧会话代次的 token 被服务端拒绝。不清 token（弹窗要留住当前页面），
+      // 由全局弹窗停掉后台任务并在用户确认后清 token 跳登录页。
+      notifySessionReplaced(data?.reason || "账号已在其他设备登录，本设备已下线");
+    }
     if (res.status === 403 && data?.code === BAN_CODE) {
       // 封号：广播事件让全局弹窗展示原因并强制登出。这里不清 token，
       // 交给弹窗「确定」按钮处理，保证用户一定能看到封号提示。
@@ -110,6 +129,8 @@ export const api = {
     areaId?: string | null;
     levelMin: number;
     levelMax: number;
+    /** P4-1b：指定共享野怪实例，命中时由服务端原子抢占（别人抢先则 409）。 */
+    wildId?: string;
     testFlags?: { testShiny?: boolean; testMaxStats?: boolean; testOHKO?: boolean };
   }) =>
     request("/api/battle/start", { method: "POST", body: JSON.stringify(body) }),
@@ -133,6 +154,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ battleId, slot }),
     }),
+
+  // ───────────────────── P4-1b 共享野怪（跨账号同一份实例）─────────────────────
+  /** 读某区域的共享野怪列表；服务端保证实例对所有客户端一致。 */
+  wildList: (areaId: string, theme: string, levelMin: number, levelMax: number) =>
+    request(`/api/wild?areaId=${encodeURIComponent(areaId)}&theme=${encodeURIComponent(theme)}`
+      + `&levelMin=${levelMin}&levelMax=${levelMax}`),
 
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**

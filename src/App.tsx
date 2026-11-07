@@ -18,9 +18,11 @@ import MechanicsModal from "@/components/MechanicsModal";
 import MoveChartModal from "@/components/MoveChartModal";
 import { isLoggedIn, clearToken } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, BANNED_EVENT } from "@/lib/api";
-import { startAutoSync } from "@/lib/sync";
-import { startRealtime } from "@/lib/ws";
+import { startAutoSync, stopAutoSync } from "@/lib/sync";
+import { startRealtime, stopRealtime } from "@/lib/ws";
 import { startSessionSync } from "@/lib/session";
+import { SESSION_REPLACED_EVENT } from "@/lib/sessionReplaced";
+import { setSessionSuspended } from "@/lib/sessionState";
 import PixelButton from "@/components/PixelButton";
 
 // 未登录一律先去登录页；登录完成后由 Auth 页 navigate("/") 回到游戏。
@@ -99,6 +101,57 @@ function BanGate() {
   );
 }
 
+// 顶号弹窗（P4-1a）：后来者登录 / 建连时，服务端把旧设备的会话作废。
+// 这里先停掉实时通道与自动同步，本设备进入只读下线态；**不做任何本地改动合并**，
+// 用户点确认后清 token 回登录页。弹窗显示期间不主动清 token，保证提示一定看得到。
+function SessionGate() {
+  const navigate = useNavigate();
+  const [reason, setReason] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onReplaced = (e: Event) => {
+      const detail = (e as CustomEvent<{ reason?: string }>).detail;
+      setSessionSuspended(true);
+      stopAutoSync();
+      stopRealtime();
+      setReason(detail?.reason || "账号已在其他设备登录，本设备已下线");
+    };
+    window.addEventListener(SESSION_REPLACED_EVENT, onReplaced);
+    return () => window.removeEventListener(SESSION_REPLACED_EVENT, onReplaced);
+  }, []);
+
+  if (!reason) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="replaced-title"
+    >
+      <div className="max-h-[85vh] w-full max-w-sm overflow-auto border-2 border-[color:var(--accent)] bg-[color:var(--bg)] p-5 text-center shadow-2xl">
+        <div id="replaced-title" className="font-display text-lg leading-relaxed text-[color:var(--accent)]">
+          账号已在其他设备登录
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-[color:var(--text)]">
+          为保证存档只有一份服务端真值，本设备已下线。本设备尚未同步的改动不会被保存。
+        </p>
+        <p className="mt-2 break-words text-xs leading-relaxed text-[color:var(--muted)]">{reason}</p>
+        <div className="mt-5">
+          <PixelButton
+            onClick={() => {
+              clearToken();
+              setReason(null);
+              navigate("/auth", { replace: true });
+            }}
+          >
+            重新登录
+          </PixelButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 启动自动云同步：订阅 store 变更做防抖上传、监听网络恢复重传。无 UI，仅副作用。
 function SyncBootstrap() {
   useEffect(() => {
@@ -133,6 +186,7 @@ export default function App() {
     <Router>
       <UnauthorizedListener />
       <BanGate />
+      <SessionGate />
       <SyncBootstrap />
       <SessionBootstrap />
       <RealtimeBootstrap />

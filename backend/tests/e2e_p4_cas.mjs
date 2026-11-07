@@ -9,7 +9,7 @@
  * 分区：
  *  A 版本必填        缺 revision / 非法 revision / 超前 revision 一律拒绝
  *  B 串行 CAS        写入成功推进版本；用旧版本再写必须 409，并带回服务端快照
- *  C 双端并发        同一账号两条登录，后到的一方被拒，先写内容不被覆盖
+ *  C 重放 + 顶号      旧版本重放被 409；二次登录让旧 token 立刻失效
  *  D 意图 CAS        意图同样要带版本；冲突时不消耗 nonce（可原样重放）
  *  E 服务端写操作     gameOp 由服务端自持状态，不需要客户端声明版本，但仍推进版本号
  *  F 一致性          GET / PUT / WS 三处看到的 revision 一致
@@ -121,34 +121,43 @@ async function main() {
     `status=${replayOk.status} revision=${replayOk.data?.revision}`);
   rev = replayOk.data?.revision ?? rev;
 
-  // ═══════════════════ C. 双端并发 ═══════════════════
-  console.log('\n—— C. 双端并发 ——');
+  // ═══════════════════ C. 旧版本重放 + 顶号 ═══════════════════
+  console.log('\n—— C. 旧版本重放 + 顶号 ——');
 
   const dual = await accountWithSave('p4_dual');
-  // 同一账号两条登录 = 两台设备（clientId 不同，token 不同）
-  const dev2 = await login(dual.username, dual.password);
-  const tokenB = dev2.data?.token;
-  suite.check('同账号二次登录拿到独立 token', typeof tokenB === 'string' && tokenB.length > 20, `len=${tokenB?.length}`);
-
+  // P4-1a 顶号后同账号不再允许两台设备同时在线，CAS 的现实用途变成
+  // 「同一会话内的网络重传 / 双击提交 / 离线队列重放」——仍必须带对版本。
   const baseRev = dual.revision;
-  const devA = await rawPut(dual.token, validSave({ money: 1000 }), baseRev);
-  suite.check('设备 A 基于当前版本写入 → 200', devA.status === 200, `status=${devA.status}`);
+  const firstWrite = await rawPut(dual.token, validSave({ money: 1000 }), baseRev);
+  suite.check('首次基于当前版本写入 → 200', firstWrite.status === 200, `status=${firstWrite.status}`);
 
-  const devB = await rawPut(tokenB, validSave({ money: 500 }), baseRev);
-  suite.check('设备 B 拿同一旧版本写入 → 409（不再静默覆盖）',
-    devB.status === 409 && devB.data?.code === 'REVISION_CONFLICT',
-    `status=${devB.status} code=${devB.data?.code}`);
+  const replay = await rawPut(dual.token, validSave({ money: 500 }), baseRev);
+  suite.check('同一会话拿旧版本重放 → 409（不再静默覆盖）',
+    replay.status === 409 && replay.data?.code === 'REVISION_CONFLICT',
+    `status=${replay.status} code=${replay.data?.code}`);
 
   const nowSave = jsonOf(await getSave(dual.token));
   suite.check('服务端保留的是先写的那份（server-wins，不是 last-write-wins）',
     nowSave?.money === 1000, `money=${nowSave?.money}`);
 
-  const devBRetry = await rawPut(tokenB, validSave({ money: 500 }), devB.data.revision);
-  suite.check('设备 B 应用服务端版本后重放 → 200',
-    devBRetry.status === 200, `status=${devBRetry.status}`);
+  const replayFixed = await rawPut(dual.token, validSave({ money: 500 }), replay.data.revision);
+  suite.check('对齐服务端版本后重放 → 200',
+    replayFixed.status === 200, `status=${replayFixed.status}`);
   const afterRetry = jsonOf(await getSave(dual.token));
-  suite.check('重放生效：现在服务端是 B 的内容',
+  suite.check('重放生效：现在服务端是新的内容',
     afterRetry?.money === 500, `money=${afterRetry?.money}`);
+
+  // 顶号：二次登录让旧 token 立刻失效，从根上消除「两台设备同时写同一存档」。
+  const dev2 = await login(dual.username, dual.password);
+  const tokenB = dev2.data?.token;
+  suite.check('二次登录拿到新 token', typeof tokenB === 'string' && tokenB !== dual.token,
+    `len=${tokenB?.length}`);
+  const oldMe = await api('/api/auth/me', { token: dual.token });
+  suite.check('旧 token REST → 403 SESSION_REPLACED（顶号）',
+    oldMe.status === 403 && oldMe.data?.code === 'SESSION_REPLACED',
+    `status=${oldMe.status} code=${oldMe.data?.code}`);
+  const newMe = await api('/api/auth/me', { token: tokenB });
+  suite.check('新 token REST 正常', newMe.status === 200, `status=${newMe.status}`);
 
   // ═══════════════════ D. 意图 CAS ═══════════════════
   console.log('\n—— D. 意图 CAS ——');

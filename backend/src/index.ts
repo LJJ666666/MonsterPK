@@ -9,10 +9,11 @@ import { actionRoutes } from './modules/actions';
 import { sessionRoutes } from './modules/session';
 import { battleRoutes } from './modules/battle';
 import { gameRoutes } from './modules/game';
+import { wildRoutes } from './modules/wild';
 import { contentStats } from './game/content';
-import { getSessionStats, battles } from './modules/sessionBus';
+import { getSessionStats, battles, wilds } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
-import { getAccountState, BAN_CODE, type AccountState } from './lib/account';
+import { getAccountState, checkSessionVersion, BAN_CODE, type AccountState } from './lib/account';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
 declare module 'fastify' {
@@ -35,7 +36,9 @@ fastify.register(jwt, {
   secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
 });
 
-// 认证守卫：除 JWT 校验外实时查库判断封号，封号必须即时生效（不能等旧 token 过期）。
+// 认证守卫：JWT 校验 → 会话代次（P4-1a 顶号）→ 实时查库封号。
+// 顺序有讲究：顶号与封号都要即时生效，不能等旧 token 过期；会话代次放在封号之前，
+// 因为「已在别处登录」比「被封」更常见，且不需要跑后续风控。
 fastify.decorate('authenticate', async (req: any, reply: any) => {
   try {
     await req.jwtVerify();
@@ -46,6 +49,11 @@ fastify.decorate('authenticate', async (req: any, reply: any) => {
   if (!userId) return reply.code(401).send({ error: '未登录或登录已过期' });
   const state = await getAccountState(userId);
   if (!state.exists) return reply.code(401).send({ error: '账号不存在或已被删除' });
+  const session = checkSessionVersion(req.user?.sv, state.sessionVersion);
+  // strict:false 下判别联合不收窄，用属性存在性取值（bug_log §18）。
+  if ('code' in session) {
+    return reply.code(403).send({ error: session.reason, code: session.code });
+  }
   if (state.banned) {
     return reply.code(403).send({
       error: '你已被封号',
@@ -63,6 +71,7 @@ fastify.get('/api/health', async () => ({
   ws: getRealtimeStats(),
   sessions: getSessionStats(),
   battles: battles.stats(),
+  wild: wilds.stats(),
   content: contentStats(),
 }));
 
@@ -72,6 +81,7 @@ fastify.register(actionRoutes);
 fastify.register(sessionRoutes);
 fastify.register(battleRoutes);
 fastify.register(gameRoutes);
+fastify.register(wildRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 registerRealtime(fastify);

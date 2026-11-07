@@ -146,9 +146,10 @@ test('WsRegistry：登记 / 计数 / 按用户列出 / 注销', () => {
   const a = conn('a', 'u1');
   const b = conn('b', 'u1');
   const c = conn('c', 'u2');
-  assert.equal(r.add(a), true);
-  assert.equal(r.add(b), true);
-  assert.equal(r.add(c), true);
+  // P4-1a：默认上限已改为 1（顶号）。这里测的是登记表本身，显式放宽到 3。
+  assert.equal(r.add(a, 3), true);
+  assert.equal(r.add(b, 3), true);
+  assert.equal(r.add(c, 3), true);
   assert.equal(r.size, 3);
   assert.equal(r.userCount, 2);
   assert.equal(r.countForUser('u1'), 2);
@@ -187,7 +188,7 @@ test('WsRegistry：findStale 找出无 pong / 超时连接', () => {
   dead.alive = false;
   const old = conn('old', 'u2', 0);
   old.lastSeenAt = 1;
-  r.add(fresh); r.add(dead); r.add(old);
+  r.add(fresh, 3); r.add(dead, 3); r.add(old, 3);
   const stale = r.findStale(10_000, 1_000).map((c) => c.id).sort();
   assert.deepEqual(stale, ['dead', 'old']);
 });
@@ -198,7 +199,7 @@ test('WsRegistry：broadcastToUser 只发给该用户的 OPEN 连接', () => {
   const b = conn('b', 'u1');
   const c = conn('c', 'u2');
   c.socket.readyState = 3; // CLOSED
-  r.add(a); r.add(b); r.add(c);
+  r.add(a, 3); r.add(b, 3); r.add(c, 3);
   assert.equal(r.broadcastToUser('u1', '{"type":"pong"}'), 2);
   assert.equal(a.socket.sent[0], '{"type":"pong"}');
   assert.equal(b.socket.sent[0], '{"type":"pong"}');
@@ -214,4 +215,48 @@ test('WsRegistry：clear 清空全部索引', () => {
   assert.equal(r.size, 0);
   assert.equal(r.userCount, 0);
   assert.deepEqual(r.all(), []);
+});
+
+// ——————————————— P4-1a 顶号 / P4-1b 全量广播 ———————————————
+
+test('WsRegistry：takeover 原子顶号，旧连接全部返回且只剩新连接在线', () => {
+  const r = new WsRegistry();
+  const a = conn('a', 'u1');
+  const b = conn('b', 'u1');
+  const c = conn('c', 'u2');
+  r.add(a, 3); r.add(b, 3); r.add(c, 3);
+  const fresh = conn('fresh', 'u1');
+  const evicted = r.takeover(fresh);
+  assert.deepEqual(evicted.map((x) => x.id).sort(), ['a', 'b']);
+  assert.equal(r.countForUser('u1'), 1, '顶号后同账号只能有一条连接');
+  assert.equal(r.get('fresh')?.id, 'fresh');
+  assert.equal(r.get('a'), undefined);
+  assert.equal(r.size, 2, '其他账号的连接不受影响');
+  assert.equal(r.broadcastToUser('u1', 'x'), 1);
+  assert.equal(a.socket.sent.length, 0, '登记表不负责发 bye，由调用方处理');
+});
+
+test('WsRegistry：takeover 并发形状下不会双登记', () => {
+  const r = new WsRegistry();
+  const x = conn('x', 'u1');
+  const y = conn('y', 'u1');
+  // 模拟两个几乎同时到达的握手：两个 takeover 顺序执行，最终只有后者在线
+  assert.equal(r.takeover(x).length, 0);
+  const evicted = r.takeover(y);
+  assert.deepEqual(evicted.map((c) => c.id), ['x']);
+  assert.equal(r.countForUser('u1'), 1);
+  assert.equal(r.size, 1);
+});
+
+test('WsRegistry：broadcastAll 跨账号全量送达，跳过非 OPEN 连接', () => {
+  const r = new WsRegistry();
+  const a = conn('a', 'u1');
+  const b = conn('b', 'u2');
+  const c = conn('c', 'u3');
+  c.socket.readyState = 3;
+  r.add(a); r.add(b); r.add(c);
+  assert.equal(r.broadcastAll('{"type":"wild.state"}'), 2);
+  assert.equal(a.socket.sent[0], '{"type":"wild.state"}');
+  assert.equal(b.socket.sent[0], '{"type":"wild.state"}');
+  assert.equal(c.socket.sent.length, 0);
 });

@@ -486,3 +486,63 @@ E2E 根本撞不进临界区，通不通过和有没有锁无关。
 虽然当前是单人对战，重复结算不会翻倍发奖（两次算出的档一样），但版本号会多涨一次，
 客户端与 `authority.expected` 的对应关系就错位了。修：`battle/start` 与 `battle/action`
 一起进槽位锁。
+
+## 27. 顶号与共享野怪的七个坑（2026-11-07 P4-1）
+
+### 27.1 只断 WS 不算「下线」——刷新页面会互相顶号死循环
+
+最初想的是「新连接 takeover 踢掉旧连接 + 前端停重连」。看着够粗暴，实际有个致命回路：
+旧设备的 token 还在 localStorage，用户不点弹窗直接刷新 → `startRealtime()` 重新握手
+→ 又把新设备踢下线 → 新设备也刷新……两台设备无限互踢。
+
+修：加 `User.sessionVersion`，登录即递增并写进 JWT 的 `sv`，认证守卫和 WS upgrade
+双校验，旧 token 所有 REST 直接 403 `SESSION_REPLACED`。前端再记 `replacedToken`，
+只要本地还是那枚旧 token 就拒绝建连。**顶号的触发点必须是 login，不能等 WS 握手**。
+
+### 27.2 顶号把四组 E2E 一起打红，不能靠兼容开关糊过去
+
+`p21`（第 4 条 → 429）、`p22`（两条连接都收广播）、`p4`（双端 CAS 用两条登录）、
+`hardening`（连接数上限）全部基于「同账号允许多端」。逐个加 `if (旧模式)` 兼容分支
+是最省事但最坏的做法——测试会继续给一个已经不存在的语义背书。
+
+修：改用例语义。`p22` 改成「顶号 + 唯一活跃连接收广播 + 旧连接不再收」，
+`p4` C 段改成「同一会话的旧版本重放」，`p21` 改成「第 2 条顶掉第 1 条 + 旧 token
+REST/WS 双失效」。用例数 34→41 / 24→25 / 39→41 / 114→115，语义与实现对齐。
+
+### 27.3 discriminant 联合又不收窄（§18 复发两次）
+
+`checkSessionVersion()` 返回 `{ok:true} | {ok:false, code, reason}`，
+`if (!session.ok) session.code` 在 `strict:false` 下 TS2339；
+`wilds.claim()` 的 `ClaimResult` 同样。一律改成 `'code' in result` 取属性。
+**这条已经第三次踩了，写联合类型时直接按「属性存在性」写。**
+
+### 27.4 Prisma 迁移必须先停 :3001（§12 复现）
+
+加 `sessionVersion` 字段时后端 tsx watch 在跑，`prisma generate` 撞 Windows DLL 文件锁。
+按 §12 流程停掉监听进程 → 写迁移 SQL → `migrate deploy` → `generate` → 重启，干净。
+顺带发现旧会话残留了 3 个 tsx watch 进程，一起清掉，端口才真的释放。
+
+### 27.5 共享野怪的 revision 一开始是全局的
+
+`WildRegistry` 用单个 `revision`，结果给「未知区域」补一次怪，就把 `wild_starter`
+的快照版本从 1 推到 2 —— E2E 的「两次读取 revision 一致」立刻红。
+这不是断言写错，是设计错：`wild.state` 带 `areaId`，客户端按区域幂等，
+版本就该按区域。修：加 `areaRevisions: Map<areaId, number>`，
+`list()` 返回本区域版本；`stats().revision` 仅作全局累计变更数。
+
+### 27.6 客户端能改「所有玩家共享的真值」
+
+`GET /api/wild` 的 `resolveAreaSpec(areaId, fallback)` 原本在 areaId 没命中内容表时
+采信客户端传的 `theme / levelMin / levelMax`，而 `setAreaSpec()` 是**跨账号单例**——
+A 传 `levelMax=60` 就能让 B 看到 60 级野怪，等于客户端改别人的世界。
+
+修：① 前端改用内容表里的真实区域 `wild_starter`（grass 1-5）；
+② 服务端对未知区域用固定默认 `grass 1-5`，**完全忽略客户端 fallback**；
+③ E2E 加两条「伪造主题/等级不改共享真值」「未知区域也固定默认」。
+
+### 27.7 `setToken` 忘了复位只读下线态
+
+`isSessionSuspended()` 是传输层硬闸，只在顶号时置 true。如果不在 `setToken()` 里
+复位，用户重新登录后所有 API 仍被本地拦截，表现为「登录成功但一切空白」。
+同时 `resetSessionReplaced()` 也要在 `setToken()` 调，否则第二次顶号不再弹窗。
+这类「全局一次性标志」必须在登录入口统一复位，写单测盖住（`sessionReplaced.test.ts`）。

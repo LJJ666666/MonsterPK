@@ -19,7 +19,7 @@ import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type RawData } from 'ws';
 import { prisma } from '../lib/prisma';
-import { getAccountState, BAN_CODE } from '../lib/account';
+import { getAccountState, checkSessionVersion, BAN_CODE, SESSION_REPLACED_CODE } from '../lib/account';
 import { type WsConnection } from '../lib/wsRegistry';
 import { buildSnapshot, SESSION_SLOTS } from '../lib/gameSession';
 import {
@@ -37,7 +37,8 @@ import {
   buildRejectResponse,
   deadAfterMs,
 } from '../lib/wsProtocol';
-import { wsRegistry, gameSessions } from './sessionBus';
+import { wsRegistry, gameSessions, wilds } from './sessionBus';
+import { publishWild } from './wild';
 import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
@@ -45,6 +46,28 @@ import { battles } from './sessionBus';
 
 export function getRealtimeStats(): { connections: number; users: number } {
   return { connections: wsRegistry.size, users: wsRegistry.userCount };
+}
+
+/**
+ * P4-1a：登录成功后立刻把该账号的在线连接全部踢下线。
+ *
+ * 顶号的触发点是「新会话建立」，不是「新 WS 握手」——后者要等前端建连，
+ * 中间有窗口让旧设备继续发请求。服务端主动发 bye 让旧设备即时看到弹窗；
+ * onConnected 的 takeover 保留为兜底，防两个并发握手同时通过校验。
+ */
+export function kickUserConnections(userId: string, reason: string): number {
+  const evicted = wsRegistry.listForUser(userId);
+  for (const c of evicted) {
+    try {
+      c.socket.send(encodeServerMessage({
+        type: 'bye', code: SESSION_REPLACED_CODE, reason,
+      }));
+      c.socket.close(4001, SESSION_REPLACED_CODE);
+    } catch { /* 已断开 */ }
+    wsRegistry.remove(c.id);
+    detachConnection(c.id);
+  }
+  return evicted.length;
 }
 
 /** 心跳周期可由 .env 覆盖（便于联调），但钳制在 5s~120s，防止配置失误打爆服务。 */
@@ -106,8 +129,11 @@ export function registerRealtime(fastify: FastifyInstance): void {
         if (state.banned) {
           return reject(socket, 403, BAN_CODE, state.banReason ?? '你已被封号', userId);
         }
-        if (!wsRegistry.canAccept(userId)) {
-          return reject(socket, 429, 'TOO_MANY_CONNECTIONS', '同一账号连接数过多', userId);
+        // P4-1a：旧设备拿旧 token 重连（例如刷新页面）会在这里被挡住，
+        // 否则它会把新设备顶下线，形成两台设备互相踢的死循环。
+        const session = checkSessionVersion(payload?.sv, state.sessionVersion);
+        if ('code' in session) {
+          return reject(socket, 403, session.code, session.reason, userId);
         }
         wss.handleUpgrade(req, socket, head, (ws) => onConnected(fastify, ws, userId, heartbeatMs));
       } catch (err) {
@@ -137,6 +163,11 @@ export function registerRealtime(fastify: FastifyInstance): void {
       sweepSessions(now);
       // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
       battles.sweep(now);
+      // P4-1b：共享野怪过期换新 / 超时放回池子后，把新列表广播给所有在线客户端。
+      for (const areaId of wilds.sweep(now)) {
+        const spec = wilds.getAreaSpec(areaId);
+        if (spec) publishWild(areaId, spec, now);
+      }
 
       const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
       if (userIds.length === 0) return;
@@ -200,9 +231,23 @@ function onConnected(
     lastSeenAt: now,
     alive: true,
   };
-  if (!wsRegistry.add(conn)) {
-    ws.close(1008, 'too many connections');
-    return;
+  // P4-1a 顶号：新连接原子接管，把同账号的旧连接全部踢下线。
+  // 旧连接收到 bye 后由前端停实时 / 停同步 / 清 token，绝不重连、绝不合并本地改动。
+  const evicted = wsRegistry.takeover(conn);
+  for (const old of evicted) {
+    try {
+      old.socket.send(encodeServerMessage({
+        type: 'bye',
+        code: SESSION_REPLACED_CODE,
+        reason: '账号已在其他设备登录，本设备已下线',
+      }));
+      old.socket.close(4001, SESSION_REPLACED_CODE);
+    } catch { /* 已断开 */ }
+    detachConnection(old.id);
+    fastify.log.info(
+      { event: 'ws_takeover', userId, evictedConnectionId: old.id, connectionId: conn.id },
+      'ws connection replaced by newer device',
+    );
   }
 
   ws.send(

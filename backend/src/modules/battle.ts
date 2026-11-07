@@ -23,7 +23,9 @@ import {
 import { LOCATIONS, THEME_TABLE, contentStats } from '../game/content';
 import { encodeServerMessage } from '../lib/wsProtocol';
 import { commitState } from './session';
-import { broadcastToUser, gameSessions, battles } from './sessionBus';
+import { broadcastToUser, gameSessions, battles, wilds } from './sessionBus';
+import { publishWild, resolveAreaSpec } from './wild';
+import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
 const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
 
@@ -34,6 +36,11 @@ const startSchema = z.object({
   areaId: z.string().min(1).max(60).nullish(),
   levelMin: z.coerce.number().int().min(1).max(60).default(1),
   levelMax: z.coerce.number().int().min(1).max(60).default(3),
+  /**
+   * P4-1b：指定要挑战的共享野怪实例。命中时敌方种族/等级取自实例，
+   * 且由服务端原子抢占 —— 别人再抢同一只只会拿到 409 WILD_CLAIMED。
+   */
+  wildId: z.string().min(1).max(80).optional(),
   /**
    * P3-1c：管理员测试标记。普通账号传了也**静默忽略**（不报错、不封号），
    * 避免把「客户端硬编码了测试开关」这种误用升级成风控事件。
@@ -194,6 +201,21 @@ function fail(reply: any, err: unknown) {
   throw err;
 }
 
+/** 用服务端内容表还原区域真值后广播野怪列表（跨账号）。 */
+function publishArea(
+  areaId: string,
+  fallback: WildAreaSpec,
+): void {
+  publishWild(areaId, resolveAreaSpec(areaId, fallback));
+}
+
+/** 战斗结果 → 共享野怪的公开结算结果。 */
+function wildResultOf(result: BattleState['result']): 'captured' | 'defeated' | 'fled' {
+  if (result === 'captured') return 'captured';
+  if (result === 'enemy_fainted') return 'defeated';
+  return 'fled';
+}
+
 export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   /** 开局：敌方由服务端生成，客户端只说明「在哪打」。 */
   fastify.post('/api/battle/start', { preHandler: fastify.authenticate }, async (req, reply) => {
@@ -208,7 +230,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** 开局主体；调用方已持有槽位锁。 */
   async function runBattleStart(reply: FastifyReply, userId: string, params: z.infer<typeof startSchema>) {
-    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags } = params;
+    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags, wildId } = params;
 
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
 
@@ -242,9 +264,39 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
       if (!THEME_TABLE[finalTheme]) finalTheme = theme;
     }
 
+    const now = Date.now();
+    const battleId = `bt_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
+    // P4-1b：指定野怪时先原子抢占。claim 是同步纯函数，没有 await，
+    // 同一实例的两个并发开局请求只有第一个能拿到（捕获互斥的语言级保证）。
+    let claimed: WildInstance | null = null;
+    let claimedAreaId: string | null = null;
+    let claimedSpec: WildAreaSpec | null = null;
+    if (wildId) {
+      if (battles.current(userId, slot)) {
+        return reply.code(409).send({ error: '已有进行中的战斗', code: 'BATTLE_IN_PROGRESS' });
+      }
+      const areaKey = areaId ?? theme;
+      const spec = resolveAreaSpec(areaKey, { theme: finalTheme, levelMin: lvMin, levelMax: lvMax });
+      const claim = wilds.claim(wildId, userId, slot, battleId, now);
+      if (!claim.ok) {
+        // strict:false 下判别联合不收窄，用属性存在性取值（bug_log §18）。
+        const code = 'code' in claim ? claim.code : 'WILD_CLAIMED';
+        const status = code === 'WILD_NOT_FOUND' ? 404 : 409;
+        return reply.code(status).send({
+          error: code === 'WILD_NOT_FOUND' ? '野怪不存在或已刷新'
+            : code === 'WILD_ON_COOLDOWN' ? '本槽位已有正在挑战的野怪'
+              : '这只野怪已被其他玩家抢先挑战',
+          code,
+        });
+      }
+      claimed = claim.instance;
+      claimedAreaId = claim.instance.areaId;
+      claimedSpec = spec;
+    }
+
     try {
       const state = createBattle({
-        id: `bt_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`,
+        id: battleId,
         userId,
         slot,
         theme: finalTheme,
@@ -254,8 +306,16 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         levelMax: lvMax,
         party,
         themes: THEME_TABLE,
-        now: Date.now(),
+        now,
         rng: Math.random,
+        ...(claimed ? {
+          wild: {
+            wildId: claimed.id,
+            speciesId: claimed.speciesId,
+            level: claimed.level,
+            label: claimed.label,
+          },
+        } : {}),
       });
       // 测试标记只对管理员生效：身份由服务端查库判定，客户端自称不算数。
       // 只在客户端真的传了标记时才多查一次库，普通玩家开局没有额外开销。
@@ -264,13 +324,24 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         if (me?.role === 'admin') applyAdminTestFlags(state, testFlags);
       }
       battles.create(state);
+      if (claimed && claimedAreaId && claimedSpec) {
+        // 抢占成功立刻广播：其他客户端马上看到「已被挑战」，不会继续排队点同一只。
+        publishWild(claimedAreaId, resolveAreaSpec(claimedAreaId, claimedSpec), now);
+      }
       return {
         ok: true,
         battle: battleView(state),
         content: contentStats(),
         ttlMs: BATTLE_TTL_MS,
+        wild: claimed ? { id: claimed.id, areaId: claimedAreaId } : null,
       };
     } catch (err) {
+      // 开局失败（队伍全灭 / 内容表异常）必须把刚抢占的实例放回去，
+      // 否则这只野怪会永久卡在 claimed，谁都打不了。
+      if (claimed && claimedAreaId && claimedSpec) {
+        wilds.release(battleId, now);
+        publishWild(claimedAreaId, resolveAreaSpec(claimedAreaId, claimedSpec), now);
+      }
       return fail(reply, err);
     }
   }
@@ -343,6 +414,15 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           source: 'battle',
         });
         battles.drop(userId, slot);
+        // P4-1b：共享野怪结算。归属三键由 WildRegistry 复核，结果跨账号广播，
+        // 其他客户端会看到这只野怪变成 resolved（已捕获 / 已击败 / 已逃走）。
+        const wild = next.wildId ? wilds.findByBattle(next.id) : undefined;
+        if (wild) {
+          wilds.resolve(wild.id, userId, slot, next.id, wildResultOf(next.result), Date.now());
+          publishArea(wild.areaId, {
+            theme: next.theme, levelMin: next.levelMin, levelMax: next.levelMax,
+          });
+        }
         return {
           ok: true,
           battle: battleView(next),
@@ -375,6 +455,11 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const state = battles.get(userId, parsed.data.slot, parsed.data.battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
     battles.drop(userId, parsed.data.slot);
+    // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。
+    const released = wilds.release(parsed.data.battleId, Date.now());
+    for (const areaId of released) {
+      publishArea(areaId, { theme: state.theme, levelMin: state.levelMin, levelMax: state.levelMax });
+    }
     return { ok: true, dropped: true };
   });
 }

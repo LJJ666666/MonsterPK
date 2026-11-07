@@ -7,6 +7,9 @@ import { ELEMENT_COLORS, ELEMENT_LABEL, ITEM_SPECS, MOVE_SPECS } from "@/game/da
 import type { ItemId } from "@/game/types";
 import { useGameStore } from "@/stores/useGameStore";
 import { requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
+import {
+  useWildList, wildStatusText, SHARED_WILD_AREA_ID,
+} from "@/lib/wild";
 
 import TypeChartModal from "@/components/TypeChartModal";
 import { MonsterName } from "@/components/MonsterName";
@@ -26,6 +29,9 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   // 开局失败（断网 / 未登录 / 队伍全灭）要如实告知：现在没有本地降级，
   // 静默返回会让玩家以为按钮坏了。
   const [startError, setStartError] = useState<string | null>(null);
+  // P4-1b：共享野怪列表在组件顶层订阅（Hook 规则），战斗中也保持最新，
+  // 结算后回到营地/训练场能立刻看到「已被捕获」与补进来的新怪。
+  const wildView = useWildList(SHARED_WILD_AREA_ID, "grass", 1, 5);
 
   const saves = [save1, save2, save3];
   const save = saves[slot - 1];
@@ -112,6 +118,62 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
               <PixelButton tone="muted" onClick={() => navigate("/camp", { state: { returnToTown: true } })}>
                 回程
               </PixelButton>
+            </div>
+
+            {/* P4-1b 共享野怪：所有客户端看到同一批实例，捕获互斥由服务端原子抢占保证。
+                小卡片纵向排列，375px 不出现横向滚动。 */}
+            <div className="border-t-2 border-[color:var(--stroke)] pt-3">
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                <span className="font-display text-[color:var(--text)]">附近野怪（多人共享）</span>
+                <button
+                  type="button"
+                  className="text-[color:var(--muted)] underline"
+                  onClick={() => void wildView.refresh()}
+                >
+                  刷新
+                </button>
+              </div>
+              {wildView.error ? (
+                <div className="mb-2 border-2 border-[color:var(--danger)] px-2 py-1 text-[11px] text-[color:var(--danger)]">
+                  {wildView.error}
+                </div>
+              ) : null}
+              {wildView.loading && wildView.monsters.length === 0 ? (
+                <div className="text-xs text-[color:var(--muted)]">正在读取野怪…</div>
+              ) : null}
+              <div className="space-y-2">
+                {wildView.monsters.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between gap-2 border-2 border-[color:var(--stroke)] px-2 py-2 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[color:var(--text)]">{m.label}</div>
+                      <div className="text-[color:var(--muted)]">Lv.{m.level} · {wildStatusText(m)}</div>
+                    </div>
+                    <PixelButton
+                      size="sm"
+                      tone="muted"
+                      disabled={m.status !== "available"}
+                      onClick={async () => {
+                        setStartError(null);
+                        const res = await startEncounter(
+                          "grass", "共享草地", 1, 5, SHARED_WILD_AREA_ID, m.id,
+                        );
+                        if (!res.ok) {
+                          setStartError((res as { reason?: string }).reason ?? "无法开始战斗");
+                          void wildView.refresh();
+                        }
+                      }}
+                    >
+                      挑战
+                    </PixelButton>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-[11px] leading-relaxed text-[color:var(--muted)]">
+                所有玩家看到同一批野怪；被别人抢先时服务端会拒绝，列表自动刷新。
+              </div>
             </div>
           </div>
         </PixelCard>

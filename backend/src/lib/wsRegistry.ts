@@ -63,6 +63,42 @@ export class WsRegistry {
     return true;
   }
 
+  /**
+   * P4-1a 顶号：原子地踢掉该账号所有既有连接并登记新连接，返回被踢掉的连接。
+   *
+   * 必须是**同步**方法：upgrade 阶段有 await（查库），两个并发握手都可能通过校验，
+   * 只有把「移除旧连接 + 登记新连接」放进同一个同步临界区，才不会出现两条同时在线。
+   * 调用方负责给被踢连接发 bye / close / detach，本类只管登记表。
+   */
+  takeover(conn: WsConnection): WsConnection[] {
+    const evicted = this.listForUser(conn.userId);
+    for (const old of evicted) this.remove(old.id);
+    if (this.byId.has(conn.id)) return evicted;
+    this.byId.set(conn.id, conn);
+    let set = this.byUser.get(conn.userId);
+    if (!set) {
+      set = new Set<string>();
+      this.byUser.set(conn.userId, set);
+    }
+    set.add(conn.id);
+    return evicted;
+  }
+
+  /** P4-1b：全量广播（跨账号），共享野怪的 wild.state 用它下发。 */
+  broadcastAll(data: string): number {
+    let sent = 0;
+    for (const c of this.byId.values()) {
+      if (c.socket.readyState !== 1) continue;
+      try {
+        c.socket.send(data);
+        sent += 1;
+      } catch {
+        // 单条连接失败不影响其他连接；close 事件会负责注销
+      }
+    }
+    return sent;
+  }
+
   remove(id: string): boolean {
     const conn = this.byId.get(id);
     if (!conn) return false;

@@ -134,7 +134,7 @@ type GameState = {
   ) => { ok: true } | { ok: false; reason: string };
   exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
   
-  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string, wildId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   useMove: (moveId: MoveId) => Promise<void>;
   useItem: (itemId: ItemId) => Promise<void>;
   switchTo: (partyIndex: number) => void;
@@ -311,7 +311,7 @@ export const useGameStore = create<GameState>()(
         return { ok: true, json: JSON.stringify({ ...save, lastSavedAt: nowIso() }, null, 2) };
       },
 
-      startEncounter: async (theme, areaName, levelMin, levelMax, areaId) => {
+      startEncounter: async (theme, areaName, levelMin, levelMax, areaId, wildId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return { ok: false, reason: "请先创建或导入存档" };
@@ -335,6 +335,7 @@ export const useGameStore = create<GameState>()(
             areaId,
             levelMin,
             levelMax,
+            ...(wildId ? { wildId } : {}),
             testFlags: {
               testShiny: state.testShiny,
               testMaxStats: state.testMaxStats,

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { BAN_CODE } from '../lib/account';
+import { kickUserConnections } from './realtime';
 
 const registerSchema = z.object({
   username: z.string().min(3).max(20),
@@ -27,11 +28,11 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: '用户名已存在' });
     }
     const user = await prisma.user.create({
-      data: { username, password: hashPassword(password) },
+      data: { username, password: hashPassword(password), sessionVersion: 1 },
     });
-    // 签发带过期时间的 token；过期后 Authenticate 守卫会自动拒绝（401）
+    // P4-1a：JWT 带登录代次 sv，注册即从 1 起；之后每次登录递增，旧 token 立刻失效。
     const token = fastify.jwt.sign(
-      { userId: user.id },
+      { userId: user.id, sv: user.sessionVersion },
       { expiresIn: process.env.JWT_TTL ?? "30d" }
     );
     return { token, username: user.username };
@@ -56,10 +57,20 @@ export async function authRoutes(fastify: FastifyInstance) {
         reason: user.banReason ?? '检测到异常游戏数据',
       });
     }
+    // P4-1a 顶号：登录即递增代次，前一个设备（含刚注册那次）的 token 全部作废。
+    // 用 increment 的返回值签发，避免「先读后写」在高并发登录时签出同一个 sv。
+    const rotated = await prisma.user.update({
+      where: { id: user.id },
+      data: { sessionVersion: { increment: 1 } },
+      select: { sessionVersion: true },
+    });
     const token = fastify.jwt.sign(
-      { userId: user.id },
+      { userId: user.id, sv: rotated.sessionVersion },
       { expiresIn: process.env.JWT_TTL ?? "30d" }
     );
+    // 顶号即时生效：不等新设备建 WS，先把旧设备的实时通道断掉。
+    // 旧 token 的 REST 请求则由认证守卫按 sv 拒绝（403 SESSION_REPLACED）。
+    kickUserConnections(user.id, '账号已在其他设备登录，本设备已下线');
     return { token, username: user.username };
   });
 

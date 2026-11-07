@@ -1,7 +1,8 @@
 // 登录态 token 的本地存取（仅存 token，存档仍在云端）。
 // 注意：token 合法性（过期）在本地只做轻量判断，真正的校验以后端 jwtVerify 为准。
 import { uuid } from "@/game/rules";
-import { forgetAllRevisions } from "./sessionState";
+import { forgetAllRevisions, setSessionSuspended } from "./sessionState";
+import { resetSessionReplaced } from "./sessionReplaced";
 
 const TOKEN_KEY = "mpk_token";
 // 每设备唯一标识：用于云端存档冲突判断（区分「同一设备」与「跨设备」写入）。
@@ -14,6 +15,9 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  // P4-1a：新会话（含被顶号后重新登录）恢复业务请求与顶号通知闸门。
+  setSessionSuspended(false);
+  resetSessionReplaced();
 }
 
 export function clearToken(): void {

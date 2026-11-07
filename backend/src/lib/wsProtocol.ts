@@ -14,15 +14,19 @@
 export const WS_PATH = '/ws';
 /** 协议版本：P2-2 保持 1，用 hello.capabilities 声明新增能力，避免旧客户端被拒。 */
 export const WS_PROTOCOL_VERSION = 1;
-export const WS_CAPABILITIES = ['session.state', 'session.resync', 'battle.state'];
+export const WS_CAPABILITIES = ['session.state', 'session.resync', 'battle.state', 'wild.state'];
 
 /** 服务端底层 ping 周期；连接超过两个周期无响应即判定死连接。 */
 export const WS_HEARTBEAT_MS = 30_000;
 export const WS_DEAD_GRACE_MS = 5_000;
 /** 单条上行消息上限（字节）。ws 的 maxPayload 也会在更底层强制截断。 */
 export const WS_MAX_MESSAGE_BYTES = 4_096;
-/** 同一账号允许的同时在线连接数，防止单账号耗尽服务端连接表。 */
-export const WS_MAX_CONNECTIONS_PER_USER = 3;
+/**
+ * P4-1a：同一账号只允许 1 条在线连接。第 2 条握手不再被 429 拒绝，
+ * 而是由 WsRegistry.takeover() 顶掉前一条（后来者赢，前者直接下线）。
+ * 常量保留供单测与只读诊断使用，路由不再用 canAccept 拦人。
+ */
+export const WS_MAX_CONNECTIONS_PER_USER = 1;
 /** 单连接速率限制：每秒最多消息数，超过直接关闭（1008）。 */
 export const WS_RATE_WINDOW_MS = 1_000;
 export const WS_RATE_MAX_MESSAGES = 20;
@@ -111,6 +115,28 @@ export type BattleStatePayload = {
   result: 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted' | null;
 };
 
+/**
+ * P4-1b 共享野怪：区域野怪列表的全量快照（跨账号广播）。
+ * 客户端只按 revision 幂等应用，上行没有对应的写入口；
+ * 抢占必须走 POST /api/battle/start 带 wildId，由服务端原子 claim。
+ */
+export type WildStatePayload = {
+  type: 'wild.state';
+  areaId: string;
+  revision: number;
+  monsters: {
+    id: string;
+    areaId: string;
+    speciesId: string;
+    name: string;
+    level: number;
+    label: string;
+    status: 'available' | 'claimed' | 'resolved';
+    result: 'captured' | 'defeated' | 'fled' | null;
+    expiresAt: number;
+  }[];
+};
+
 /** 服务端 → 客户端：控制消息 + 权威态快照。 */
 export type ServerMessage =
   | {
@@ -127,7 +153,8 @@ export type ServerMessage =
   | { type: 'error'; code: string; reason: string }
   | { type: 'bye'; reason: string; code?: string }
   | SessionStatePayload
-  | BattleStatePayload;
+  | BattleStatePayload
+  | WildStatePayload;
 
 export type ParseResult =
   | { ok: true; message: ClientMessage }

@@ -920,3 +920,94 @@ P3-2 之后所有「改存档」的判断都在服务端，但兜底通路 `PUT 
 3. 槽位锁只解决单进程内竞态；多实例必须换实现（见 21.3）。
 4. 冲突时服务端**放弃**客户端那次写入，不做自动重放。若将来要做「本地改动不丢」，
    需要把本地改动表达成意图再重放，不能整包重放。
+
+## 22. P4-1 顶号与共享野怪（2026-11-07）
+
+杰哥拍板：**同账号多端不合并、不静默切档，后来者顶号，前者直接下线**。
+P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 共享野怪实例（跨账号同一只、捕获互斥）。
+
+### 22.1 会话代次（P4-1a，服务端强制）
+
+- `User.sessionVersion Int @default(0)`（迁移 `20261107164000_add_session_version`）。
+  `register` 从 1 起、`login` 用 `increment` 取返回值，`JWT` 带 `sv`。
+  用 increment 的返回值签发，不用「先读后写」，否则并发登录会签出同一个 sv。
+- `lib/account.ts::checkSessionVersion(payloadSv, current)` 是纯函数：
+  缺 `sv`（迁移前的老 token）→ `SESSION_REPLACED`「登录状态已更新，请重新登录」；
+  `sv !== current` → `SESSION_REPLACED`「账号已在其他设备登录」。
+- 校验点两处：`index.ts::authenticate`（**在封号判断之前**）与 `realtime.ts` 的 WS upgrade。
+  旧 token 的所有 REST 一律 403，旧 token 也不能再建 WS。
+- **顶号的触发点是 login，不是 WS 握手**：`auth.ts` 登录成功后立即调
+  `kickUserConnections(userId, reason)`，主动给旧连接发 `bye` 并 `close(4001)`。
+  等前端建连再踢会留出窗口，让旧设备继续发请求。
+
+> 为什么必须有 sv：只断 WS 时 token 还在 localStorage，被顶设备一刷新就重新握手，
+> 把新设备踢下线，两台设备互相顶号。服务端让旧 token 失效才是真下线。
+
+### 22.2 单 WS 连接与原子接管
+
+- `WS_MAX_CONNECTIONS_PER_USER` 3 → **1**；upgrade 阶段删掉 `canAccept → 429`，
+  改为「后来者赢」：`WsRegistry.takeover(conn)` 同步踢掉同账号全部旧连接并登记新连接。
+  必须是同步方法：upgrade 阶段有 `await getAccountState`，两个并发握手都可能通过校验。
+- `takeover` 只改登记表；发 `bye` / close / `detachConnection` 由调用方做。
+- 旧连接收到 `bye { code: 'SESSION_REPLACED' }` 后**绝不重连**（见 22.3）。
+
+### 22.3 前端只读下线态（不做本地改动合并）
+
+- 新增 `src/lib/sessionReplaced.ts`：一次性闸门 `notifySessionReplaced()`，
+  REST 403 与 WS bye 两条通道同时到达只弹一次窗；`setToken()` 复位。
+- `src/lib/sessionState.ts` 的 `isSessionSuspended()` 是硬闸：
+  `api.request` 在最前面拦截**所有**非 `/api/auth/` 请求（含 GET），
+  本地未上传的改动不会被偷偷同步上去。逐个调用点加判断不可靠，统一在传输层拦。
+- `App.tsx::SessionGate` 收到事件 → `setSessionSuspended(true)` + `stopAutoSync()`
+  （清 debounce / 离线队列 / 待探测态）+ `stopRealtime()` + 弹窗。
+  **弹窗期间不清 token**，保证提示一定看得到；点「重新登录」才 `clearToken()` 并跳登录页。
+- `ws.ts` 记 `replacedToken`：本地还是这枚 token 时 `startRealtime()` 直接拒绝建连，
+  防「不点弹窗直接刷新」把新设备顶掉。重新登录换了 token 自然解除。
+
+### 22.4 被顶号改变的既有语义（必须知道）
+
+1. **P2-2 同账号多端广播**：顶号后同账号只有一条连接，`broadcastToUser` 退化为单连接推送。
+   `e2e:p22` 的「两条连接都收到快照」改为「顶号 + 唯一活跃连接收广播 + 旧连接不再收」。
+2. **P4-0 双端 CAS**：同账号不再有两台设备，`e2e:p4` C 段从「两条登录」改为
+   「同一会话的旧版本重放 / 乱序请求」。CAS 仍有价值（网络重传、双击提交、离线队列重放），
+   但不再是「多端互斥」的主要防线——那个位置由顶号接管。
+3. `e2e:p21` 的「第 4 条 429」改为「第 2 条顶掉第 1 条」；`e2e:hardening` 同步改。
+   **不要加兼容开关让旧用例继续绿**：语义变了就改用例，留着 429 分支只会掩盖真相。
+
+### 22.5 共享野怪实例池（P4-1b）
+
+- `lib/wildRegistry.ts`：纯内存、纯逻辑、零 IO。每个 `areaId` 维护 3 只实例，
+  未抢占 TTL 5min、抢占 TTL 30min（与战斗 TTL 对齐）、结算后保留 10s 让别人看到结果。
+- **`claim()` 故意不加锁**：同步函数、无 `await`，Node 单线程下两个请求不可能交错进临界区。
+  这是语言级原子性，比加锁更可靠（对照 §21.3 / bug_log §26.4 的 TOCTOU）。
+- 归属三键 `(userId, slot, battleId)`：`resolve` / `release` 都复核，别人不能结束我的野怪。
+  公开视图**不含** `claim`，不泄露他人 userId。
+- `revision` **按区域独立**：别的区域补怪不该把本区域快照版本推高；
+  客户端按 `areaId + revision` 幂等应用。`stats().revision` 只是全局累计变更数。
+
+### 22.6 区域真值与接口契约
+
+- `GET /api/wild?areaId=...`（需登录）→ 区域全量快照。
+  **区域主题与等级一律服务端定**：`areaId` 命中 `LOCATIONS.wildAreas` 用内容表
+  （前端用真实区域 `wild_starter` = grass 1-5）；未命中用固定默认 `grass 1-5`，
+  **完全忽略客户端传的 theme / levelMin / levelMax**。共享池是跨账号单例，
+  采信客户端 fallback 等于让 A 改掉所有人看到的野怪。
+- `POST /api/battle/start` 加可选 `wildId`：先原子 `claim`，命中则敌方种族 / 等级 / 标签
+  取自实例（`createBattle(..., { wild })`），不再现场掷骰。
+  失败码：`WILD_NOT_FOUND`(404) / `WILD_CLAIMED`(409) / `WILD_RESOLVED`(409) /
+  `WILD_ON_COOLDOWN`(409) / `BATTLE_IN_PROGRESS`(409)。
+  开局后续任何异常都要 `release(battleId)` 放回池子，否则实例永久卡在 claimed。
+- 结算 / 放弃 / 心跳 sweep 都会 `publishWild()` → `broadcastAll()` 发 `wild.state`
+  （**跨账号全量广播**，与 `session.state` 的按用户广播不同）。
+- 前端 `src/lib/wild.ts::useWildList()` 只读：首次 REST 拉、订阅 WS 全量快照按 revision
+  幂等应用、30s 兜底轮询；**没有任何写列表的方法**。`Arena.tsx` 展示「附近野怪」，
+  点「挑战」才发带 `wildId` 的开局意图，被抢先就刷新列表。
+
+### 22.7 仍然存在的边界
+
+1. 野怪池是**单进程内存态**：多实例部署（P5-1）必须换成共享存储 + 分布式抢占。
+2. 顶号不区分「同账号的两个标签页」和「两台设备」，两者都会互踢——这是杰哥要的口径。
+3. `sv` 校验每个请求都多一次主键查询（已与封号查询合并成同一次 `getAccountState`），
+   上云后可加短 TTL 缓存，但不能缓存过久，否则顶号不即时生效。
+4. P4-2 联机对战仍需操作级同步：野怪是「抢一次」的互斥资源，
+   回合制实时同屏不能靠整档 CAS 或实例池解决。

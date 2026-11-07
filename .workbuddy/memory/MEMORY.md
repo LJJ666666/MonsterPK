@@ -66,5 +66,5 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7；路由 `/`、
 - **P4-2a ✅ / P4-2b ✅**：四榜只读派生（`e2e:p42a` **39** / `ui_smoke_p42a` **17/17**）；房间内核（`RoomRegistry` + `withRoomLock` + `room.state` + quota 三段式 + 同 token 重连 + 可选托管 + 超时随机代放；`e2e:p42b` **43** + `roomRegistry` 18 + `roomLock` 5 去锁 + `roomProtocol` 8 + 前端 9）。均未动 schema（§23/§24/§28/§29）。
 - **P4-2c ✅（11-07）**：单人 Boss 讨伐 + 只读伤害榜 + 每日次数。先还 **F12**（`game/settlement.ts::applySettlementToSave()`，普通战斗与 Boss 共用）；`BossDamageEvent` append-only（`battleId @unique`）；三只占位 Boss（倍率只抬 HP）。证据：`verify` **25/25 `VERIFY_OK`**、后端 **306** / 前端 **122**、`e2e:p42c` **44**、`ui_smoke_p42c` **19/19**；**`SCHEMA_VERSION` 未动**，仅加一条迁移（§25/§30）。
 - **P4-2 d~e 📋**：`d 1v1 PVP（房间态 + 双方意图仲裁，复用 b 的托管/超时，结算写双方档各一次 commitState）→ e 共斗/副本（Boss HP 是房间真值）`。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`。**下一步 P4-2d**。
-- **Git**：`fe159eb`→`2f2c8b7`→…→`25b6168`(P4-2a)→`d73624e`(P4-2b) 均已推送；`rollback-20261107-pre-p41`/`rollback-20261107-post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b` 成对在远端。`dev.db`/`.env` gitignore。
+- **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 均已推送；`rollback-20261107-pre-p41`/`rollback-20261107-post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py` / `doc_check.py`；11-07 已重建并 `ENV_CHECK_OK`。

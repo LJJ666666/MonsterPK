@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { captureChance, effectiveness, createInstance, computeDamage } from "@/game/rules";
+import { captureChance, effectiveness, createInstance, computeDamage, getMonsterStatBounds, evolveMonsterInstance, INIT_SPREAD_MIN } from "@/game/rules";
 import { MONSTER_SPECS } from "@/game/data";
+
+const STAT_KEYS = ["hp", "atk", "def", "spAtk", "spDef", "spd"] as const;
 
 describe("rules", () => {
   it("calculates effectiveness", () => {
@@ -26,6 +28,34 @@ describe("rules", () => {
     expect(c2).toBeGreaterThan(c1);
     expect(c1).toBeGreaterThanOrEqual(0.02);
     expect(c2).toBeLessThanOrEqual(0.95);
+  });
+
+  it("个体值区间正向、带宽达标、下限等于种族值", () => {
+    for (const specId of Object.keys(MONSTER_SPECS)) {
+      const b = getMonsterStatBounds(specId);
+      for (const k of STAT_KEYS) {
+        expect(b.initMin[k], `${specId}.${k} 下限超过上限`).toBeLessThanOrEqual(b.initMax[k]);
+        expect(b.initMax[k] - b.initMin[k], `${specId}.${k} 带宽不足`).toBeGreaterThanOrEqual(INIT_SPREAD_MIN);
+      }
+    }
+  });
+
+  it("进化后保留个体差异，不被抹平到同一下限", () => {
+    // ember_marmot → ember_badger（16 级进化）。修复前 remapByBounds 的
+    // `oldMax <= oldMin` 分支恒成立，直接返回 newMin，导致所有个体进化后属性完全一致。
+    const from = getMonsterStatBounds("ember_marmot");
+    const base = createInstance("ember_marmot", 16);
+    const fixedGrowth = { hp: 2, atk: 1, def: 1, spAtk: 1, spDef: 1, spd: 1 };
+    const at = (iv: typeof from.initMin) => ({ ...base, initStats: { ...iv }, growthRates: fixedGrowth });
+
+    const evoHigh = evolveMonsterInstance(at(from.initMax), "ember_badger");
+    const evoLow = evolveMonsterInstance(at(from.initMin), "ember_badger");
+
+    expect(evoHigh.specId).toBe("ember_badger");
+    expect(evoLow.specId).toBe("ember_badger");
+    expect(evoHigh.initStats.atk).toBeGreaterThan(evoLow.initStats.atk);
+    expect(evoHigh.initStats.def).toBeGreaterThan(evoLow.initStats.def);
+    expect(evoHigh.atk).toBeGreaterThan(evoLow.atk);
   });
 });
 

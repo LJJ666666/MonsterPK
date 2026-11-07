@@ -30,7 +30,7 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 ## 4. 运行命令与环境
 - 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**关机/会话交接后后台服务不会自动恢复**，新会话先 curl 探活（5173 / 3001）再重启。
 - **校验（首选一条命令）**：`npm run verify` —— 15 个阶段（前后端 check/test/build + 内容表一致性 + 六组 E2E + 375px 冒烟 + 文档与镜像自检），约 35s，跑完自动清理测试账号。子集：`--only=check,unit` / `--only=e2e:hardening` / `--skip=e2e,smoke`；CI 用 `--strict`（服务缺失即失败）。报告落 `.verify-report.json`（已 gitignore）。
-- **分项数字**：前端 `check` / `test`（**47**）/ `build`（606.74 KB / gzip 142.90）；后端 `check` / `test`（**160**）/ `check:content` / `e2e`（**57**）/ `e2e:p12`（**38**）/ `e2e:p21`（**34**）/ `e2e:p22`（**24**）/ `e2e:p31`（**39**）/ **`e2e:hardening`（112 项）**；headless 375px **15/15**。E2E 需服务已起；**RNG 用例必须重复跑**（bug_log §17）。改 `data.ts` 必须 `gen:content` 一起提交。
+- **分项数字**：前端 `check` / `test`（**49**）/ `build`（606.74 KB / gzip 142.90）；后端 `check` / `test`（**162**）/ `check:content` / `e2e`（**62**）/ `e2e:p12`（**38**）/ `e2e:p21`（**34**）/ `e2e:p22`（**24**）/ `e2e:p31`（**39**）/ **`e2e:hardening`（114 项）**；headless 375px **15/15**。E2E 需服务已起；**RNG 用例必须重复跑**（bug_log §17）。改 `data.ts` 必须 `gen:content` 一起提交。
 - **测试数据清理**：`cd backend && npm run clean:e2e`（`--dry` 先看，`--prefix=a_,b_` 临时追加前缀）。只删测试前缀、**永不删 admin**；verify 跑完会自动执行一次。
 - **账号管理**：`cd backend && npm run admin -- grant <用户名>` / `revoke` / `ban` / `unban` / `list` / `audit`。⚠️ 不授权就用测试菜单会被风控封号。**绝不写死固定用户名**。
 - 本机 `D:\MyJob\MonsterPK`（NTFS，11-07 重建环境）；remote `https://github.com/LJJ666666/MonsterPK.git`；node v22.22.2 / npm 10.9.7。dev/preview 的 `/api/save` 无 `save_data.json` 返回 404 属正常。
@@ -47,7 +47,7 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **在线权威态（P2-2）**：`lib/gameSession.ts` 按 `userId+slot` 维护内存态（data/authority/revision/连接）；`sessionBus.ts` 单例解循环依赖；`modules/session.ts` 的 **`commitState()` 是唯一写入口**（DB upsert → 内存 → 广播 `session.state`），`PUT /api/save` 与 `/api/actions/:type` 都改调它。`revision` 复用 `authority.revision` 单调递增；连接建立 hydrate 推快照，断线 10min TTL。下行 `session.state` 全量快照，上行只 `session.resync`；**伪造 `session.state` → UNKNOWN_TYPE + 1008**。见规范 §16。
 - **云同步（P0-3 桥接）**：`syncOnLogin` 冲突恢复 + `SyncBootstrap` 1.5s 防抖整包 PUT + 离线队列；被拒档不入队。**契约**：客户端不能再整包把资源改高（bug_log §15）。
 - **服务端战斗（P3-1a/b）**：敌方/队伍/背包全取自服务端，`captureRate` 读内容表并钳 0.02~0.62，RNG 注入可复现；结束 `applySettlement` 覆盖存档 → `commitState(source='battle')`（expected=新档摘要、revision+1、pending=null）并广播 `battle.state`（下行）。公式与前端 `rules.ts` 的对齐由 `tests/battleEngine.test.ts` 强制校验。
-- **测试基础设施（11-07 固化）**：`tests/lib/harness.mjs`（HTTP/账号/存档/WS/断言/清理共用底座）；`e2e_hardening.mjs`（**112 项对抗**，七分区，逐例断 status+code，自清理）；`numericRules.test.ts`（**30 项数值矩阵**：伤害不变量/克制单调/PP 全量/捕获率钳制/经验曲线）；`scripts/verify.mjs` 统一编排；`clean-test-data.mjs` 清账号。
+- **测试基础设施（11-07 固化）**：`tests/lib/harness.mjs`（HTTP/账号/存档/WS/断言/清理共用底座）；`e2e_hardening.mjs`（**114 项对抗**，八分区含 B2 格式错不封号，逐例断 status+code，自清理）；`numericRules.test.ts`（**31 项数值矩阵**：伤害不变量/克制单调/PP 全量/捕获率钳制/经验曲线/个体值区间）；`scripts/verify.mjs` 统一编排；`clean-test-data.mjs` 清账号。
 - **能力边界**：已挡改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/伪造 rebase/普通账号调测试菜单/WS 伪造状态写入/**伪造战斗动作与越权 battleId**；**未挡** GG 改内存（P3-1c 后生效）、加速器改客户端动画节奏（不影响结算）。管理员只在服务端判定；服务端价格/挂机参数在 `settlements.ts`，改 `data.ts`/`idle.ts` 时两处同步（`data.ts` 还要 `gen:content`）。
 
 ## 6. 已修的坑（详见 `.trae/documents/bug_log.md`）
@@ -57,11 +57,11 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - §10 Router 外 useNavigate 白屏 / §11 vitest EPERM / §12 Prisma DLL 锁 / §13 两套测试框架混跑 / §14 `.env` 路径 / §15 旧 E2E 契约冲突 / §16 用户名超长 401 / §17 捕获新增幻兽误拦 / §18 `strict:false` 收窄失效 / §19 upgrade 拒绝丢 body / §20 e2e:p31 等级死断言。
 
 ## 7. 进度与遗留
-- **P1-2 ✅ / P1-3 ✅（11-06）**：RNG/结算/时钟上移，nonce 防重放；捕获率补稀有度/等级差、`amulet_coin` 翻倍、`exp_share` 全队经验、进化石可用。证据：后端 76/76、E2E 57/57 + 38/38、前端 27/27、headless 10/10。**内容缺口**：仅 `spark_mouse` 配了 `stone_thunder` 道具进化。
-- **P2-1 ✅（11-06）**：WebSocket 通道（鉴权/心跳/重连/限流/状态 UI），证据：后端 92/92、`e2e:p21` 34/34、前端 37/37、headless 13/13。
-- **P2-2 ✅（11-07）**：服务端 GameSession 在线权威态（内存 + DB + `commitState` 唯一写入口 + 多端广播）；不加迁移、不改 SCHEMA_VERSION。证据：后端 **107/107**、`e2e:p22` **24/24**、前端 47/47、headless 15/15。
-- **P3-1a ✅ + P3-1b ✅（11-07）**：内容表由 `gen-content.ts` 从 `data.ts` 生成（`check:content` 防漂移）；`game/rules.ts`（RNG 注入）+ `game/battle.ts` 状态机；`lib/battleSession.ts` 三键归属 + 30min TTL；四接口经 `commitState(source='battle')` 写档并广播。证据：后端 **130/130**、`e2e:p31` **39/39**、前端 47/47、headless 15/15。**下一步 P3-1c**：前端五个入口改调 `/api/battle/*`；当前仍走本地战斗。
-- **11-07 全量回归 + 对抗 ✅**：前端 47/47 / build 606.74 KB；后端 130/130 / `check:content` 一致；E2E 57、38×2、34、24、**39×5**；headless 15/15；对抗 **65/65**。修复 `e2e:p31` 等级死断言（RNG 浮动致约 60% 失败），改区间 [2,6]，用例 38→39（bug_log §20）。
-- **11-07 测试体系固化 ✅**：对抗脚本转正为 `e2e:hardening`（**112 项**，七分区，自清理）；新增 `numericRules.test.ts` **30 项**（后端单测 130→**160**）；新增 `npm run verify`（**15 阶段约 35s**，自动清账号 + 出报告）；清理历史测试账号 **268 个**，dev.db 只剩 `admin`。**已知偏差（待杰哥定）**：38 只幻兽 `initMin > initMax`（144 项，个体值上限失效），属数值平衡决策，测试只诊断不判失败。
+- **P1-2/P1-3 ✅（11-06）**：RNG/结算/时钟上移，nonce 防重放；捕获率补稀有度/等级差、`amulet_coin` 翻倍、`exp_share` 全队经验、进化石可用。**内容缺口**：仅 `spark_mouse` 有 `stone_thunder` 道具进化。
+- **P2-1 ✅（11-06）**：WebSocket 通道（鉴权/心跳/重连/限流/状态 UI）。
+- **P2-2 ✅（11-07）**：GameSession 在线权威态（内存 + DB + `commitState` 唯一写入口 + 多端广播）；不加迁移、不改 SCHEMA_VERSION。
+- **P3-1a/1b ✅（11-07）**：内容表由 `gen-content.ts` 派生（`check:content` 防漂移）；`game/rules.ts`（RNG 注入）+ `game/battle.ts` 状态机；`battleSession` 三键归属 + 30min TTL；四接口经 `commitState(source='battle')` 写档广播。**下一步 P3-1c**：前端五个入口改调 `/api/battle/*`，当前仍走本地战斗。
+- **11-07 测试体系固化 ✅**：对抗脚本转正为 `e2e:hardening`（**114 项**，八分区，自清理）；新增 `numericRules.test.ts` **31 项**（后端单测 130→**162**）；新增 `npm run verify`（**15 阶段约 35s**，自动清账号 + 出报告）；清理历史测试账号 **268 个**，dev.db 只剩 `admin`。另修 `e2e:p31` 等级死断言（bug_log §20）。
+- **11-07 两项缺陷已修 ✅（杰哥拍板）**：①**个体值区间**——`initMin` 硬编码 base+2.0~3.2 与内容表 `initStatsMax`(base+0~5) 相减，38 只 144 项反向、宽度均值 1.6（最窄 0），`forceInitMax` 偏低，且 `remapByBounds` 恒走 `oldMax<=oldMin` 分支**使进化时个体差异清零**；修法 `initMin=种族值`、`initMax=max(initStatsMax, base+4)`，30 级均值仅 +0.19。②**money**——`MONEY` 混装格式错与越界且在白名单内，负/小数/null 直接封号；拆 `<FIELD>_FORMAT`(400 不封号) / `<FIELD>_RANGE`(封号)，`MONSTER_HP_EXCEED` 移出白名单。详见 bug_log §21/§22、规范 §18.5。
 - **Git（11-06 / 11-07）**：`fe159eb`（P0~P1-3）、`bb04998`（P2-1）、`834a55a`（HANDOFF）、`2f2c8b7`（P2-2）、`616acbe`（文档收尾）、**`bbb1853`（P3-1a/1b，25 文件 +2595/−57）** 均已推送。回滚点 tag：`rollback-20261107-pre-p22`→`834a55a`、`post-p22`→`2f2c8b7`、`pre-p31`→`616acbe`，均在远端。`dev.db`/`.env` 已 gitignore。
 - **回家交接**：`HANDOFF.md`（已入库）含 clone / 环境重建 / 记忆恢复 / 话术 / 验收 / 坑；配套 `check_home_env.py`、`doc_check.py`。11-07 已按手册在 `D://MyJob//MonsterPK` 重建：装依赖、随机 JWT_SECRET、4 条迁移、起双服务、建 `admin/adminJJ`、全量 `ENV_CHECK_OK`。

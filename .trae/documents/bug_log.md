@@ -203,3 +203,70 @@ P1-1 里 zod 联合类型 narrowing 失败也是同一类坑（当时改用 thro
 
 **教训**：涉及 RNG 的 E2E 不要写死等值断言；要么注入固定种子，要么断言真实区间与不变量。
 `gameSession` / `battleEngine` 单测能注入 RNG，E2E 走真实 `Math.random`，只能断言范围。
+
+## 21. 幻兽个体值区间整体反向，进化还会把个体差异清零（2026-11-07 杰哥拍板修复）
+
+现象：`getMonsterStatBounds()` 返回的 `initMin` 普遍大于 `initMax`。统计全表 **38 只幻兽 144 项**
+（`atk/def/spAtk/spDef/spd` 各 38 项全部反向，`hp` 部分反向），例 `sprout_owl.atk` 下限 51 > 上限 49。
+
+根因：`initMin` 是按 `Math.floor(base + 3.2 / 2.3 / 2.0)` 硬编码推算的，而 `data.ts` 里
+`initStatsMax` 的取值是 `base + 0~5`（实测差值均值：hp 4.63 / atk 2.18 / def 2.00 /
+spAtk 0.82 / spDef 0.79 / spd 0.50）。下限比上限还高，区间整体翻转。
+
+三层后果，一层比一层隐蔽：
+1. `randInt(min, max)` 在 `max < min` 时退化为 `[max, min-1]`，实际宽度只剩均值 **1.6**、最窄 **0**——
+   个体差异几乎不存在，稀有度设计失效。
+2. `forceInitMax`（测试菜单满属性）拿到的是 `initMax`，反而比随机生成的值还低，功能名不副实。
+3. 最严重：`evolveMonsterInstance()` 里 `remapByBounds()` 开头是 `if (oldMax <= oldMin) return newMin;`。
+   区间反向让这个分支**恒定命中**，于是每次进化都把 six stats 全部重置成新种族的 `initMin`——
+   **个体差异在进化瞬间被清零**，而且不报错、不告警，从表现上完全看不出来。
+
+处理（杰哥 2026-11-07 拍板「肯定要平衡的，要修」）：
+- `initMin` 归位到种族值本身（去掉 +3.2/2.3/2.0 魔数），语义变成「种族值 = 平均个体」。
+- `initMax = Math.max(spec.initStatsMax?.x ?? 0, initMin.x + INIT_SPREAD_MIN)`，`INIT_SPREAD_MIN = 4`：
+  尊重内容表各自的浮动幅度（HP 普遍给到 +5），同时保底不会窄于 4。
+- 前后端 `rules.ts` 两处同步改，`numericRules.test.ts` 从「只诊断」改为**硬断言**（反向 0 项、
+  带宽 ≥ 4、下限等于种族值），并新增 `forceInitMax 六维等于上限` 用例。
+- 前端 `rules.test.ts` 新增两条回归：区间正向 + **进化后保留个体差异**。
+
+影响评估：30 级属性均值只从 139.4 变到 139.6（+0.19），1 级属性均值从 base+0.8 升到 base+2.1。
+平衡零回归，玩家体感是「属性上限终于正常了」。已在 `initMin` 上方写明这段历史，防止再被加回魔数。
+
+## 22. `MONEY` 一个 code 混装「格式错」与「越界」，负金钱/小数直接封号（2026-11-07 修复）
+
+现象：普通账号提交 `money: -1` / `1.5` / `null` 会被判为改档并**封号**（403 ACCOUNT_BANNED）。
+按理这些是格式脏档，不该是终局惩罚。
+
+根因：`saveValidator.ts` 用一条判断同时覆盖两种性质完全不同的违规：
+
+```ts
+if (!isNonNegInt(parsed.money) || (parsed.money as number) > SAVE_LIMITS.MONEY_MAX) {
+  c.reject('MONEY', 'money', ...);   // 两种原因共用一个 code
+}
+```
+
+而 `antiCheat.ts` 的 `CHEAT_CODES` 里正好有 `'MONEY'`，于是「格式错」和「篡改越界」一起进了封号名单。
+讽刺的是 `antiCheat.ts` 文件开头自己写着原则：「未列入的违规一律只 400 拒绝、不封号——旧版存档、
+内容表更新、客户端 bug、网络损坏都可能造成格式异常，拿这些去封号会把正常玩家封掉。」
+实现违反了它自己声明的契约。
+
+同型问题共 13 个 code：`MONEY / STEPS / MONSTER_LEVEL / MONSTER_EXP / MONSTER_MAX_HP / MONSTER_HP /
+MONSTER_HP_EXCEED / MONSTER_STAT / MONSTER_STATS_VALUE / INVENTORY_VALUE / COLLECTION_TIMES /
+IDLE_LEVEL / CLEARED_AREA_LEVEL`，全部是「格式 + 越界」共用一个 code。
+
+处理：确立命名约定，**一个 code 只能表达一件事**：
+- `<FIELD>_FORMAT`：类型 / 符号 / 整数性错误 → hard reject（400），**不进白名单、不封号**。
+- `<FIELD>_RANGE`：数值合法但超过上界 → hard reject + 封号（留在 `CHEAT_CODES`）。
+- `MONSTER_HP` 拆为 `MONSTER_HP_FORMAT`；`MONSTER_HP_EXCEED`（hp > maxHp，内部矛盾）**移出**白名单；
+  `CLEARED_AREAS` 的元素非对象从 `CLEARED_AREA_LEVEL` 拆出为 `CLEARED_AREA`。
+
+`antiCheat.ts` 的决策逻辑一行没改（`formatHard = hard.filter(!CHEAT_CODES.has(code))` 本就走 400），
+只改 code 命名与白名单内容，所以风险面很小。`antiCheat.test.ts` 增加双向断言：14 个格式码必须
+`isCheatCode === false`、19 个越界/容量/高危码必须 `true`，且 `CHEAT_CODES.size` 精确相等——
+以后新增风控码忘了同步会被这条用例挡住。
+
+连带修：管理员以前能写进 `money: -1` 的脏档（会污染库），现在格式脏档**任何账号都 400 拒绝**，
+管理员放行的只是「数值偏高」。
+
+**教训**：风控 code 的语义粒度 = 封号决策的粒度。一个 code 承载两种性质，迟早会把其中最轻的那半
+当成最重的那半处理。凡是「格式 / 越界」混写的判断，都要先问一句：这半边真的够封号吗。

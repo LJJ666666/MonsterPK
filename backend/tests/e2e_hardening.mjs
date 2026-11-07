@@ -175,18 +175,37 @@ async function main() {
   const afterBad = await save.put(authAcc.token, validSave());
   suite.check('连打 11 次非法请求后仍可正常写入（未误封）', afterBad.status === 200, `status=${afterBad.status}`);
 
+  // ═══════════════════ B2. 格式错误必须「拒绝但不封号」 ═══════════════════
+  // 这类值脏档、旧版迁移失败、客户端算术 bug 都能产生，不是改档证据。
+  // 契约（2026-11-07 起）：<FIELD>_FORMAT → 400，<FIELD>_RANGE / 容量类 → 403 封号。
+  console.log('\n—— B2. 格式错误不封号 ——');
+
+  const formatCases = [
+    ['金币为负', () => validSave({ money: -1 }), 'MONEY_FORMAT'],
+    ['金币为小数', () => validSave({ money: 1.5 }), 'MONEY_FORMAT'],
+    ['金币为 null', () => validSave({ money: null }), 'MONEY_FORMAT'],
+    ['HP 超过 maxHp（内部矛盾）', () => validSave({ party: [{ ...validSave().party[0], hp: 999 }] }), 'MONSTER_HP_EXCEED'],
+    ['幻兽等级为字符串', () => validSave({ party: [{ ...validSave().party[0], level: '30' }] }), 'MONSTER_LEVEL_FORMAT'],
+  ];
+  {
+    const acc = await mk('hd_fmt');
+    for (const [label, build, expectCode] of formatCases) {
+      const r = await save.put(acc.token, build());
+      suite.check(`格式错误「${label}」→ 400 ${expectCode} 且不封号`,
+        r.status === 400 && r.data?.code === expectCode,
+        `status=${r.status} code=${r.data?.code ?? ''}`);
+    }
+    const after = await save.put(acc.token, validSave());
+    suite.check('连续 5 次格式错误后账号仍可正常写入（未误封）',
+      after.status === 200, `status=${after.status} code=${after.data?.code ?? ''}`);
+  }
+
   // ═══════════════════ C. 风控封号与封号后封锁 ═══════════════════
   console.log('\n—— C. 风控封号 ——');
 
   const banCases = [
-    ['金币 5,000,000（超软线）', () => validSave({ money: 5_000_000 })],
-    // 当前契约：money 的任何非法值都归入 CHEAT_CODES 的 MONEY → 直接封号。
-    // 这涵盖「负数 / 小数 / null」这类格式错误，存在误封风险（见回归报告建议），
-    // 本套件按现状断言，策略调整后这三条应改为 400 不封号。
-    ['金币为负（当前契约：按 MONEY 封号）', () => validSave({ money: -1 })],
-    ['金币为小数（当前契约：按 MONEY 封号）', () => validSave({ money: 1.5 })],
-    ['金币为 null（当前契约：按 MONEY 封号）', () => validSave({ money: null })],
-    ['HP 超过 maxHp', () => validSave({ party: [{ ...validSave().party[0], hp: 999 }] })],
+    // 合法但高到只有测试菜单/外挂能造出（软告警升级为封号，阈值见 SAVE_LIMITS.MONEY_WARN）。
+    ['金币 5,000,000（超软线 MONEY_HIGH）', () => validSave({ money: 5_000_000 })],
     ['队伍 7 只（上限 6）', () => validSave({ party: manyMonsters(7) })],
     ['技能 5 个（上限 4）', () => validSave({ party: [{ ...validSave().party[0], moveIds: MOVE_IDS.slice(0, 5) }] })],
     ['道具堆叠 1,000,001（上限 1,000,000）', () => validSave({ inventory: { capsule_basic: 1_000_001 } })],

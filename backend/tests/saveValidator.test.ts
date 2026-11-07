@@ -12,6 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateSaveData, EXPECTED_SAVE_VERSION } from '../src/lib/saveValidator.ts';
+import { isCheatCode } from '../src/lib/antiCheat.ts';
 
 const NOW = Date.parse('2026-11-05T10:00:00.000Z');
 const PAST = '2026-11-05T09:59:00.000Z';
@@ -96,19 +97,28 @@ test('缺 party / inventory → 结构硬拒绝', () => {
 });
 
 // ——————————————— B. 典型改档一律拒绝 ———————————————
-test('金钱：负数 / 小数 / 字符串 / 超上限 全部拒绝', () => {
-  for (const money of [-1, 1.5, '999999', 10_000_000, null]) {
+test('金钱：负数 / 小数 / 字符串 / null → MONEY_FORMAT 拒绝，且不算改档', () => {
+  for (const money of [-1, 1.5, '999999', null]) {
     const r = validate(validSave({ money }));
     assert.equal(r.ok, false, `money=${String(money)} 应被拒绝`);
-    assert.ok(codes(r).includes('MONEY'), `money=${String(money)} 应命中 MONEY`);
+    assert.ok(codes(r).includes('MONEY_FORMAT'), `money=${String(money)} 应命中 MONEY_FORMAT`);
   }
+  // 契约：格式错误不封号。脏档、旧版迁移失败、客户端算术 bug 都会产生这些值。
+  assert.equal(isCheatCode('MONEY_FORMAT'), false, 'MONEY_FORMAT 不该触发封号');
+});
+
+test('金钱：超上限 → MONEY_RANGE 拒绝（改档特征，交给 antiCheat 封号）', () => {
+  const r = validate(validSave({ money: 10_000_000 }));
+  assert.equal(r.ok, false);
+  assert.ok(codes(r).includes('MONEY_RANGE'));
+  assert.equal(isCheatCode('MONEY_RANGE'), true, 'MONEY_RANGE 必须触发封号');
 });
 
 test('金钱：NaN / Infinity 不能以 JSON 数值形式混入（null / 字符串均被拒）', () => {
   for (const raw of ['{"version":"10","party":[],"inventory":{},"money":1e400}']) {
     const r = validate(raw);
     assert.equal(r.ok, false);
-    assert.ok(codes(r).includes('MONEY'));
+    assert.ok(codes(r).includes('MONEY_FORMAT'));
   }
 });
 
@@ -136,14 +146,18 @@ test('lastSavedAt 允许 5 分钟内的正常时钟偏差', () => {
   assert.equal(r.ok, true, JSON.stringify(r.hard));
 });
 
-test('幻兽：等级 0 / 负 / 超上限 → MONSTER_LEVEL 拒绝', () => {
-  for (const level of [0, -5, 5000, '30']) {
+test('幻兽：等级 0 / 负 / 字符串 → MONSTER_LEVEL_FORMAT；超上限 → MONSTER_LEVEL_RANGE', () => {
+  for (const level of [0, -5, '30']) {
     const save = validSave();
     (save.party[0] as any).level = level;
     const r = validate(save);
     assert.equal(r.ok, false, `level=${String(level)} 应被拒绝`);
-    assert.ok(codes(r).includes('MONSTER_LEVEL'));
+    assert.ok(codes(r).includes('MONSTER_LEVEL_FORMAT'), `level=${String(level)} 应命中 FORMAT`);
   }
+  const save = validSave();
+  (save.party[0] as any).level = 5000;
+  const r = validate(save);
+  assert.ok(codes(r).includes('MONSTER_LEVEL_RANGE'), '5000 级应命中 RANGE');
 });
 
 test('幻兽：hp > maxHp → MONSTER_HP_EXCEED 拒绝', () => {
@@ -187,29 +201,34 @@ test('队伍 > 6 只 → MONSTER_LIST_MAX 拒绝', () => {
   assert.ok(codes(r).includes('MONSTER_LIST_MAX'));
 });
 
-test('背包：负数 / 小数 / 超上限 → INVENTORY_VALUE 拒绝', () => {
+test('背包：负数 / 小数 / 字符串 → INVENTORY_VALUE_FORMAT；超上限 → INVENTORY_VALUE_RANGE', () => {
   for (const inv of [
     { capsule_basic: -1 },
     { capsule_basic: 1.5 },
     { capsule_basic: '99' },
-    { capsule_basic: 2_000_000 },
   ]) {
     const r = validate(validSave({ inventory: inv }));
     assert.equal(r.ok, false, JSON.stringify(inv));
-    assert.ok(codes(r).includes('INVENTORY_VALUE'));
+    assert.ok(codes(r).includes('INVENTORY_VALUE_FORMAT'), JSON.stringify(inv));
   }
+  const over = validate(validSave({ inventory: { capsule_basic: 2_000_000 } }));
+  assert.ok(codes(over).includes('INVENTORY_VALUE_RANGE'));
 });
 
-test('图鉴：捕获次数负数 / 超上限 → COLLECTION_TIMES 拒绝', () => {
-  const r = validate(validSave({ collection: { sprout_owl: { seen: true, captured: true, timesCaptured: -3 } } }));
-  assert.equal(r.ok, false);
-  assert.ok(codes(r).includes('COLLECTION_TIMES'));
+test('图鉴：捕获次数负数 → COLLECTION_TIMES_FORMAT；超上限 → COLLECTION_TIMES_RANGE', () => {
+  const neg = validate(validSave({ collection: { sprout_owl: { seen: true, captured: true, timesCaptured: -3 } } }));
+  assert.equal(neg.ok, false);
+  assert.ok(codes(neg).includes('COLLECTION_TIMES_FORMAT'));
+
+  const over = validate(validSave({ collection: { sprout_owl: { seen: true, captured: true, timesCaptured: 2_000_000 } } }));
+  assert.equal(over.ok, false);
+  assert.ok(codes(over).includes('COLLECTION_TIMES_RANGE'));
 });
 
-test('挂机：clearedAreas.level 越界 → 拒绝', () => {
+test('挂机：clearedAreas.level 越界 → CLEARED_AREA_LEVEL_RANGE', () => {
   const r = validate(validSave({ clearedAreas: { area_a: { name: 'x', level: 99999, theme: 'grass', clearedAt: PAST } } }));
   assert.equal(r.ok, false);
-  assert.ok(codes(r).includes('CLEARED_AREA_LEVEL'));
+  assert.ok(codes(r).includes('CLEARED_AREA_LEVEL_RANGE'));
 });
 
 // ——————————————— C. 合法极端值必须放行（不误杀）———————————————

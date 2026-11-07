@@ -615,13 +615,36 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - 编排器先探活 3001/5173，缺服务的阶段标 `SKIP` 而非失败，避免本地没起服务时一片红。
 - 跑完自动执行 `clean:e2e`，防止 dev.db 被临时账号撑大；报告写 `.verify-report.json`（已 gitignore）。
 
-### 18.5 已知偏差与待决策项
+### 18.5 已修缺陷与风控码约定
 
-- **38 只幻兽 `initMin > initMax`（144 项）**：`getMonsterStatBounds` 的 `initMin` 用
-  `baseHp+3.2 / baseAtk+2.3 / …` 推算，而 `data.ts` 的 `initStatsMax` 多数直接等于 `base`，
-  导致区间反向、`randInt` 区间塌陷、个体值上限失效。
-  修它会让 1 级属性整体下移 2~3 点（数值平衡决策）→ `numericRules.test.ts` 只做
-  `t.diagnostic` 诊断并设「反向项 ≤ 200」的上界保护，不判失败。**待产品决策后再改。**
-- **`money` 格式错误会封号**：负数 / 小数 / null 目前归入 `CHEAT_CODES` 的 `MONEY` → 403 封号。
-  测试按现状断言并在用例名标注「当前契约」；若后续把「格式非法」与「数值超限」拆开
-  （如 `MONEY_INVALID` 只 400），需同步改这 3 条用例与 `antiCheat.test.ts`、`e2e_save_validation.mjs`。
+2026-11-07 杰哥拍板修复两项，细节见 `bug_log.md` §21 / §22，此处只留工程约定。
+
+**① 幻兽个体值区间（已修，bug_log §21）**
+原 `initMin = base + 3.2/2.3/2.0`，与内容表 `initStatsMax`（`base+0~5`）相减令 38 只 144 项
+`initMin > initMax`，实测带宽均值仅 1.6、最窄 0；并让 `remapByBounds` 的 `oldMax <= oldMin`
+分支恒命中，**进化时个体差异被清零**。现约定：
+
+- `initMin` **必须等于种族值**，不得再叠加任何魔法偏移（`numericRules.test.ts` 硬断言）。
+- `initMax = max(spec.initStatsMax?.x ?? 0, initMin.x + INIT_SPREAD_MIN)`，`INIT_SPREAD_MIN = 4`。
+  内容表可以给更宽（HP 普遍 +5），但不能窄于保底。
+- 前后端 `rules.ts` 两处 `getMonsterStatBounds` 必须同步改，公式对照由 `battleEngine.test.ts` 兜。
+- 新增幻兽只填 `base*` 与 `initStatsMax`，不要动 `getMonsterStatBounds` 里的算式。
+
+**② 风控 code 命名约定（已落地，bug_log §22）**
+一个 code 只能表达一件事，**语义粒度 = 封号决策的粒度**：
+
+| 后缀 | 含义 | 处置 | 在 `CHEAT_CODES` |
+|---|---|---|---|
+| `_FORMAT` | 类型 / 符号 / 整数性错误（脏档、旧版迁移、客户端 bug） | 400 拒绝 | ❌ 绝不封号 |
+| `_RANGE` | 数值合法但超过上界（正常逻辑不可能产生） | 400 拒绝 + 封号 | ✅ |
+| 容量类（`MONSTER_MOVES_MAX` / `INVENTORY_KEYS` …） | 条目数超规则上限 | 400 + 封号 | ✅ |
+| `_HIGH` / `_OVERFLOW` 软告警 | 合法但高到只有测试菜单/外挂能造 | 封号 | ✅ |
+
+- `MONSTER_HP_EXCEED`（hp > maxHp）属内部矛盾/脏档，**不在**白名单。
+- 格式脏档任何账号（含管理员）都不入库；管理员放行的只是「数值偏高」。
+- 新增字段务必拆两个 code；`antiCheat.test.ts` 会双向校验 14 个格式码 `false`、19 个越界码 `true`，
+  且 `CHEAT_CODES.size` 精确相等——漏同步会被这条用例挡住。
+
+**遗留风险（未改，杰哥策略）**：`MONEY_HIGH` 阈值 `MONEY_WARN = 999_999` 与前端测试菜单
+`addMoney` 上限相同，意味着正常攒到 100 万即触发封号。目前按「改数据一律封」的强度保留，
+长线运营前建议按道具单价与消耗速度重算该阈值。

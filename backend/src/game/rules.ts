@@ -407,21 +407,39 @@ export function gainExp(monster: ServerMonster, amount: number): { monster: Serv
 
 // —— 遭遇生成：敌方全由服务端掷，客户端只收结果 ——
 
+/** 个体值最小带宽（上限 - 下限）。内容表给窄于此时按此兜底。与前端 rules.ts 保持一致。 */
+export const INIT_SPREAD_MIN = 4;
+
 export function getMonsterStatBounds(specId: string): {
   initMin: StatBlock; initMax: StatBlock; gMin: StatBlock; gMax: StatBlock;
 } {
   const spec = MONSTER_SPECS[specId];
+
+  // 1 级六维下限 = 种族值本身。种族值代表「平均个体」，个体差异只在此基准上加成。
+  // 历史实现曾在此处硬编码 base+3.2 / +2.3 / +2.0，而内容表 initStatsMax 的取值是
+  // base+0~5，两者相减令区间整体反向（38 只幻兽 144 项 initMin > initMax），后果有三：
+  // ① randInt 区间塌陷，实际宽度只剩 0~2；② forceInitMax 拿到比平均值更低的值；
+  // ③ 进化时 remapByBounds 因 oldMax <= oldMin 直接返回 newMin，把个体差异清零。
+  // 修法：下限归位到种族值，带宽改为「内容表优先 + 保底」。前端 rules.ts 同公式。
   const initMin: StatBlock = {
-    hp: Math.floor(spec.baseHp + 3.2),
-    atk: Math.floor(spec.baseAtk + 2.3),
-    def: Math.floor(spec.baseDef + 2.0),
-    spAtk: Math.floor(spec.baseSpAtk + 2.3),
-    spDef: Math.floor(spec.baseSpDef + 2.0),
-    spd: Math.floor(spec.baseSpd + 2.0),
+    hp: spec.baseHp,
+    atk: spec.baseAtk,
+    def: spec.baseDef,
+    spAtk: spec.baseSpAtk,
+    spDef: spec.baseSpDef,
+    spd: spec.baseSpd,
   };
-  const initMax: StatBlock = spec.initStatsMax ?? {
-    hp: initMin.hp + 5, atk: initMin.atk + 4, def: initMin.def + 4,
-    spAtk: initMin.spAtk + 4, spDef: initMin.spDef + 4, spd: initMin.spd + 4,
+
+  // 上限优先尊重内容表（不同种族可以有自己的浮动幅度，例如 HP 普遍给得更宽），
+  // 内容表缺失或窄于保底线时抬到 initMin + INIT_SPREAD_MIN，保证任何一项都有可感知的浮动。
+  const declared = spec.initStatsMax;
+  const initMax: StatBlock = {
+    hp: Math.max(declared?.hp ?? 0, initMin.hp + INIT_SPREAD_MIN),
+    atk: Math.max(declared?.atk ?? 0, initMin.atk + INIT_SPREAD_MIN),
+    def: Math.max(declared?.def ?? 0, initMin.def + INIT_SPREAD_MIN),
+    spAtk: Math.max(declared?.spAtk ?? 0, initMin.spAtk + INIT_SPREAD_MIN),
+    spDef: Math.max(declared?.spDef ?? 0, initMin.spDef + INIT_SPREAD_MIN),
+    spd: Math.max(declared?.spd ?? 0, initMin.spd + INIT_SPREAD_MIN),
   };
   const gMin: StatBlock = spec.growthPerLevel?.min ?? { hp: 2, atk: 1, def: 1, spAtk: 1, spDef: 1, spd: 1 };
   const gMax: StatBlock = spec.growthPerLevel?.max ?? {

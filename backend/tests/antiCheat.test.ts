@@ -84,7 +84,7 @@ test('满属性（六维超上限）→ 普通账号 ban', () => {
   (save.party[0] as any).atk = 999_999;
   const a = decide(save, false);
   assert.equal(a.kind, 'ban');
-  if (a.kind === 'ban') assert.ok(a.codes.includes('MONSTER_STAT'));
+  if (a.kind === 'ban') assert.ok(a.codes.includes('MONSTER_STAT_RANGE'));
 });
 
 test('经验溢出（exp 达阈值却未升级）→ 普通账号 ban', () => {
@@ -95,10 +95,10 @@ test('经验溢出（exp 达阈值却未升级）→ 普通账号 ban', () => {
   if (a.kind === 'ban') assert.ok(a.codes.includes('MONSTER_EXP_OVERFLOW'));
 });
 
-test('负金钱（硬违规）→ 普通账号 ban', () => {
+test('负金钱属于格式错误 → 只 reject，不封号（格式错不是改档证据）', () => {
   const a = decide(validSave({ money: -1 }), false);
-  assert.equal(a.kind, 'ban');
-  if (a.kind === 'ban') assert.ok(a.codes.includes('MONEY'));
+  assert.equal(a.kind, 'reject');
+  if (a.kind === 'reject') assert.ok(a.codes.includes('MONEY_FORMAT'));
 });
 
 // ——————————————— 防误封：格式 / 兼容问题只拒绝，不封号 ———————————————
@@ -154,5 +154,34 @@ test('CHEAT_CODES 不含任何格式/兼容类 code', () => {
   for (const code of ['NOT_JSON', 'VERSION_OLD', 'VERSION_TOO_NEW', 'MONSTER_STATS_MISSING', 'TIMESTAMP_MISSING', 'TIMESTAMP_FUTURE', 'PARTY_MISSING']) {
     assert.equal(isCheatCode(code), false, `${code} 不该触发封号`);
   }
-  assert.ok(CHEAT_CODES.size >= 20);
+
+  // 格式 / 脏档 / 内部矛盾类：一律不封号。这类值脏档、旧版迁移、客户端 bug 都能产生，
+  // 拿它们封号会误封正常玩家（2026-11-07 起 money 负数/小数即属此列）。
+  const formatCodes = [
+    'MONEY_FORMAT', 'STEPS_FORMAT',
+    'MONSTER_LEVEL_FORMAT', 'MONSTER_EXP_FORMAT', 'MONSTER_MAX_HP_FORMAT',
+    'MONSTER_HP_FORMAT', 'MONSTER_HP_EXCEED',
+    'MONSTER_STAT_FORMAT', 'MONSTER_STATS_VALUE_FORMAT',
+    'INVENTORY_VALUE_FORMAT', 'COLLECTION_TIMES_FORMAT',
+    'IDLE_LEVEL_FORMAT', 'CLEARED_AREA_LEVEL_FORMAT', 'CLEARED_AREA',
+  ];
+  for (const code of formatCodes) {
+    assert.equal(isCheatCode(code), false, `${code} 是格式/脏档类，不该封号`);
+  }
+
+  // 越界 / 容量类：必须封号，缺一个就等于开了后门。
+  const cheatCodes = [
+    'MONEY_RANGE', 'STEPS_RANGE',
+    'MONSTER_LEVEL_RANGE', 'MONSTER_EXP_RANGE', 'MONSTER_MAX_HP_RANGE',
+    'MONSTER_STAT_RANGE', 'MONSTER_STATS_VALUE_RANGE',
+    'INVENTORY_VALUE_RANGE', 'COLLECTION_TIMES_RANGE',
+    'IDLE_LEVEL_RANGE', 'CLEARED_AREA_LEVEL_RANGE',
+    'MONSTER_MOVES_MAX', 'MONSTER_LIST_MAX', 'INVENTORY_KEYS', 'COLLECTION_KEYS',
+    'MONEY_HIGH', 'MONSTER_LEVEL_HIGH', 'MONSTER_EXP_OVERFLOW', 'COLLECTION_TIMES_HIGH',
+  ];
+  for (const code of cheatCodes) {
+    assert.equal(isCheatCode(code), true, `${code} 必须触发封号`);
+  }
+  // 白名单不允许出现约定之外的新 code：新增风控码必须同步本用例与文档。
+  assert.equal(CHEAT_CODES.size, cheatCodes.length);
 });

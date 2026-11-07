@@ -29,14 +29,23 @@ export type SaveAction =
  *   捕抓必全满会抬高六维与 initStats；普通游玩达不到这些阈值）。
  */
 export const CHEAT_CODES: ReadonlySet<string> = new Set([
-  // —— 硬违规里的数值类 ——
-  'MONEY', 'STEPS',
-  'MONSTER_LEVEL', 'MONSTER_EXP', 'MONSTER_MAX_HP', 'MONSTER_HP', 'MONSTER_HP_EXCEED',
-  'MONSTER_STAT', 'MONSTER_STATS_VALUE', 'MONSTER_MOVES_MAX', 'MONSTER_LIST_MAX',
-  'INVENTORY_VALUE', 'INVENTORY_KEYS',
-  'COLLECTION_TIMES', 'COLLECTION_KEYS',
-  'IDLE_LEVEL', 'CLEARED_AREA_LEVEL',
-  // —— 软告警里的改档特征（本次由「放行」升级为「封号」）——
+  // —— 硬违规里的「越界」类 ——
+  // 命名约定（2026-11-07 起）：每个数值字段拆成两个 code，一个只能表达一件事。
+  //   <FIELD>_FORMAT = 类型 / 符号 / 整数性错误 → 脏档、旧版迁移、客户端 bug 都可能产生，
+  //                    只 400 拒绝，**绝不封号**（不在此集合内）。
+  //   <FIELD>_RANGE  = 数值合法但超过上界 → 正常游戏逻辑不可能产生，才是改档特征，封号。
+  // 历史教训：MONEY 一个 code 同时覆盖「-1 / 1.5 / null」和「> 9999999」，
+  // 结果改错格式的正常玩家直接被封，违反了本文件开头写下的白名单原则。
+  'MONEY_RANGE', 'STEPS_RANGE',
+  'MONSTER_LEVEL_RANGE', 'MONSTER_EXP_RANGE', 'MONSTER_MAX_HP_RANGE',
+  'MONSTER_STAT_RANGE', 'MONSTER_STATS_VALUE_RANGE',
+  'INVENTORY_VALUE_RANGE', 'COLLECTION_TIMES_RANGE',
+  'IDLE_LEVEL_RANGE', 'CLEARED_AREA_LEVEL_RANGE',
+  // —— 容量类：塞入超过规则允许的条目数，正常游玩不可能 ——
+  'MONSTER_MOVES_MAX', 'MONSTER_LIST_MAX',
+  'INVENTORY_KEYS', 'COLLECTION_KEYS',
+  // —— 软告警里的改档特征（2026-11-07 由「放行」升级为「封号」，阈值见 SAVE_LIMITS._WARN）——
+  // 注意：这几个是「合法但高到只有测试菜单/外挂能造出」，与上面的 FORMAT 类性质完全不同。
   'MONEY_HIGH', 'MONSTER_LEVEL_HIGH', 'MONSTER_EXP_OVERFLOW', 'COLLECTION_TIMES_HIGH',
 ]);
 

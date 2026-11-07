@@ -128,13 +128,18 @@ function validateMonster(m: unknown, path: string, c: ReturnType<typeof createCo
   if (typeof m.specId !== 'string' || m.specId.length === 0 || m.specId.length > SAVE_LIMITS.ID_MAX) {
     c.reject('MONSTER_SPEC_ID', `${path}.specId`, '幻兽 specId 必须是非空字符串');
   }
-  if (!isNonNegInt(m.level) || (m.level as number) < 1 || (m.level as number) > SAVE_LIMITS.LEVEL_MAX) {
-    c.reject('MONSTER_LEVEL', `${path}.level`, `等级必须是 1~${SAVE_LIMITS.LEVEL_MAX} 的整数`);
+  // 幻兽数值同样按 FORMAT（格式错，不封号）/ RANGE（越界，可封号）两级判定。
+  if (!isNonNegInt(m.level) || (m.level as number) < 1) {
+    c.reject('MONSTER_LEVEL_FORMAT', `${path}.level`, `等级必须是正整数（当前 ${JSON.stringify(m.level)}）`);
+  } else if ((m.level as number) > SAVE_LIMITS.LEVEL_MAX) {
+    c.reject('MONSTER_LEVEL_RANGE', `${path}.level`, `等级 ${m.level} 超出上限 ${SAVE_LIMITS.LEVEL_MAX}`);
   } else if ((m.level as number) > SAVE_LIMITS.LEVEL_WARN) {
     c.warn('MONSTER_LEVEL_HIGH', `${path}.level`, `等级 ${m.level} 偏高，疑似改档或极端练级`);
   }
-  if (!isNonNegInt(m.exp) || (m.exp as number) > SAVE_LIMITS.EXP_MAX) {
-    c.reject('MONSTER_EXP', `${path}.exp`, '经验值必须是非负整数且不超出上限');
+  if (!isNonNegInt(m.exp)) {
+    c.reject('MONSTER_EXP_FORMAT', `${path}.exp`, '经验值必须是非负整数');
+  } else if ((m.exp as number) > SAVE_LIMITS.EXP_MAX) {
+    c.reject('MONSTER_EXP_RANGE', `${path}.exp`, `经验值 ${m.exp} 超出上限 ${SAVE_LIMITS.EXP_MAX}`);
   } else if (
     isNonNegInt(m.level) &&
     (m.exp as number) >= 16 + (m.level as number) * 18
@@ -144,19 +149,24 @@ function validateMonster(m: unknown, path: string, c: ReturnType<typeof createCo
   }
 
   // HP 不变量：0 <= hp <= maxHp，且 maxHp 为正整数。
-  if (!isNonNegInt(m.maxHp) || (m.maxHp as number) < 1 || (m.maxHp as number) > SAVE_LIMITS.STAT_MAX) {
-    c.reject('MONSTER_MAX_HP', `${path}.maxHp`, 'maxHp 必须是正整数且不超出上限');
+  if (!isNonNegInt(m.maxHp) || (m.maxHp as number) < 1) {
+    c.reject('MONSTER_MAX_HP_FORMAT', `${path}.maxHp`, `maxHp 必须是正整数（当前 ${JSON.stringify(m.maxHp)}）`);
+  } else if ((m.maxHp as number) > SAVE_LIMITS.STAT_MAX) {
+    c.reject('MONSTER_MAX_HP_RANGE', `${path}.maxHp`, `maxHp ${m.maxHp} 超出上限 ${SAVE_LIMITS.STAT_MAX}`);
   }
   if (!isNonNegInt(m.hp)) {
-    c.reject('MONSTER_HP', `${path}.hp`, 'hp 必须是非负整数');
+    c.reject('MONSTER_HP_FORMAT', `${path}.hp`, 'hp 必须是非负整数');
   } else if (isNonNegInt(m.maxHp) && (m.hp as number) > (m.maxHp as number)) {
+    // hp > maxHp 是内部矛盾（脏档或客户端算错），不是改档特征，不封号。
     c.reject('MONSTER_HP_EXCEED', `${path}.hp`, 'hp 不能超过 maxHp');
   }
 
   for (const key of ['atk', 'def', 'spAtk', 'spDef', 'spd']) {
     const v = m[key];
-    if (!isNonNegInt(v) || (v as number) > SAVE_LIMITS.STAT_MAX) {
-      c.reject('MONSTER_STAT', `${path}.${key}`, `${key} 必须是非负整数且不超出上限`);
+    if (!isNonNegInt(v)) {
+      c.reject('MONSTER_STAT_FORMAT', `${path}.${key}`, `${key} 必须是非负整数（当前 ${JSON.stringify(v)}）`);
+    } else if ((v as number) > SAVE_LIMITS.STAT_MAX) {
+      c.reject('MONSTER_STAT_RANGE', `${path}.${key}`, `${key} ${v} 超出上限 ${SAVE_LIMITS.STAT_MAX}`);
     }
   }
 
@@ -191,8 +201,10 @@ function validateMonster(m: unknown, path: string, c: ReturnType<typeof createCo
     }
     for (const stat of STAT_KEYS) {
       const v = block[stat];
-      if (!isNonNegInt(v) || (v as number) > SAVE_LIMITS.STAT_MAX) {
-        c.reject('MONSTER_STATS_VALUE', `${path}.${key}.${stat}`, `${key}.${stat} 必须是非负整数且不超出上限`);
+      if (!isNonNegInt(v)) {
+        c.reject('MONSTER_STATS_VALUE_FORMAT', `${path}.${key}.${stat}`, `${key}.${stat} 必须是非负整数（当前 ${JSON.stringify(v)}）`);
+      } else if ((v as number) > SAVE_LIMITS.STAT_MAX) {
+        c.reject('MONSTER_STATS_VALUE_RANGE', `${path}.${key}.${stat}`, `${key}.${stat} ${v} 超出上限 ${SAVE_LIMITS.STAT_MAX}`);
       }
     }
   }
@@ -263,17 +275,25 @@ export function validateSaveData(
   }
 
   // —— 顶层数值 ——
+  // 金钱分两级判定，不可合并：
+  //   FORMAT（负数 / 小数 / 非数字）→ 400 拒绝但**不封号**。脏档、旧版迁移失败、
+  //     客户端算术 bug 都会产生这种值，拿它封号会误封正常玩家（见 antiCheat.ts 白名单原则）。
+  //   RANGE（超出合法上界）→ 正常游戏逻辑不可能产生，才是改档特征，交给 antiCheat 判定封号。
   let money = 0;
-  if (!isNonNegInt(parsed.money) || (parsed.money as number) > SAVE_LIMITS.MONEY_MAX) {
-    c.reject('MONEY', 'money', `金钱必须是 0~${SAVE_LIMITS.MONEY_MAX} 的整数`);
+  if (!isNonNegInt(parsed.money)) {
+    c.reject('MONEY_FORMAT', 'money', '金钱必须是非负整数');
+  } else if ((parsed.money as number) > SAVE_LIMITS.MONEY_MAX) {
+    c.reject('MONEY_RANGE', 'money', `金钱 ${parsed.money} 超出上限 ${SAVE_LIMITS.MONEY_MAX}`);
   } else {
     money = parsed.money as number;
     if (money > SAVE_LIMITS.MONEY_WARN) {
       c.warn('MONEY_HIGH', 'money', `金钱 ${money} 偏高，疑似改档`);
     }
   }
-  if (!isNonNegInt(parsed.steps) || (parsed.steps as number) > SAVE_LIMITS.STEPS_MAX) {
-    c.reject('STEPS', 'steps', '步数必须是非负整数且不超出上限');
+  if (!isNonNegInt(parsed.steps)) {
+    c.reject('STEPS_FORMAT', 'steps', '步数必须是非负整数');
+  } else if ((parsed.steps as number) > SAVE_LIMITS.STEPS_MAX) {
+    c.reject('STEPS_RANGE', 'steps', `步数 ${parsed.steps} 超出上限 ${SAVE_LIMITS.STEPS_MAX}`);
   }
   if (parsed.playerName !== undefined) {
     if (typeof parsed.playerName !== 'string' || parsed.playerName.length > SAVE_LIMITS.PLAYER_NAME_MAX) {
@@ -321,8 +341,10 @@ export function validateSaveData(
       if (typeof key !== 'string' || key.length === 0 || key.length > SAVE_LIMITS.ID_MAX) {
         c.reject('INVENTORY_KEY', `inventory.${key}`, '道具 id 格式不正确');
       }
-      if (!isNonNegInt(value) || (value as number) > SAVE_LIMITS.ITEM_STACK_MAX) {
-        c.reject('INVENTORY_VALUE', `inventory.${key}`, `${key} 的数量必须是非负整数且不超出上限`);
+      if (!isNonNegInt(value)) {
+        c.reject('INVENTORY_VALUE_FORMAT', `inventory.${key}`, `${key} 的数量必须是非负整数（当前 ${JSON.stringify(value)}）`);
+      } else if ((value as number) > SAVE_LIMITS.ITEM_STACK_MAX) {
+        c.reject('INVENTORY_VALUE_RANGE', `inventory.${key}`, `${key} 的数量 ${value} 超出上限 ${SAVE_LIMITS.ITEM_STACK_MAX}`);
       }
     }
   }
@@ -343,8 +365,10 @@ export function validateSaveData(
           continue;
         }
         const times = entry.timesCaptured;
-        if (!isNonNegInt(times) || (times as number) > SAVE_LIMITS.TIMES_CAPTURED_MAX) {
-          c.reject('COLLECTION_TIMES', `collection.${key}.timesCaptured`, '捕获次数必须是非负整数且不超出上限');
+        if (!isNonNegInt(times)) {
+          c.reject('COLLECTION_TIMES_FORMAT', `collection.${key}.timesCaptured`, '捕获次数必须是非负整数');
+        } else if ((times as number) > SAVE_LIMITS.TIMES_CAPTURED_MAX) {
+          c.reject('COLLECTION_TIMES_RANGE', `collection.${key}.timesCaptured`, `捕获次数 ${times} 超出上限 ${SAVE_LIMITS.TIMES_CAPTURED_MAX}`);
         } else {
           totalCaptured += times as number;
           if ((times as number) > SAVE_LIMITS.TIMES_CAPTURED_WARN) {
@@ -372,8 +396,12 @@ export function validateSaveData(
   checkTimestampFormat(parsed.lastSavedAt, 'lastSavedAt');
   if (isPlainObject(parsed.idle)) {
     checkTimestampFormat(parsed.idle.startedAt, 'idle.startedAt');
-    if (parsed.idle.level !== undefined && (!isNonNegInt(parsed.idle.level) || (parsed.idle.level as number) > SAVE_LIMITS.LEVEL_MAX)) {
-      c.reject('IDLE_LEVEL', 'idle.level', '挂机区域难度等级不合法');
+    if (parsed.idle.level !== undefined) {
+      if (!isNonNegInt(parsed.idle.level)) {
+        c.reject('IDLE_LEVEL_FORMAT', 'idle.level', '挂机区域难度等级必须是整数');
+      } else if ((parsed.idle.level as number) > SAVE_LIMITS.LEVEL_MAX) {
+        c.reject('IDLE_LEVEL_RANGE', 'idle.level', `挂机区域难度等级 ${parsed.idle.level} 超出上限 ${SAVE_LIMITS.LEVEL_MAX}`);
+      }
     }
   }
   if (parsed.clearedAreas !== undefined) {
@@ -381,8 +409,13 @@ export function validateSaveData(
       c.reject('CLEARED_AREAS', 'clearedAreas', 'clearedAreas 必须是对象');
     } else {
       for (const [key, area] of Object.entries(parsed.clearedAreas)) {
-        if (!isPlainObject(area) || !isNonNegInt(area.level) || (area.level as number) > SAVE_LIMITS.LEVEL_MAX) {
-          c.reject('CLEARED_AREA_LEVEL', `clearedAreas.${key}.level`, '首通区域难度等级不合法');
+        const areaPath = `clearedAreas.${key}`;
+        if (!isPlainObject(area)) {
+          c.reject('CLEARED_AREA', areaPath, '首通区域记录必须是对象');
+        } else if (!isNonNegInt(area.level)) {
+          c.reject('CLEARED_AREA_LEVEL_FORMAT', `${areaPath}.level`, '首通区域难度等级必须是整数');
+        } else if ((area.level as number) > SAVE_LIMITS.LEVEL_MAX) {
+          c.reject('CLEARED_AREA_LEVEL_RANGE', `${areaPath}.level`, `首通区域难度等级 ${area.level} 超出上限 ${SAVE_LIMITS.LEVEL_MAX}`);
         }
       }
     }

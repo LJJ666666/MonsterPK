@@ -6,7 +6,7 @@
  *  - 结构/格式问题 → 400 且不封号（防误封）
  *  - 合法档 / 旧档 / 空档 → 200 放行
  *  - 改系统时间（未来时间戳）→ 200 且服务端钳制，绝不封号
- *  - 明确改档（满金币/高等级/负金钱/hp 越界/超队伍）→ 403 封号，
+ *  - 明确改档（满金币/高等级/超队伍）→ 403 封号；
  *    后续请求 403、重新登录 403、库里 bannedAt 与审计记录落地
  *  - 管理员账号：改档特征放行，结构错误仍 400，且自身不会被封
  *  - 解封后可正常登录写档
@@ -177,11 +177,11 @@ async function main() {
   check('GET 返回 schemaVersion 元数据', !!got.data?.schemaVersion, JSON.stringify(got.data));
 
   // ——————————————— G. 明确改档 → 403 封号（每例独立账号）———————————————
+  // 只收「合法但正常玩不到」与「容量越界」两类。格式错误见 G2，两者性质不同：
+  // 前者正常游戏逻辑不可能产生，后者脏档 / 旧版迁移 / 客户端算术 bug 都会产生。
   const cheatCases = [
     ['满金币（测试菜单级）', validSave({ money: 1_500_000 })],
     ['高等级 Lv120', (() => { const s = validSave(); s.party[0].level = 120; return s; })()],
-    ['负金钱', validSave({ money: -1 })],
-    ['hp 超过 maxHp', (() => { const s = validSave(); s.party[0].hp = 99999; return s; })()],
     ['队伍 7 只', (() => { const s = validSave(); s.party = Array(7).fill(s.party[0]); return s; })()],
   ];
   let firstBanned = null;
@@ -206,6 +206,32 @@ async function main() {
     if (!firstBanned) firstBanned = { username: u.username, id: db?.id };
   }
 
+  // ——————————————— G2. 格式错误 → 400 拒绝，不封号 ———————————————
+  // 契约（2026-11-07 起）：<FIELD>_FORMAT 只拒绝；<FIELD>_RANGE 与容量类才封号。
+  // 把「负金钱 / 小数 / hp>maxHp」这类格式脏档当作弊封号，会误封正常玩家。
+  const formatCases = [
+    ['负金钱', validSave({ money: -1 }), 'MONEY_FORMAT'],
+    ['小数金钱', validSave({ money: 1.5 }), 'MONEY_FORMAT'],
+    ['hp 超过 maxHp', (() => { const s = validSave(); s.party[0].hp = 99999; return s; })(), 'MONSTER_HP_EXCEED'],
+  ];
+  for (const [name, data, expectCode] of formatCases) {
+    const u = await freshUser(`f${formatCases.findIndex((x) => x[0] === name)}`);
+    const r = await put(u.token, data);
+    check(`格式错误 / ${name} → 400 ${expectCode}（不封号）`,
+      r.status === 400 && r.data?.code === expectCode, JSON.stringify(r.data));
+
+    const db = await prisma.user.findUnique({ where: { username: u.username } });
+    check(`格式错误 / ${name} 库里未写 bannedAt`, !db?.bannedAt, JSON.stringify(db?.bannedAt));
+    const audit = db ? await prisma.banRecord.count({ where: { userId: db.id } }) : 0;
+    check(`格式错误 / ${name} 未产生封号审计`, audit === 0, `count=${audit}`);
+
+    const ok = await put(u.token, validSave({ playerName: '正常存档' }));
+    check(`格式错误 / ${name} 之后仍可正常写档`, ok.status === 200, JSON.stringify(ok.data));
+
+    const relog = await login(u.username);
+    check(`格式错误 / ${name} 仍可正常登录`, relog.status === 200, JSON.stringify(relog.data));
+  }
+
   // ——————————————— H. 管理员：改档放行、结构仍拒绝 ———————————————
   const adm = await freshUser('adm');
   await prisma.user.update({ where: { username: adm.username }, data: { role: 'admin' } });
@@ -215,7 +241,9 @@ async function main() {
   const admMoney = await put(adm.token, validSave({ money: 1_500_000 }));
   check('管理员满金币 → 200 放行', admMoney.status === 200, JSON.stringify(admMoney.data));
   const admNegative = await put(adm.token, validSave({ money: -1 }));
-  check('管理员负金钱 → 200 放行（数值类改档特征）', admNegative.status === 200, JSON.stringify(admNegative.data));
+  // 格式脏档任何账号都不入库：管理员放行的是「数值偏高」，不是「结构损坏」。
+  check('管理员负金钱 → 400（格式脏档不入库）',
+    admNegative.status === 400 && admNegative.data?.code === 'MONEY_FORMAT', JSON.stringify(admNegative.data));
   const admBadJson = await put(adm.token, 'not-a-json');
   check('管理员非 JSON → 400（结构损坏仍拒绝）', admBadJson.status === 400, JSON.stringify(admBadJson.data));
   const admDb = await prisma.user.findUnique({ where: { username: adm.username } });

@@ -275,12 +275,18 @@ test('gainExp 给 0 经验不升级', () => {
 
 // ───────────────────────── 能力值与实例 ─────────────────────────
 
-test('getMonsterStatBounds 结构完整、数值合法（并统计区间反向的已知偏差）', (t) => {
+test('getMonsterStatBounds 区间正向、带宽达标、下限归位种族值', () => {
   const STATS = ['hp', 'atk', 'def', 'spAtk', 'spDef', 'spd'] as const;
-  let reversed = 0;
-  const samples: string[] = [];
+  const BASE_KEY = {
+    hp: 'baseHp', atk: 'baseAtk', def: 'baseDef',
+    spAtk: 'baseSpAtk', spDef: 'baseSpDef', spd: 'baseSpd',
+  } as const;
+  const reversed: string[] = [];
+  const tooNarrow: string[] = [];
+  const notBase: string[] = [];
 
   for (const specId of Object.keys(MONSTER_SPECS)) {
+    const spec = MONSTER_SPECS[specId] as any;
     const b = rules.getMonsterStatBounds(specId);
     for (const stat of STATS) {
       // 结构合法性：必须是有限正数，否则 createInstance 会生成 NaN 幻兽
@@ -288,21 +294,36 @@ test('getMonsterStatBounds 结构完整、数值合法（并统计区间反向�
       assert.ok(Number.isFinite(b.initMax[stat]) && b.initMax[stat] > 0, `${specId}.initMax.${stat} 非法：${b.initMax[stat]}`);
       assert.ok(Number.isFinite(b.gMin[stat]) && b.gMin[stat] >= 0, `${specId}.gMin.${stat} 非法：${b.gMin[stat]}`);
       assert.ok(Number.isFinite(b.gMax[stat]) && b.gMax[stat] >= 0, `${specId}.gMax.${stat} 非法：${b.gMax[stat]}`);
-      if (b.initMin[stat] > b.initMax[stat]) {
-        reversed += 1;
-        if (samples.length < 5) samples.push(`${specId}.${stat}=${b.initMin[stat]}>${b.initMax[stat]}`);
+
+      if (b.initMin[stat] > b.initMax[stat]) reversed.push(`${specId}.${stat}=${b.initMin[stat]}>${b.initMax[stat]}`);
+      if (b.initMax[stat] - b.initMin[stat] < rules.INIT_SPREAD_MIN) {
+        tooNarrow.push(`${specId}.${stat} 宽 ${b.initMax[stat] - b.initMin[stat]}`);
+      }
+      // 1 级下限必须等于种族值：这是「种族值是平均个体基准」的契约，
+      // 一旦有人再往 initMin 上叠魔法偏移，区间会重新顶翻。
+      if (b.initMin[stat] !== spec[BASE_KEY[stat]]) {
+        notBase.push(`${specId}.${stat}=${b.initMin[stat]}≠${spec[BASE_KEY[stat]]}`);
       }
     }
   }
 
-  // 已知偏差（2026-11-07 发现）：initMin 用 base+2.0~3.2 推算，而内容表的 initStatsMax
-  // 多数直接等于 base，导致 min > max、randInt 区间塌陷，个体值上限失效。
-  // 修它要改数值平衡（会让 1 级属性整体下移 2~3 点），属产品决策，故此处只诊断不判失败；
-  // 但给出上界保护：内容表再新增错误数据会立刻让本用例失败。
-  if (reversed > 0) {
-    t.diagnostic(`已知偏差：${reversed} 项 initMin > initMax，示例 ${samples.join(', ')}（待数值评审）`);
+  assert.deepEqual(reversed, [], `存在 initMin > initMax 的区间：${reversed.slice(0, 5).join(', ')}`);
+  assert.deepEqual(tooNarrow, [], `个体带宽低于 ${rules.INIT_SPREAD_MIN}：${tooNarrow.slice(0, 5).join(', ')}`);
+  assert.deepEqual(notBase, [], `initMin 未等于种族值：${notBase.slice(0, 5).join(', ')}`);
+});
+
+test('forceInitMax 生成的六维等于该种族上限（防止上限失效再次回归）', () => {
+  const STATS = ['hp', 'atk', 'def', 'spAtk', 'spDef', 'spd'] as const;
+  for (const specId of ['sprout_owl', 'spark_mouse', 'ember_marmot', 'rock_golem']) {
+    const bounds = rules.getMonsterStatBounds(specId);
+    const inst = rules.createInstance(specId, 1, seq([0.5]), { forceInitMax: true }) as any;
+    for (const stat of STATS) {
+      // hp 在 1 级时 maxHp 即 initStats.hp
+      const actual = stat === 'hp' ? inst.maxHp : inst[stat];
+      assert.equal(actual, bounds.initMax[stat], `${specId}.${stat} forceInitMax 应为 ${bounds.initMax[stat]}，实际 ${actual}`);
+      assert.equal(inst.initStats[stat], bounds.initMax[stat], `${specId}.initStats.${stat} 未取上限`);
+    }
   }
-  assert.ok(reversed <= 200, `区间反向项异常增长到 ${reversed}，疑似内容表新增错误数据`);
 });
 
 test('createInstance 生成的幻兽落在该种族的合法区间内', () => {

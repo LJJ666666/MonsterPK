@@ -195,35 +195,67 @@ test('pickUsableMove：PP 为 0 的技能不会被选中', () => {
 
 // ───────────────────────── 捕获率 ─────────────────────────
 
+/**
+ * 以「我方平均等级 = 野怪等级」调用捕获率，让 levelFactor 恒为 1，
+ * 这样其它维度的断言（HP / 状态 / 球）不受等级差干扰。等级差单独测。
+ */
+const cc = (enemy: any, baseRate: number, device = 1) =>
+  rules.captureChance(enemy, baseRate, device, enemy.level ?? 1);
+
 test('捕获率：满血时为基础率的 1/3（HP 系数公式决定）', () => {
   const enemy = makeMonster({ maxHp: 100, hp: 100, status: 'none' });
-  const chance = rules.captureChance(enemy as any, 0.3, 1);
+  const chance = cc(enemy, 0.3);
   // hpFactor = (3*maxHp - 2*hp) / (3*maxHp)，满血即 1/3
   assert.ok(Math.abs(chance - 0.1) < 1e-9, `满血应为 0.3/3=0.1，实际 ${chance}`);
 });
 
 test('捕获率：残血显著提高，且钳制在 0.95 以内', () => {
-  const full = rules.captureChance(makeMonster({ maxHp: 100, hp: 100 }) as any, 0.3, 1);
-  const low = rules.captureChance(makeMonster({ maxHp: 100, hp: 1 }) as any, 0.3, 1);
+  const full = cc(makeMonster({ maxHp: 100, hp: 100 }), 0.3);
+  const low = cc(makeMonster({ maxHp: 100, hp: 1 }), 0.3);
   assert.ok(low > full, `残血 ${low} 应高于满血 ${full}`);
   assert.ok(low <= 0.95, `捕获率不得超过 0.95，实际 ${low}`);
 
-  const master = rules.captureChance(makeMonster({ maxHp: 100, hp: 1 }) as any, 0.3, 255);
+  const master = cc(makeMonster({ maxHp: 100, hp: 1 }), 0.3, 255);
   assert.equal(master, 0.95, '大师球应吃到 0.95 上限');
 });
 
 test('捕获率：不低于 0.02 下限', () => {
-  const chance = rules.captureChance(makeMonster({ maxHp: 100, hp: 100 }) as any, 0.0001, 1);
+  const chance = cc(makeMonster({ maxHp: 100, hp: 100 }), 0.0001);
   assert.equal(chance, 0.02, `极低基础率应被钳到 0.02，实际 ${chance}`);
 });
 
 test('捕获率：异常状态提高成功率（sleep/freeze 最高）', () => {
-  const base = rules.captureChance(makeMonster({ status: 'none' }) as any, 0.2, 1);
-  const para = rules.captureChance(makeMonster({ status: 'paralyze' }) as any, 0.2, 1);
-  const sleep = rules.captureChance(makeMonster({ status: 'sleep' }) as any, 0.2, 1);
+  const base = cc(makeMonster({ status: 'none' }), 0.2);
+  const para = cc(makeMonster({ status: 'paralyze' }), 0.2);
+  const sleep = cc(makeMonster({ status: 'sleep' }), 0.2);
   assert.ok(para >= base, '麻痹不应降低捕获率');
   assert.ok(sleep > base, `睡眠 ${sleep} 应高于无状态 ${base}`);
   assert.ok(sleep > para, '睡眠加成应高于麻痹');
+});
+
+// P1-3 的两项修正在 P3-1c 迁到 game/rules.ts 时曾经丢失（只存在于已下线的
+// capture 意图里），这里把它们钉住，避免再次静默回退。
+test('捕获率：稀有度越低越难抓（baseRate < 0.25 额外打折）', () => {
+  const enemy = makeMonster({ maxHp: 100, hp: 10 });
+  const rare = cc(enemy, 0.05);
+  const normal = cc(enemy, 0.45);
+  assert.ok(rare < normal, `稀有怪 ${rare} 应低于普通怪 ${normal}`);
+
+  // 0.2 落在 0.15~0.25 档 → 额外 ×0.92，按公式验算绝对值而不是自证
+  const hpFactor = (3 * 100 - 2 * 10) / (3 * 100);
+  const mid = cc(enemy, 0.2);
+  assert.ok(Math.abs(mid - 0.2 * hpFactor * 0.92) < 1e-9, `中稀有度应打 0.92 折，实际 ${mid}`);
+});
+
+test('捕获率：越级抓更难，等级压制小幅加成且不超过 +10%', () => {
+  const enemy = makeMonster({ level: 10, maxHp: 100, hp: 10 });
+  const same = rules.captureChance(enemy as any, 0.45, 1, 10);
+  const overleveled = rules.captureChance(enemy as any, 0.45, 1, 1);
+  assert.ok(overleveled < same, `越级抓捕 ${overleveled} 必须低于同级 ${same}`);
+
+  const advantage = rules.captureChance(enemy as any, 0.45, 1, 30);
+  assert.ok(advantage > same, `等级压制 ${advantage} 应高于同级 ${same}`);
+  assert.ok(advantage <= same * 1.1 + 1e-9, `等级压制加成不得超过 10%，实际 ${advantage} / ${same}`);
 });
 
 // ───────────────────────── 经验与升级 ─────────────────────────

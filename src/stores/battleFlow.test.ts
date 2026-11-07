@@ -171,23 +171,26 @@ describe("startEncounter：开局走服务端", () => {
     expect(currentBattle()).toBeNull();
   });
 
-  it("服务端不可达（网络层失败）→ 降级本地战斗，且不带 serverId", async () => {
+  it("服务端不可达（网络层失败）→ 如实报错，不再降级本地战斗", async () => {
+    // 2026-11-07：本地降级已删除。本地战果必然被服务端增量核对拒绝，
+    // 只会留下「打完不认」和同步 400 死循环，收益为零。
+    const saveBefore = JSON.stringify(useGameStore.getState().save1);
     (api.battleStart as any).mockRejectedValue(new TypeError("Failed to fetch"));
     const res = await useGameStore.getState().startEncounter(...startArgs);
-    expect(res.ok).toBe(true);
-    const b = currentBattle();
-    expect(b?.serverId).toBeUndefined();
-    expect(b?.log.at(-1)).toContain("本地模式");
-    // 本地降级仍要标图鉴「已见」（这是 P3-1c 之前的既有行为）
-    expect(useGameStore.getState().save1?.collection.sprout_owl.seen).toBe(true);
+    expect(res.ok).toBe(false);
+    expect((res as { reason?: string }).reason ?? "").toContain("网络中断");
+    expect(currentBattle()).toBeNull();
+    // 开局失败不能偷偷写档（旧实现会给图鉴补 seen 并刷新 lastSavedAt）
+    expect(JSON.stringify(useGameStore.getState().save1)).toBe(saveBefore);
   });
 
-  it("未登录 → 直接本地战斗，不发任何请求", async () => {
+  it("未登录 → 拒绝开局，不发任何请求", async () => {
     mem.clear();
     const res = await useGameStore.getState().startEncounter(...startArgs);
-    expect(res.ok).toBe(true);
+    expect(res.ok).toBe(false);
+    expect((res as { reason?: string }).reason ?? "").toContain("尚未登录");
     expect(api.battleStart).not.toHaveBeenCalled();
-    expect(currentBattle()?.serverId).toBeUndefined();
+    expect(currentBattle()).toBeNull();
   });
 });
 

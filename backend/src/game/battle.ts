@@ -61,6 +61,16 @@ export type BattleAction =
   | { type: 'switch'; partyIndex: number }
   | { type: 'flee' };
 
+/**
+ * 队伍平均等级（含已倒下的成员），用于捕获率的等级差修正。
+ * 口径与 P1-3 的 `settlements` 实现一致，改这里不用再同步别处——那边已下线。
+ */
+export function partyAvgLevel(party: ServerMonster[]): number {
+  if (!party.length) return 1;
+  const sum = party.reduce((acc, m) => acc + m.level, 0);
+  return Math.max(1, Math.round(sum / party.length));
+}
+
 export class BattleError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -324,7 +334,7 @@ export function applyBattleAction(
       consumeItem(s, itemId, inventory);
       const spec = MONSTER_SPECS[s.enemy.specId];
       const baseRate = clamp(spec?.captureRate ?? 0.05, 0.02, 0.62);
-      const res = attemptCapture(s.enemy, baseRate, item.modifier ?? 1, rng);
+      const res = attemptCapture(s.enemy, baseRate, item.modifier ?? 1, partyAvgLevel(s.party), rng);
       const head = `抛出了 ${item.name}…（成功率 ${Math.round(res.chance * 100)}%）`;
       if (res.ok) {
         const captured: ServerMonster = {
@@ -576,5 +586,10 @@ export function previewCaptureChance(s: BattleState, itemId: string): number | n
   const item = ITEM_SPECS[itemId];
   if (!item || item.kind !== 'capture') return null;
   const spec = MONSTER_SPECS[s.enemy.specId];
-  return captureChance(s.enemy, clamp(spec?.captureRate ?? 0.05, 0.02, 0.62), item.modifier ?? 1);
+  return captureChance(
+    s.enemy,
+    clamp(spec?.captureRate ?? 0.05, 0.02, 0.62),
+    item.modifier ?? 1,
+    partyAvgLevel(s.party),
+  );
 }

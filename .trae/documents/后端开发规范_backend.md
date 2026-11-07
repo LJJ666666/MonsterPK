@@ -681,9 +681,9 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
    `lib/session.ts` 应用快照时必须传 `{ keepBattle: true }`。
    否则结算广播到达的瞬间 UI 会从战斗画面跳回「尚未开始遭遇」。
 
-3. **只有网络层失败才降级本地战斗**。`toFailure(e).transient` 判定：
-   无 `status`（fetch 失败）或 5xx → 可降级；4xx（队伍全灭、区域没怪、401、404）→ 如实报错。
-   业务拒绝还去本地开一场，会造成「服务端说打不了，客户端自己打了一场，奖励提交时被拒」。
+3. **没有任何降级**（2026-11-07 改）。战斗只有服务端一条路：未登录 / 网络不通 / 5xx
+   一律如实报错，`startEncounter` 返回「网络中断，战斗需要连接服务端」。
+   原先在 `toFailure(e).transient` 时降级本地战斗的分支已删除，原因见 §19.5。
 
 4. **动作在途不重复发**。`battle.pending` 置位期间所有按钮 disabled。
    连点两次会把同一回合打两遍（服务端按动作序列推进，不认「同一次点击」）。
@@ -709,3 +709,56 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 
 单测是 mock 掉 api 的，证明「分流写对了」；只有 `ui_smoke_p31c` 能证明整条链路活着，
 所以它不能省。改动战斗相关代码后至少跑 `npm run verify -- --only=smoke` 复查。
+
+### 19.5 为什么不做离线降级（2026-11-07 定，杰哥拍板）
+
+P3-1c 第一版留了「网络层失败 → 本地战斗」的降级。评估后删除，理由分三层：
+
+**1. 收益侧本来就走不通，但代价很实在。** 本地战斗打完会把存档改富（经验、金钱、
+捕获、首通区域），而服务端 `expected` 还是战前摘要 → `compareDigest` 判定变富 →
+400 `AUTHORITY_MISMATCH`。`classifyUploadError` 把 4xx 判为 **permanent**、不入离线队列，
+但**本地那份富档还在**：下一次、下下一次自动上传全部 400。
+玩家看到的是「打完了、UI 给了奖励、联网后档案回滚，而且之后一直同步不上」。
+这不是安全漏洞，是比漏洞更常见的数据可靠性故障。
+
+**2. 它撑不起「离线也能玩」的承诺。** 断网时意图也发不出去，奖励、捕获、首通全都无效，
+玩家实际上只能打一场不算数的仗。与其假装能玩，不如明确告知。
+
+**3. 它保留了一整套可被改写的战斗实现。** `store` 里约 550 行本地战斗逻辑（`executeMoveAction`
+/ `processEndOfTurn` / `runEnemyTurn` / `beginLocalEncounter`）是 GG 改内存最舒服的落点。
+虽然改完的收益会被服务端拒掉，但只要将来有一处同步校验放松，它就是后门；
+平时则要维护前后端两份规则（靠 `battleEngine.test.ts` 逐项对照兜着，那是成本不是资产）。
+
+**当前策略**：未登录 → 「尚未登录，战斗需要连接服务端」；网络不通 / 5xx → 「网络中断，
+战斗需要连接服务端。请检查网络后重试」。战斗中掉线不降级，用 `GET /api/battle/current`
+（`store.resumeBattle`）恢复。
+
+> 若将来真要做离线玩法，正确形态是**演练模式**：本地打、**不写存档、不给奖励**，
+> UI 明确标「演练不计进度」。不能是「本地结算 + 联网补提交」——那条路必然对不上账。
+
+### 19.6 `battle_reward` / `capture` 意图下线（同批）
+
+这两个意图是 P1-2 的产物：那时战斗在客户端跑，服务端只能采信上报的过程数据。
+`settlements.ts` 里 `battle_reward` 直接拿 `payload.enemyLevel` 算钱和经验的写法：
+
+```ts
+const enemyLevel = clamp(int(payload.enemyLevel, 1), 1, 30);
+const expGain = 10 + enemyLevel * 6;
+const moneyGain = (50 + enemyLevel * 10) * (hasAmuletCoin ? 2 : 1);
+```
+
+**没有任何「这场战斗真的发生过」的校验**，`modules/actions.ts` 里也没有战斗前置条件。
+P3-1c 之后战斗已经上移，这条链路就成了零成本刷资源的口子：任何登录账号反复
+`POST /api/actions/battle_reward { enemyLevel: 30 }` 即可每次拿 350 金币 + 190 经验，
+nonce 每次新发不触发重放。`capture` 同型（采信 `baseRate` / `enemyHp` / `enemyStatus`）。
+
+处理：从 `INTENT_TYPES` 移除、删除两个分支、删除只为其服务的 `CAPTURE_MODIFIER` /
+`computeCaptureChance` / `statusMultiplier` / `BASE_RATE_MAX`。**不留兼容开关**——
+开发阶段没有真实老客户端，「保留旧链路避免老客户端不可用」是无意义判断。
+
+同时补回一处静默回退：`computeCaptureChance` 里的**稀有度打折**与**等级差修正**（P1-3）
+在 P3-1c 迁到 `game/rules.ts::captureChance` 时没有跟过去，导致服务端战斗的捕获率
+退回「只看残血和球」。现在两项并入 `captureChance(enemy, baseRate, device, playerAvgLevel)`，
+前后端同步，`numericRules.test.ts` 用硬断言钉住（稀有度 ×0.92、等级压制上限 +10%）。
+
+**教训**：删掉一个入口之前，先确认它承载的规则有没有别的落点。这次差点连规则一起删了。

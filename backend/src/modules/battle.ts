@@ -6,8 +6,9 @@
  * 战斗结束由服务端把结果写回存档并广播（source='battle'）。
  *
  * 与 P1-2 的关系：P1-2 是「客户端跑完再上报，服务端核对增量」；
- * 本模块把过程也接管了，`battle_reward` / `capture` 意图在服务端战斗路径下不再需要，
- * 但旧链路保留，避免一次性切换导致老客户端不可用。
+ * 本模块把过程也接管了。`battle_reward` / `capture` 意图已于 2026-11-07 从
+ * `settlements.ts` 删除——它们采信客户端上报的 `enemyLevel` / `baseRate`，
+ * 战斗上移后等于零成本刷奖励的口子，不再保留兼容开关。
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';

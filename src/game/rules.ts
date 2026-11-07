@@ -427,14 +427,36 @@ export function createInstance(specId: string, level: number, forceShiny?: boole
   };
 }
 
-export function captureChance(enemy: MonsterInstance, baseRate: number, deviceModifier: number) {
+/**
+ * 捕获率 = 基础率 × 残血 × 异常 × 球倍率 × 稀有度 × 等级差。
+ *
+ * 与 `backend/src/game/rules.ts::captureChance` 必须逐项一致，由
+ * `backend/tests/battleEngine.test.ts` 强制对照。P3-1c 之后前端不再参与捕获判定，
+ * 这里保留作规则真值参照（瘦终端重构时再统一收口）。
+ */
+export function captureChance(
+  enemy: MonsterInstance,
+  baseRate: number,
+  deviceModifier: number,
+  playerAvgLevel: number,
+) {
   const hpFactor = (3 * enemy.maxHp - 2 * enemy.hp) / (3 * enemy.maxHp);
-  const chance = baseRate * hpFactor * statusMultiplier(enemy.status) * deviceModifier;
+  const rarity = baseRate < 0.15 ? 0.85 : baseRate < 0.25 ? 0.92 : 1;
+  const diff = enemy.level - playerAvgLevel;
+  const levelFactor =
+    diff > 0 ? clamp(1 - diff * 0.02, 0.6, 1) : clamp(1 + Math.min(-diff, 10) * 0.01, 1, 1.1);
+  const chance =
+    baseRate * hpFactor * statusMultiplier(enemy.status) * deviceModifier * rarity * levelFactor;
   return clamp(chance, 0.02, 0.95);
 }
 
-export function attemptCapture(enemy: MonsterInstance, baseRate: number, deviceModifier: number) {
-  const chance = captureChance(enemy, baseRate, deviceModifier);
+export function attemptCapture(
+  enemy: MonsterInstance,
+  baseRate: number,
+  deviceModifier: number,
+  playerAvgLevel: number,
+) {
+  const chance = captureChance(enemy, baseRate, deviceModifier, playerAvgLevel);
   const shakes = chance > 0.7 ? 3 : chance > 0.45 ? 2 : 1;
   const ok = roll(chance);
   return { ok, chance, shakes };

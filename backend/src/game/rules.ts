@@ -519,9 +519,31 @@ export function createInstance(
 
 // —— 捕获：基础率来自服务端内容表，客户端只报「用哪个球」 ——
 
-export function captureChance(enemy: ServerMonster, baseRate: number, deviceModifier: number): number {
+/**
+ * 捕获率 = 基础率 × 残血 × 异常 × 球倍率 × 稀有度 × 等级差。
+ *
+ * ⚠️ 历史：稀有度与等级差原本只写在 P1-2 的 `capture` 意图里（settlements.ts），
+ * P3-1c 把战斗搬上服务端后走的是本函数，两项修正一度**静默丢失**——服务端战斗
+ * 的捕获率退回「只看残血和球」。2026-11-07 补齐并让 `capture` 意图下线，
+ * 公式从此只有这一份，不再有两处实现漂移的可能。
+ *
+ * `playerAvgLevel` 由调用方按队伍（含倒下成员）平均等级传入，不采信客户端上报。
+ */
+export function captureChance(
+  enemy: ServerMonster,
+  baseRate: number,
+  deviceModifier: number,
+  playerAvgLevel: number,
+): number {
   const hpFactor = (3 * enemy.maxHp - 2 * enemy.hp) / (3 * enemy.maxHp);
-  const chance = baseRate * hpFactor * statusMultiplier(enemy.status) * deviceModifier;
+  // 稀有度：基础率越低（越稀有）额外打折
+  const rarity = baseRate < 0.15 ? 0.85 : baseRate < 0.25 ? 0.92 : 1;
+  // 等级差：野怪高于我方平均等级时逐级降低，反之小幅加成（最多 +10%）
+  const diff = enemy.level - playerAvgLevel;
+  const levelFactor =
+    diff > 0 ? clamp(1 - diff * 0.02, 0.6, 1) : clamp(1 + Math.min(-diff, 10) * 0.01, 1, 1.1);
+  const chance =
+    baseRate * hpFactor * statusMultiplier(enemy.status) * deviceModifier * rarity * levelFactor;
   return clamp(chance, 0.02, 0.95);
 }
 
@@ -529,9 +551,10 @@ export function attemptCapture(
   enemy: ServerMonster,
   baseRate: number,
   deviceModifier: number,
+  playerAvgLevel: number,
   rng: Rng,
 ): { ok: boolean; chance: number; shakes: number } {
-  const chance = captureChance(enemy, baseRate, deviceModifier);
+  const chance = captureChance(enemy, baseRate, deviceModifier, playerAvgLevel);
   const shakes = chance > 0.7 ? 3 : chance > 0.45 ? 2 : 1;
   return { ok: roll(chance, rng), chance, shakes };
 }

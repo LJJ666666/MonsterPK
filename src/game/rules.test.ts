@@ -23,8 +23,8 @@ describe("rules", () => {
     const e1 = { ...createInstance("tide_newt", 5), hp: 40, status: "none" as const };
     const e2 = { ...createInstance("tide_newt", 5), hp: 5, status: "sleep" as const };
     const base = MONSTER_SPECS[e1.specId].captureRate;
-    const c1 = captureChance(e1, base, 1);
-    const c2 = captureChance(e2, base, 1);
+    const c1 = captureChance(e1, base, 1, e1.level);
+    const c2 = captureChance(e2, base, 1, e2.level);
     expect(c2).toBeGreaterThan(c1);
     expect(c1).toBeGreaterThanOrEqual(0.02);
     expect(c2).toBeLessThanOrEqual(0.95);

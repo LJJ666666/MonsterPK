@@ -10,15 +10,21 @@
  * 整包存档仍是过渡载体，战斗中间态（HP/PP/状态）不在存档里、由客户端持有。
  * 精确增量让服务端只裁决资源与随机，不打断现有战斗流程；P3 上服务端模拟后再彻底换成瘦终端。
  *
- * 内容真值说明：道具价格/捕获器倍率在这里由服务端持有（经济安全必需）；
- * 幻兽 captureRate 的 ID 真值校验留 P3（服务端持有完整内容表时），
- * 当前对客户端上报的 baseRate 做上界钳制，避免伪造「必中怪」。
+ * 内容真值说明：道具价格/捕获器倍率在这里由服务端持有（经济安全必需）。
+ *
+ * ⚠️ 2026-11-07 下线 `capture` / `battle_reward` 两个意图：
+ *   P1-2 时代战斗在客户端跑，服务端只能采信上报的 `enemyLevel` / `baseRate`
+ *   （最多钳一下上界）来裁决奖励与捕获。P3-1c 战斗过程整体上移后，这两个接口
+ *   变成「不用打就能领奖」的直通车——任何登录账号反复 POST `battle_reward`
+ *   即可刷金币与经验，且 nonce 每次新发、不触发重放检测。
+ *   现在奖励与捕获都由 `game/battle.ts` 的 `applySettlement` 在真实战斗结束时写入，
+ *   这两条链路不再有任何生产调用方，直接删除，不留兼容开关。
  */
 import { digestOf, type ResourceDigest, type DigestViolation, type AuthorityState } from './authority';
 
 export const INTENT_TYPES = [
   'idle_start', 'idle_claim', 'idle_cancel',
-  'capture', 'battle_reward', 'shop_buy', 'admin_test',
+  'shop_buy', 'admin_test',
 ] as const;
 export type IntentType = (typeof INTENT_TYPES)[number];
 
@@ -64,17 +70,12 @@ export const ITEM_PRICES: Record<string, number> = {
   amulet_coin: 10000, exp_share: 50000,
 };
 
-export const CAPTURE_MODIFIER: Record<string, number> = {
-  capsule_basic: 1, capsule_prism: 1.5, capsule_ultra: 2, capsule_master: 255,
-};
-
 /** 服务端挂机参数（与 src/game/idle.ts 一致）。 */
 export const IDLE_CAP_MINUTES = 8 * 60;
 const CAPSULE_ROLL_MINUTES = 20;
 const CAPSULE_DROP_CHANCE = 0.15;
 const IDLE_MONEY_BASE = 1.5;
 const IDLE_MONEY_PER_LEVEL = 0.15;
-const BASE_RATE_MAX = 0.62; // 内容表里最大 captureRate，防客户端伪造「必中怪」
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
@@ -84,39 +85,6 @@ function int(v: unknown, fallback = 0): number {
 }
 function parseSave(raw: string): any {
   try { return JSON.parse(raw); } catch { return null; }
-}
-
-/** 异常状态对捕获率的加成（与 rules.ts::statusMultiplier 一致）。 */
-function statusMultiplier(status: unknown): number {
-  if (status === 'sleep' || status === 'freeze') return 2;
-  if (status === 'paralyze') return 1.5;
-  if (status === 'burn' || status === 'poison') return 1.4;
-  return 1;
-}
-
-/**
- * 捕获率公式（P1-3）：在原有「基础率 × 残血 × 异常 × 球倍率」上补两项：
- *  - 稀有度：baseRate 越低（越稀有）额外打折；
- *  - 等级差：野怪等级高于我方平均等级时逐级降低，反之小幅加成。
- * 玩家平均等级从服务端存档算，不采信客户端上报。
- */
-export function computeCaptureChance(args: {
-  baseRate: number;
-  hp: number;
-  maxHp: number;
-  status?: unknown;
-  itemId: string;
-  enemyLevel: number;
-  playerAvgLevel: number;
-}): number {
-  const maxHp = Math.max(1, args.maxHp);
-  const hp = clamp(args.hp, 0, maxHp);
-  const hpFactor = (3 * maxHp - 2 * hp) / (3 * maxHp);
-  const rarity = args.baseRate < 0.15 ? 0.85 : args.baseRate < 0.25 ? 0.92 : 1;
-  const diff = args.enemyLevel - args.playerAvgLevel;
-  const levelFactor = diff > 0 ? clamp(1 - diff * 0.02, 0.6, 1) : clamp(1 + Math.min(-diff, 10) * 0.01, 1, 1.1);
-  const device = CAPTURE_MODIFIER[args.itemId] ?? 1;
-  return clamp(args.baseRate * hpFactor * statusMultiplier(args.status) * device * rarity * levelFactor, 0.02, 0.95);
 }
 
 /** 服务端挂机结算：时钟与 RNG 都在这里，客户端 idle.startedAt 完全不参与。 */
@@ -207,60 +175,12 @@ export function decideIntent(type: IntentType, payload: Record<string, unknown>,
     return { ok: true, pending: base };
   }
 
-  // —— b 捕获：RNG 在服务端，客户端伪造「成功」会在增量核对处被拒 ——
-  if (type === 'capture') {
-    const itemId = typeof payload.itemId === 'string' ? payload.itemId : '';
-    if (!(itemId in CAPTURE_MODIFIER)) return { ok: false, reason: '无效的捕获道具' };
-    if ((inv[itemId] ?? 0) < 1) return { ok: false, reason: '捕获道具不足' };
-    const maxHp = int(payload.enemyMaxHp, 0);
-    if (maxHp < 1) return { ok: false, reason: '野怪数据不合法' };
-    const party: any[] = Array.isArray(save.party) ? save.party : [];
-    const avgLevel = party.length
-      ? Math.max(1, Math.round(party.reduce((s, m) => s + (typeof m?.level === 'number' ? m.level : 1), 0) / party.length))
-      : 1;
-    const chance = computeCaptureChance({
-      baseRate: clamp(typeof payload.baseRate === 'number' ? payload.baseRate : 0.05, 0.02, BASE_RATE_MAX),
-      hp: int(payload.enemyHp, maxHp),
-      maxHp,
-      status: payload.enemyStatus,
-      itemId,
-      enemyLevel: clamp(int(payload.enemyLevel, 1), 1, 30),
-      playerAvgLevel: avgLevel,
-    });
-    const ok = ctx.rng() < chance;
-    const shakes = chance > 0.7 ? 3 : chance > 0.45 ? 2 : 1;
-    base.allow.exact = {
-      money: 0,
-      inventory: { [itemId]: -1 },
-      rosterCount: ok ? 1 : 0,
-      totalCaptured: ok ? 1 : 0,
-    };
-    base.allow.max = { clearedAreas: typeof payload.areaId === 'string' ? [payload.areaId] : [] };
-    base.result = { ok, chance, shakes, itemId };
-    return { ok: true, pending: base };
-  }
+  // —— b 捕获与战斗奖励已下线（2026-11-07）——
+  // 两者原本都采信客户端上报的过程数据（baseRate / enemyLevel），战斗上移后
+  // 成了零成本刷资源的口子。捕获与奖励现在只在 `game/battle.ts` 的真实战斗
+  // 结算里产生，这里不再提供意图入口。
 
-  // —— c 经济：战斗奖励与商店购买；P1-3 关键道具效果落在这里 ——
-  if (type === 'battle_reward') {
-    const enemyLevel = clamp(int(payload.enemyLevel, 1), 1, 30);
-    const expGain = 10 + enemyLevel * 6;
-    const hasAmuletCoin = (inv.amulet_coin ?? 0) > 0;
-    const hasExpShare = (inv.exp_share ?? 0) > 0;
-    const moneyGain = (50 + enemyLevel * 10) * (hasAmuletCoin ? 2 : 1);
-    const ids = Array.isArray(payload.monsterIds)
-      ? payload.monsterIds.filter((x): x is string => typeof x === 'string')
-      : [];
-    const levelExp: Record<string, [number, number]> = {};
-    for (const id of ids) levelExp[id] = [Math.ceil(expGain / 50) + 1, expGain + 16 + enemyLevel * 18 + 200];
-    base.allow.exact = { money: moneyGain, rosterCount: 0, totalCaptured: 0 };
-    base.allow.max = {
-      levelExp,
-      clearedAreas: typeof payload.areaId === 'string' ? [payload.areaId] : [],
-    };
-    base.result = { expGain, moneyGain, hasAmuletCoin, hasExpShare };
-    return { ok: true, pending: base };
-  }
-
+  // —— c 经济：商店购买；价格表由服务端持有 ——
   if (type === 'shop_buy') {
     const itemId = typeof payload.itemId === 'string' ? payload.itemId : '';
     const price = ITEM_PRICES[itemId];

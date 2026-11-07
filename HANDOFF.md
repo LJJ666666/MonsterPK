@@ -163,12 +163,12 @@ python scripts/check_home_env.py          # ENV_CHECK_OK（[WARN] 按提示处�
 python scripts/doc_check.py               # DOC_CHECK_OK
 python scripts/sync_memory.py --check     # [一致] 且两侧 sha256 相同
 npm run check && npm test                 # 前端 0 错误 / 81 passed
-cd backend && npm run check && npm test   # 后端 0 错误 / 162 passed
+cd backend && npm run check && npm test   # 后端 0 错误 / 160 passed
 cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 
 # B. 需要服务已起（后端 3001 + 前端 5173）
 cd backend && npm run e2e               # 62/62 E2E_OK
-cd backend && npm run e2e:p12           # 38/38 E2E_P12_OK
+cd backend && npm run e2e:p12           # 30/30 E2E_P12_OK（capture/battle_reward 已下线）
 cd backend && npm run e2e:p21           # 34/34 E2E_P21_OK
 cd backend && npm run e2e:p22           # 24/24 E2E_P22_OK（在线权威态）
 cd backend && npm run e2e:p31           # 48/48 E2E_P31_OK（服务端战斗 + P3-1c 契约）

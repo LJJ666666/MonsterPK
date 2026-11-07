@@ -109,23 +109,26 @@ test('伤害公式：同随机序列下与前端逐个数值相等', () => {
   }
 });
 
-test('捕获率：与前端同公式（含异常状态加成）', () => {
+test('捕获率：与前端同公式（含异常状态与等级差）', () => {
   const enemy = serverMonster('sprout_owl', 8);
   for (const status of ['none', 'sleep', 'paralyze', 'burn'] as const) {
     const e = { ...enemy, status };
-    const a = client.captureChance(e as any, 0.3, 1.5);
-    const b = server.captureChance(e as any, 0.3, 1.5);
-    assert.ok(Math.abs(a - b) < 1e-9, `状态 ${status} 捕获率不一致：${a} / ${b}`);
+    for (const avg of [5, 8, 20]) {
+      const a = client.captureChance(e as any, 0.3, 1.5, avg);
+      const b = server.captureChance(e as any, 0.3, 1.5, avg);
+      assert.ok(Math.abs(a - b) < 1e-9, `状态 ${status} / 均级 ${avg} 捕获率不一致：${a} / ${b}`);
+    }
   }
 });
 
-test('奖励公式：与 P1-2 的 battle_reward 裁决一致', () => {
+test('奖励公式：与 P1-2 的 battle_reward 口径一致（该意图已下线，公式仍是同一个）', () => {
   const levels = [1, 5, 12, 30];
   for (const lv of levels) {
     const plain = computeRewards(lv, {});
     assert.equal(plain.expGain, 10 + lv * 6);
     assert.equal(plain.moneyGain, 50 + lv * 10);
-    // settlements.ts 的 battle_reward：exp=10+lv*6，money=(50+lv*10)*(护符?2:1)
+    // 旧 battle_reward 意图用的是同一组常量：exp=10+lv*6，money=(50+lv*10)*(护符?2:1)。
+    // 意图已在 2026-11-07 删除，这里保留常量对照，防止有人在 applySettlement 里另起一套公式。
     const withAmulet = computeRewards(lv, { amulet_coin: 1 });
     assert.equal(withAmulet.moneyGain, (50 + lv * 10) * 2);
     assert.equal(withAmulet.hasAmuletCoin, true);

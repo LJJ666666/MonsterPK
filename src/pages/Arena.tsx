@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import PixelButton from "@/components/PixelButton";
 import PixelCard from "@/components/PixelCard";
 import StatBar from "@/components/StatBar";
-import { ELEMENT_COLORS, ELEMENT_LABEL, ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS } from "@/game/data";
-import type { ItemId, Element } from "@/game/types";
+import { ELEMENT_COLORS, ELEMENT_LABEL, ITEM_SPECS, MOVE_SPECS } from "@/game/data";
+import type { ItemId } from "@/game/types";
 import { useGameStore } from "@/stores/useGameStore";
 import { requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 
@@ -23,12 +23,16 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   const navigate = useNavigate();
   const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, resumeBattle } = useGameStore();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
+  // 开局失败（断网 / 未登录 / 队伍全灭）要如实告知：现在没有本地降级，
+  // 静默返回会让玩家以为按钮坏了。
+  const [startError, setStartError] = useState<string | null>(null);
 
   const saves = [save1, save2, save3];
   const save = saves[slot - 1];
 
   // P3-1c：我方队伍以服务端下发的战斗副本为准——战斗内的 HP / 经验只存在于那份副本里，
-  // 存档要等结算才更新。本地降级战斗没有 serverParty，回落到存档队伍。
+  // 存档要等结算才更新。本地降级已删除（2026-11-07），`?? save?.party` 只是服务端
+  // 漏发字段时的兜底，正常路径永远走 serverParty。
   const party = battle?.serverParty ?? save?.party ?? [];
   const active = battle ? party[battle.playerActiveIndex] ?? null : null;
 
@@ -89,11 +93,18 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
         <PixelCard title="训练场">
           <div className="space-y-4 text-sm text-[color:var(--muted)]">
             <div>尚未开始遭遇。你可以从营地进入训练场，或在此快速开始一场草地遭遇。</div>
+            {startError ? (
+              <div className="border-2 border-[color:var(--danger)] px-3 py-2 text-xs text-[color:var(--danger)]">
+                {startError}
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <PixelButton
                 onClick={async () => {
+                  setStartError(null);
                   const res = await startEncounter("grass", "测试草地", 1, 5);
-                  if (!res.ok) return;
+                  // strict:false 下判别联合不会自动收窄（bug_log §18），显式取
+                  if (!res.ok) setStartError((res as { reason?: string }).reason ?? "无法开始战斗");
                 }}
               >
                 快速开始（草地）
@@ -108,8 +119,6 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
     );
   }
 
-  const enemySpec = MONSTER_SPECS[battle.enemy.specId];
-  const playerSpec = MONSTER_SPECS[active.specId];
   const activePP = battle.ppByMonster?.[active.id] ?? {};
 
   return (
@@ -316,12 +325,17 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                     <PixelButton
                       tone="primary"
                       onClick={async () => {
+                        setStartError(null);
                         const res = await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
                         if (res.ok) setPanel("moves");
+                        else setStartError((res as { reason?: string }).reason ?? "无法开始战斗");
                       }}
                     >
                       继续探索
                     </PixelButton>
+                    {startError ? (
+                      <div className="w-full text-xs text-[color:var(--danger)]">{startError}</div>
+                    ) : null}
                   </>
                 )}
               </div>

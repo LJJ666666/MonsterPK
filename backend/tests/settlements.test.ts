@@ -6,8 +6,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { digestOf, freshAuthority, type AuthorityState } from '../src/lib/authority.ts';
 import {
-  computeCaptureChance, settleIdleServer, decideIntent, checkIntentDelta,
-  ITEM_PRICES, type DecisionContext,
+  settleIdleServer, decideIntent, checkIntentDelta,
+  ITEM_PRICES, INTENT_TYPES, type DecisionContext,
 } from '../src/lib/settlements.ts';
 
 const NOW = Date.parse('2026-11-06T06:00:00.000Z');
@@ -50,20 +50,8 @@ function delta(base: ReturnType<typeof digestOf>, patch: Partial<ReturnType<type
   return { ...base, ...patch };
 }
 
-// —— P1-3 捕获率公式 ——
-test('computeCaptureChance：稀有怪更难抓、越级抓更难、等级压制有小幅加成', () => {
-  const common = { hp: 10, maxHp: 100, itemId: 'capsule_basic', enemyLevel: 10, playerAvgLevel: 10 };
-  const rare = computeCaptureChance({ ...common, baseRate: 0.05 });
-  const normal = computeCaptureChance({ ...common, baseRate: 0.45 });
-  assert.ok(rare < normal, '稀有度必须额外打折');
-  const overleveled = computeCaptureChance({ ...common, baseRate: 0.45, enemyLevel: 30 });
-  assert.ok(overleveled < normal, '越级抓捕必须降低成功率');
-  const advantage = computeCaptureChance({ ...common, baseRate: 0.45, playerAvgLevel: 30 });
-  assert.ok(advantage > normal, '等级压制应有小幅加成');
-  assert.ok(computeCaptureChance({ ...common, baseRate: 0.45, status: 'sleep' }) > normal);
-  assert.ok(computeCaptureChance({ ...common, baseRate: 0.45, hp: 100 }) < normal, '满血更难抓');
-  assert.ok(computeCaptureChance({ ...common, baseRate: 0.45, itemId: 'capsule_master' }) <= 0.95);
-});
+// 捕获率公式已随 `capture` 意图下线迁到 game/rules.ts，
+// 对应单测在 numericRules.test.ts 的「捕获率公式」一节。
 
 // —— a 挂机：服务端时钟 + 服务端 RNG ——
 test('settleIdleServer：8 小时封顶、RNG 可注入', () => {
@@ -105,69 +93,25 @@ test('idle_start 的提交：增量核对要求存档写入同一个区域与难
   assert.ok(checkIntentDelta(p.baseDigest, forged, p).some((v) => v.code === 'DELTA_IDLE'));
 });
 
-// —— b 捕获：RNG 在服务端 + 伪造成功无效 ——
-test('capture：服务端掷骰，成功/失败都下发明确结果', () => {
-  const payload = {
-    itemId: 'capsule_basic', enemySpecId: 'x', enemyLevel: 10,
-    enemyHp: 5, enemyMaxHp: 100, enemyStatus: 'none', baseRate: 0.45, areaId: 'area_a',
-  };
-  const win = decideIntent('capture', payload, ctx({ rng: () => 0 }));
-  assert.equal(win.pending?.result?.ok, true);
-  assert.equal(win.pending?.allow.exact?.rosterCount, 1);
-  assert.equal(win.pending?.allow.exact?.inventory?.capsule_basic, -1);
-  const lose = decideIntent('capture', payload, ctx({ rng: () => 0.999999 }));
-  assert.equal(lose.pending?.result?.ok, false);
-  assert.equal(lose.pending?.allow.exact?.rosterCount, 0);
+// —— b 捕获与战斗奖励已下线（2026-11-07）——
+// 两者原先都采信客户端上报的过程数据（baseRate / enemyLevel），战斗上移后
+// 等于零成本刷资源。奖励与捕获现在只由 game/battle.ts 的真实战斗结算产生。
+test('capture / battle_reward 意图已下线，直接调用一律拒绝', () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ['capture', { itemId: 'capsule_basic', enemyLevel: 10, enemyHp: 5, enemyMaxHp: 100, baseRate: 0.45 }],
+    ['battle_reward', { enemyLevel: 30, areaId: 'area_a', monsterIds: ['m1'] }],
+  ];
+  for (const [type, payload] of cases) {
+    const r: any = decideIntent(type as any, payload, ctx({ rng: () => 0 }));
+    assert.equal(r.ok, false, `${type} 不该再被接受`);
+    assert.equal(r.pending, undefined, `${type} 不该再产出授权`);
+    assert.match(String(r.reason), /未知的操作类型/);
+  }
 });
 
-test('capture：客户端把「失败」伪造成成功会被增量核对拒绝', () => {
-  const payload = {
-    itemId: 'capsule_basic', enemyLevel: 10, enemyHp: 5, enemyMaxHp: 100,
-    enemyStatus: 'none', baseRate: 0.45,
-  };
-  const p = decideIntent('capture', payload, ctx({ rng: () => 0.999999 })).pending!;
-  const base = p.baseDigest;
-  const forged = delta(base, {
-    inventory: { ...base.inventory, capsule_basic: base.inventory.capsule_basic - 1 },
-    rosterCount: base.rosterCount + 1,
-    totalCaptured: base.totalCaptured + 1,
-  });
-  const violations = checkIntentDelta(base, forged, p);
-  assert.ok(violations.some((v) => v.code === 'DELTA_ROSTER'), '伪造捕获必须被拒');
-  assert.ok(violations.some((v) => v.code === 'DELTA_CAPTURE'));
-});
-
-test('capture：伪造 baseRate 被钳制到内容表上限', () => {
-  const payload = {
-    itemId: 'capsule_basic', enemyLevel: 10, enemyHp: 100, enemyMaxHp: 100,
-    enemyStatus: 'none', baseRate: 99,
-  };
-  const r = decideIntent('capture', payload, ctx({ rng: () => 0.999999 }));
-  const upper = computeCaptureChance({
-    baseRate: 0.62, hp: 100, maxHp: 100, itemId: 'capsule_basic',
-    enemyLevel: 10, playerAvgLevel: 10,
-  });
-  assert.ok((r.pending?.result?.chance as number) <= upper + 1e-9);
-});
-
-test('capture：没有球时直接拒绝，不掷骰', () => {
-  const r = decideIntent('capture', { itemId: 'capsule_basic', enemyMaxHp: 100, enemyHp: 5, baseRate: 0.45 }, ctx({ dbSaveRaw: raw({ inventory: {} }) }));
-  assert.equal(r.ok, false);
-});
-
-// —— c 经济：服务端奖励 + P1-3 关键道具 ——
-test('battle_reward：护符金币翻倍、学习装置给全队授权', () => {
-  const payload = { enemyLevel: 10, areaId: 'area_a', monsterIds: ['m1', 'm2'] };
-  const plain = decideIntent('battle_reward', payload, ctx());
-  assert.equal(plain.pending?.result?.moneyGain, 150);
-  assert.equal(plain.pending?.result?.hasAmuletCoin, false);
-  const withItems = decideIntent('battle_reward', payload, ctx({
-    dbSaveRaw: raw({ inventory: { capsule_basic: 6, potion_small: 3, amulet_coin: 1, exp_share: 1 } }),
-  }));
-  assert.equal(withItems.pending?.result?.moneyGain, 300, 'amulet_coin 让战斗金钱翻倍');
-  assert.equal(withItems.pending?.result?.hasExpShare, true);
-  assert.ok(withItems.pending?.allow.max?.levelExp?.m1);
-  assert.ok(withItems.pending?.allow.max?.levelExp?.m2);
+test('capture / battle_reward 不在意图白名单里（防止有人重新加回去）', () => {
+  assert.equal(INTENT_TYPES.includes('capture' as any), false);
+  assert.equal(INTENT_TYPES.includes('battle_reward' as any), false);
 });
 
 test('shop_buy：价格取服务端表，客户端改价无效；金币不足拒绝', () => {
@@ -216,13 +160,19 @@ test('checkIntentDelta：多 1 金币也拒绝，未授权的资源增量一律�
   }), p).some((v) => v.code === 'DELTA_ITEM'));
 });
 
-test('捕获成功提交：新增幻兽 id 不应被等级/经验上限误拦', () => {
-  const payload = {
-    itemId: 'capsule_basic', enemyLevel: 10, enemyHp: 5, enemyMaxHp: 100,
-    enemyStatus: 'none', baseRate: 0.45, areaId: 'area_a',
+test('增量核对：新增幻兽 id 不应被等级/经验上限误拦', () => {
+  // capture 意图已下线（真实捕获只走服务端战斗结算），但这条核对语义仍要守住：
+  // allow.max.levelExp 里没列出的新 id 不能被当成「超上限」拦掉，
+  // 否则服务端结算出来的新幻兽会在校验处被打回。
+  const base = digestOf(raw());
+  const p: any = {
+    nonce: 'n-new-roster', type: 'capture', createdAtMs: 0, baseDigest: base,
+    allow: {
+      exact: { money: 0, inventory: { capsule_basic: -1 }, rosterCount: 1, totalCaptured: 1 },
+      max: { levelExp: {} },
+    },
+    result: {},
   };
-  const p = decideIntent('capture', payload, ctx({ rng: () => 0 })).pending!;
-  const base = p.baseDigest;
   const good = delta(base, {
     inventory: { ...base.inventory, capsule_basic: base.inventory.capsule_basic - 1 },
     rosterCount: base.rosterCount + 1,

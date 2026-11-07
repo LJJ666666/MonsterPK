@@ -145,29 +145,26 @@ async function main() {
   const oldNonceCommit = await put(mainUser.token, Object.assign(clone(goodBuy), { money: 500 }), { intentNonce: nBuy });
   check('旧 nonce 再次提交加钱 → 400', oldNonceCommit.status === 400, JSON.stringify(oldNonceCommit.data));
 
-  // ————— C. 战斗奖励 + P1-3 关键道具 —————
+  // ————— C. battle_reward / capture 意图已下线（2026-11-07）—————
+  // P1-2 时代战斗在客户端跑，服务端只能采信上报的 enemyLevel / baseRate。
+  // P3-1c 战斗上移后这两个接口等于「不用打就能领奖」，已从 INTENT_TYPES 删除。
+  // 这里守住删除结果：任何人再来调都必须被挡在 schema 校验层。
   const plainUser = await freshUser('reward');
-  const nReward = newNonce();
   const reward = await intent(plainUser.token, 'battle_reward',
-    { enemyLevel: 10, areaId: 'area_a', monsterIds: ['abc123'] }, plainUser.baseline, nReward);
-  check('战斗奖励由服务端按等级算（10 级 → ¥150）',
-    reward.status === 200 && reward.data?.result?.moneyGain === 150, JSON.stringify(reward.data));
-  const rewardSave = clone(plainUser.baseline);
-  rewardSave.money += 150;
-  check('奖励提交 → 200', (await put(plainUser.token, rewardSave, { intentNonce: nReward })).status === 200);
+    { enemyLevel: 30, areaId: 'area_a', monsterIds: ['abc123'] }, plainUser.baseline, newNonce());
+  check('battle_reward 已下线 → 400 未知的操作类型',
+    reward.status === 400 && /未知的操作类型/.test(String(reward.data?.error)), JSON.stringify(reward.data));
 
-  const itemBaseline = validSave({ inventory: { capsule_basic: 6, potion_small: 3, amulet_coin: 1, exp_share: 1 } });
-  const itemUser = await freshUser('items', itemBaseline);
-  const nItems = newNonce();
-  const items = await intent(itemUser.token, 'battle_reward',
-    { enemyLevel: 10, areaId: 'area_a', monsterIds: ['abc123', 'm2'] }, itemBaseline, nItems);
-  check('amulet_coin 让战斗金钱翻倍 → ¥300',
-    items.data?.result?.moneyGain === 300 && items.data?.result?.hasAmuletCoin === true, JSON.stringify(items.data));
-  check('exp_share 让全队获得经验授权',
-    items.data?.result?.hasExpShare === true, JSON.stringify(items.data));
-  const itemsSave = clone(itemBaseline);
-  itemsSave.money += 300;
-  check('关键道具奖励提交 → 200', (await put(itemUser.token, itemsSave, { intentNonce: nItems })).status === 200);
+  const rewardRetry = await intent(plainUser.token, 'battle_reward',
+    { enemyLevel: 30, areaId: 'area_a', monsterIds: ['abc123'] }, plainUser.baseline, newNonce());
+  check('换新 nonce 重试仍 400（是类型下线，不是重放拦截）',
+    rewardRetry.status === 400 && /未知的操作类型/.test(String(rewardRetry.data?.error)), JSON.stringify(rewardRetry.data));
+
+  const captureGone = await intent(plainUser.token, 'capture',
+    { itemId: 'capsule_basic', enemyLevel: 30, enemyHp: 1, enemyMaxHp: 100, baseRate: 0.62 },
+    plainUser.baseline, newNonce());
+  check('capture 已下线 → 400（伪造 baseRate 的路子关闭）',
+    captureGone.status === 400 && /未知的操作类型/.test(String(captureGone.data?.error)), JSON.stringify(captureGone.data));
 
   // ————— D. 挂机：服务端时钟，改系统时间不生效且不封号 —————
   const idleUser = await freshUser('idle');
@@ -199,42 +196,10 @@ async function main() {
   const idleMe = await me(idleUser.token);
   check('改系统时间不封号', idleMe.status === 200 && idleMe.data?.banned === false, JSON.stringify(idleMe.data));
 
-  // ————— E. 捕获：RNG 在服务端，伪造结果无效 —————
-  const capUser = await freshUser('capture');
-  const capturePayload = {
-    itemId: 'capsule_basic', enemySpecId: 'sprout_owl', enemyLevel: 10,
-    enemyHp: 5, enemyMaxHp: 100, enemyStatus: 'none', baseRate: 0.45, areaId: 'area_a',
-  };
-  const nCap = newNonce();
-  const cap = await intent(capUser.token, 'capture', capturePayload, capUser.baseline, nCap);
-  check('捕获裁决 200 且返回服务端结果',
-    cap.status === 200 && typeof cap.data?.result?.ok === 'boolean' && typeof cap.data?.result?.chance === 'number',
-    JSON.stringify(cap.data));
-  const lied = clone(capUser.baseline);
-  lied.inventory.capsule_basic -= 1;
-  // 故意与服务端结果相反：客户端「自己说了算」的存档
-  if (cap.data.result.ok === false) {
-    lied.party.push(clone(lied.party[0]));
-    lied.party[1].id = 'fake_capture';
-    lied.collection.sprout_owl.timesCaptured += 1;
-  }
-  const lieCommit = await put(capUser.token, lied, { intentNonce: nCap });
-  check('忽略服务端捕获结果 → 400 增量不符',
-    lieCommit.status === 400 && lieCommit.data?.code === 'INTENT_DELTA_MISMATCH', JSON.stringify(lieCommit.data));
-
-  const honest = clone(capUser.baseline);
-  honest.inventory.capsule_basic -= 1;
-  if (cap.data.result.ok === true) {
-    const m = clone(honest.party[0]); m.id = 'captured_1';
-    honest.party.push(m);
-    honest.collection.sprout_owl.timesCaptured += 1;
-  }
-  const honestCommit = await put(capUser.token, honest, { intentNonce: nCap });
-  check('按服务端结果提交 → 200', honestCommit.status === 200, JSON.stringify(honestCommit.data));
-  const capRead = JSON.parse((await get(capUser.token)).data.data);
-  check('落库结果与服务端裁决一致',
-    capRead.inventory.capsule_basic === 5 &&
-    capRead.party.length === (cap.data.result.ok ? 2 : 1), JSON.stringify({ party: capRead.party.length, inv: capRead.inventory }));
+  // ————— E. 捕获已只走服务端战斗（capture 意图 2026-11-07 下线）—————
+  // 原用例验证「客户端伪造捕获结果会被增量核对拒绝」。现在 capture 意图不再存在，
+  // 捕获只能由 /api/battle/action 的 capture 动作在真实战斗里产生；相关断言
+  // （越权 battleId、非法道具、结算一致性）在 e2e:p31 的战斗接口区覆盖。
 
   // ————— F. 管理员测试菜单授权 —————
   const adminUser = await freshUser('admin');

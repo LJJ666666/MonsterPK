@@ -11,6 +11,16 @@
  * 输出：逐例 [PASS]/[FAIL]，末尾 E2E_P31_OK；任一失败 exit 1。
  */
 import WebSocket from 'ws';
+import { PrismaClient } from '@prisma/client';
+
+// P3-1c：管理员测试标记必须验证「身份由服务端查库判定」，所以本套件直连数据库提权。
+// 连不上就跳过该组，不让一个可选的验证点把整套 E2E 拖挂。
+let prisma = null;
+try {
+  prisma = new PrismaClient();
+} catch (err) {
+  console.log(`[WARN] Prisma 不可用，跳过管理员测试标记组：${err?.message ?? err}`);
+}
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
@@ -285,6 +295,52 @@ async function main() {
   check('放弃战斗成功', abandon.status === 200 && abandon.data?.dropped === true, asText(abandon.data));
   check('放弃后 current 为空', (await current(tokenA)).data?.battle === null);
 
+  // ═══════════ H. P3-1c 契约：前端渲染所需字段 + 管理员测试标记 ═══════════
+  // 前端不再自己拼装战斗数据，直接渲染服务端下发的 party / levelMin / levelMax。
+  // 这里锁住契约：少一个字段前端就会渲染成空面板，而服务端测试全绿也发现不了。
+  console.log('\n—— H. P3-1c 前端契约 ——');
+  const s1c = await startBattle(tokenA, { levelMin: 3, levelMax: 3 });
+  const b1c = s1c.data?.battle ?? {};
+  check('战斗视图下发 levelMin / levelMax（「继续探索」要用）',
+    b1c.levelMin === 3 && b1c.levelMax === 3, JSON.stringify({ min: b1c.levelMin, max: b1c.levelMax }));
+  check('队伍副本下发送完整个体（moveIds + 六维 + initStats + growthRates）',
+    Array.isArray(b1c.party) && b1c.party.length > 0 && b1c.party.every((m) =>
+      Array.isArray(m.moveIds) && typeof m.atk === 'number' && typeof m.maxHp === 'number'
+      && typeof m.initStats?.hp === 'number' && typeof m.growthRates?.hp === 'number'),
+    JSON.stringify(b1c.party?.[0]));
+
+  // 普通账号传测试标记：静默忽略。不能报错（客户端硬编码测试开关不该变成风控事件），
+  // 也不能生效（否则人人都是管理员）。
+  const flagged = await startBattle(tokenA, {
+    levelMin: 3, levelMax: 3,
+    testFlags: { testOHKO: true, testShiny: true, testMaxStats: true },
+  });
+  check('普通账号传测试标记不报错（静默忽略）', flagged.status === 200, `${flagged.status} ${asText(flagged.data)}`);
+  const fb = flagged.data?.battle ?? {};
+  check('普通账号 testOHKO 未生效（敌方 HP 不是 1）', fb.enemy?.hp !== 1, String(fb.enemy?.hp));
+  check('普通账号 testShiny 未生效（敌方不是异色）', fb.enemy?.isShiny !== true, String(fb.enemy?.isShiny));
+  check('普通账号没有测试标记日志', !(fb.log ?? []).some((l) => l.includes('管理员测试标记')),
+    JSON.stringify(fb.log));
+  await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: fb.battleId } });
+
+  // 管理员：先提权再开局。身份必须由服务端查库判定，客户端自称不算数。
+  if (prisma) {
+    await prisma.user.update({ where: { username: userA }, data: { role: 'admin' } });
+    const adminStart = await startBattle(tokenA, {
+      levelMin: 3, levelMax: 3,
+      testFlags: { testOHKO: true, testShiny: true },
+    });
+    const ab = adminStart.data?.battle ?? {};
+    check('管理员 testOHKO 生效（敌方开场 1 HP）', ab.enemy?.hp === 1, String(ab.enemy?.hp));
+    check('管理员 testShiny 生效（敌方异色）', ab.enemy?.isShiny === true, String(ab.enemy?.isShiny));
+    check('管理员测试标记写进战斗日志',
+      (ab.log ?? []).some((l) => l.includes('管理员测试标记')), JSON.stringify(ab.log));
+    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: ab.battleId } });
+    await prisma.user.update({ where: { username: userA }, data: { role: 'user' } });
+  } else {
+    console.log('[SKIP] 管理员测试标记（未连接数据库）');
+  }
+
   // —— 跨账号隔离 ——
   const userB = `b3b_${RUN}`;
   const tokenB = await register(userB);
@@ -296,14 +352,15 @@ async function main() {
   await request('/api/battle/abandon', { method: 'POST', token: tokenB, body: { slot: 1, battleId: idB } });
 
   await closeWs(wsCtx);
-  finish();
+  await finish();
 }
 
-function finish() {
+async function finish() {
   const total = pass + fail;
   console.log(`\n[SUMMARY] ${pass}/${total} 通过，${fail} 失败`);
   if (fail === 0) console.log('E2E_P31_OK');
   else console.log('E2E_P31_FAILED');
+  if (prisma) await prisma.$disconnect().catch(() => {});
   process.exit(fail === 0 ? 0 : 1);
 }
 

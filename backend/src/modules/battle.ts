@@ -15,7 +15,7 @@ import { prisma } from '../lib/prisma';
 import { parseAuthority, digestOf, type AuthorityState } from '../lib/authority';
 import { BATTLE_TTL_MS } from '../lib/battleSession';
 import {
-  applyBattleAction, battleView, BattleError, createBattle,
+  applyBattleAction, applyAdminTestFlags, battleView, BattleError, createBattle,
   type BattleAction, type BattleState,
 } from '../game/battle';
 import { LOCATIONS, THEME_TABLE, contentStats } from '../game/content';
@@ -32,6 +32,15 @@ const startSchema = z.object({
   areaId: z.string().min(1).max(60).nullish(),
   levelMin: z.coerce.number().int().min(1).max(60).default(1),
   levelMax: z.coerce.number().int().min(1).max(60).default(3),
+  /**
+   * P3-1c：管理员测试标记。普通账号传了也**静默忽略**（不报错、不封号），
+   * 避免把「客户端硬编码了测试开关」这种误用升级成风控事件。
+   */
+  testFlags: z.object({
+    testShiny: z.boolean().optional(),
+    testMaxStats: z.boolean().optional(),
+    testOHKO: z.boolean().optional(),
+  }).optional(),
 });
 
 const actionSchema = z.object({
@@ -174,7 +183,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const userId = (req.user as any).userId;
     const parsed = startSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '开局参数不合法' });
-    const { slot, theme, areaName, areaId, levelMin, levelMax } = parsed.data;
+    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags } = parsed.data;
 
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
 
@@ -223,6 +232,12 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         now: Date.now(),
         rng: Math.random,
       });
+      // 测试标记只对管理员生效：身份由服务端查库判定，客户端自称不算数。
+      // 只在客户端真的传了标记时才多查一次库，普通玩家开局没有额外开销。
+      if (testFlags && Object.values(testFlags).some(Boolean)) {
+        const me = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+        if (me?.role === 'admin') applyAdminTestFlags(state, testFlags);
+      }
       battles.create(state);
       return {
         ok: true,

@@ -648,3 +648,64 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 **遗留风险（未改，杰哥策略）**：`MONEY_HIGH` 阈值 `MONEY_WARN = 999_999` 与前端测试菜单
 `addMoney` 上限相同，意味着正常攒到 100 万即触发封号。目前按「改数据一律封」的强度保留，
 长线运营前建议按道具单价与消耗速度重算该阈值。
+
+## 19. P3-1c 前端接入服务端战斗的契约（2026-11-07）
+
+战斗过程上移服务端之后，客户端从「算战斗」变成「发意图 + 渲染状态」。这一节记录
+两侧必须同时遵守的约定，改任何一边都要回头看另一边界。
+
+### 19.1 请求 / 响应契约
+
+| 接口 | 谁调用 | 关键点 |
+|---|---|---|
+| `POST /api/battle/start` | `store.startEncounter` | 客户端只说明「在哪打」（theme / areaName / areaId / 等级区间）；`areaId` 能对上服务端地图时，等级区间以服务端为准 |
+| `POST /api/battle/action` | `store.useMove` / `useItem` / `switchTo` / `flee` | 动作只有 5 种：`move` / `item` / `capture` / `switch` / `flee`；越权 `battleId` 一律 404 |
+| `GET /api/battle/current` | `store.resumeBattle` | 刷新 / 断线重连后取回；战斗态**不进存档**，所以刷新只能靠它 |
+| `POST /api/battle/abandon` | `store.leaveBattle` | 中途离开必须显式放弃，否则服务端会话挂到 30min TTL |
+
+`battleView()` 下发的内容（P3-1c 扩展过，勿随意裁剪）：
+
+- `party`：**我方队伍完整个体**（`moveIds` / 六维 / `initStats` / `growthRates` 全在）。
+  战斗内的 HP / 经验只存在于这份副本里，UI 必须用它渲染，不能用存档里的队伍。
+- `levelMin` / `levelMax`：前端「继续探索」要按同难度再开一场。
+- `enemy` / `ppByMonster` / `log` / `turn` / `playerActiveIndex` / `playerMods` / `enemyMods`。
+- `rewards` / `captured` / `consumed`：结算结果，供 UI 展示。
+
+### 19.2 四条硬约束（踩了就出问题）
+
+1. **战斗中不写 save**。把服务端下发的 HP 降、经验涨写进 `save1` 会触发自动上传；
+   服务端只在结算时才认可这些变化，中途上传必然撞 `AUTHORITY_MISMATCH`。
+   我方真值放 `battle.serverParty`，`save` 保持战前状态直到结算快照到达。
+
+2. **权威快照不打断战斗**。`importSaveJson()` 默认 `battle: null`（换档语义），
+   `lib/session.ts` 应用快照时必须传 `{ keepBattle: true }`。
+   否则结算广播到达的瞬间 UI 会从战斗画面跳回「尚未开始遭遇」。
+
+3. **只有网络层失败才降级本地战斗**。`toFailure(e).transient` 判定：
+   无 `status`（fetch 失败）或 5xx → 可降级；4xx（队伍全灭、区域没怪、401、404）→ 如实报错。
+   业务拒绝还去本地开一场，会造成「服务端说打不了，客户端自己打了一场，奖励提交时被拒」。
+
+4. **动作在途不重复发**。`battle.pending` 置位期间所有按钮 disabled。
+   连点两次会把同一回合打两遍（服务端按动作序列推进，不认「同一次点击」）。
+
+### 19.3 管理员测试标记
+
+原先 `testShiny` / `testMaxStats` / `testOHKO` 只在客户端生效，战斗上移后必须由服务端处理：
+
+- `start` 接受可选 `testFlags`，服务端**查库确认 `role === 'admin'`** 才应用；
+- 普通账号传了**静默忽略**（不报错、不封号）——客户端硬编码测试开关不该升级成风控事件；
+- 三者都等价实现，不给战斗内核开后门：`testOHKO` = 敌方开场 1 HP（不是「玩家必定一击」）；
+- 生效时往战斗日志追加 `［管理员测试标记：…］`，便于排查「为什么这只怪这么强」。
+- `e2e:p31` 的 H 区用 Prisma 直连提权来验证「身份由服务端判定」，不信任客户端自称。
+
+### 19.4 测试分层
+
+| 层 | 文件 | 覆盖什么 |
+|---|---|---|
+| 映射纯函数 | `src/lib/battleApi.test.ts`（12） | `toBattleState` 字段对齐 / `toFailure` 降级判定 |
+| 接线 | `src/stores/battleFlow.test.ts`（20） | 五入口分流、防连点、BATTLE_NOT_FOUND、网络抖动不下算、结算拉档、abandon、resume |
+| 接口契约 | `backend/tests/e2e_p31_battle.mjs` H 区（9） | 下发字段完整、管理员标记双向 |
+| 真浏览器 | `scripts/ui_smoke_p31c.mjs`（15） | 点按钮 → 发意图 → 服务端结算 → 存档真的变了 |
+
+单测是 mock 掉 api 的，证明「分流写对了」；只有 `ui_smoke_p31c` 能证明整条链路活着，
+所以它不能省。改动战斗相关代码后至少跑 `npm run verify -- --only=smoke` 复查。

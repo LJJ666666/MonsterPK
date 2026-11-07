@@ -54,6 +54,7 @@ const STAGES = [
   { id: 'e2e:p31', name: 'E2E 服务端战斗（P3-1）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p31'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（112 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
+  { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -63,7 +64,7 @@ const GROUPS = {
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
   e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:hardening'],
-  smoke: ['smoke:ui'],
+  smoke: ['smoke:ui', 'smoke:p31c'],
   docs: ['docs:doc', 'docs:memory'],
 };
 
@@ -122,8 +123,8 @@ function summarize(out) {
   const mSummary = out.match(/\[SUMMARY\] (\d+)\/(\d+) 通过/);
   if (mSummary) return `${mSummary[1]}/${mSummary[2]} 通过`;
 
-  // 前端 375px 冒烟
-  const mUI = out.match(/UI_SMOKE_RESULT pass=(\d+) fail=(\d+)/);
+  // 前端 375px 冒烟（UI_SMOKE_RESULT / UI_SMOKE_P31C_RESULT 等带后缀的变体）
+  const mUI = out.match(/UI_SMOKE(?:_\w+)?_RESULT pass=(\d+) fail=(\d+)/);
   if (mUI) return `${mUI[1]} 项通过${Number(mUI[2]) ? `，${mUI[2]} 失败` : ''}`;
 
   // 后端 node:test

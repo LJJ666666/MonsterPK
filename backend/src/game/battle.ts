@@ -12,12 +12,12 @@
  */
 import {
   ITEM_SPECS, MONSTER_SPECS, MOVE_SPECS, emptyMods,
-  type ServerMonster, type StatModifiers, type StatusType,
+  type ServerMonster, type StatModifiers,
 } from './content.js';
 import {
   alive, attemptCapture, canMove, captureChance, clamp, createInstance,
-  executeMoveAction, findFirstAliveIndex, gainExp, getSpeed, initBattlePP, pickUsableMove,
-  processEndOfTurn, roll,
+  executeMoveAction, findFirstAliveIndex, gainExp, getMonsterStatBounds, getSpeed,
+  initBattlePP, pickUsableMove, processEndOfTurn, roll,
   type Rng,
 } from './rules.js';
 
@@ -484,6 +484,59 @@ export function applyBattleAction(
 }
 
 /** 给路由层用的只读视图：玩家队伍与敌方都下发，但只是展示快照，客户端改不了服务端状态。 */
+/**
+ * P3-1c：管理员测试标记（原先前端 `testShiny / testMaxStats / testOHKO` 只在本地战斗生效，
+ * 战斗上移服务端后会失效）。这里把三者等价地作用在服务端生成的敌人身上，
+ * **只允许管理员账号调用**（由路由层查库判定 role，客户端自称不算数）。
+ *
+ *  - testShiny：敌方异色；
+ *  - testMaxStats：敌方六维/成长取下限表上限，并回满 HP（等价前端的满属性测试）；
+ *  - testOHKO：敌方开场 1 HP（等价一击必杀，不必给战斗内核开后门）。
+ *
+ * 标记会写进战斗日志，便于排查「为什么这只怪这么强」。
+ */
+export function applyAdminTestFlags(
+  state: BattleState,
+  flags: { testShiny?: boolean; testMaxStats?: boolean; testOHKO?: boolean },
+): BattleState {
+  const marks: string[] = [];
+  let enemy = state.enemy;
+
+  if (flags.testShiny && !enemy.isShiny) {
+    enemy = { ...enemy, isShiny: true };
+    marks.push('异色');
+  }
+  if (flags.testMaxStats) {
+    const bounds = getMonsterStatBounds(enemy.specId);
+    const levelups = Math.max(0, enemy.level - 1);
+    const init = bounds.initMax;
+    const grow = bounds.gMax;
+    const maxHp = init.hp + grow.hp * levelups;
+    enemy = {
+      ...enemy,
+      initStats: { ...init },
+      growthRates: { ...grow },
+      maxHp,
+      hp: maxHp,
+      atk: init.atk + grow.atk * levelups,
+      def: init.def + grow.def * levelups,
+      spAtk: init.spAtk + grow.spAtk * levelups,
+      spDef: init.spDef + grow.spDef * levelups,
+      spd: init.spd + grow.spd * levelups,
+    };
+    marks.push('满属性');
+  }
+  if (flags.testOHKO) {
+    enemy = { ...enemy, hp: 1 };
+    marks.push('一击必杀');
+  }
+  if (marks.length === 0) return state;
+
+  state.enemy = enemy;
+  state.log = [...state.log, `［管理员测试标记：${marks.join(' / ')}］`];
+  return state;
+}
+
 export function battleView(s: BattleState) {
   return {
     battleId: s.id,
@@ -494,18 +547,23 @@ export function battleView(s: BattleState) {
     areaName: s.areaName,
     theme: s.theme,
     areaId: s.areaId,
+    levelMin: s.levelMin,
+    levelMax: s.levelMax,
     playerActiveIndex: s.playerActiveIndex,
     playerMods: s.playerMods,
     enemyMods: s.enemyMods,
     enemy: s.enemy,
-    party: s.party.map((m) => ({
-      id: m.id, specId: m.specId, nickname: m.nickname, level: m.level, exp: m.exp,
-      hp: m.hp, maxHp: m.maxHp, status: m.status as StatusType, element: m.element,
-      isShiny: m.isShiny,
-    })),
+    /**
+     * P3-1c：我方队伍下发**完整个体**（含 moveIds / 六维 / initStats / growthRates）。
+     * 战斗内的 HP、经验只存在于这份副本里，存档要等结算才更新，所以客户端必须拿它渲染。
+     * 这里不做字段裁剪：客户端存档本来就有这些数据，多下发不构成信息泄露，
+     * 反而省掉「服务端下发动态字段 + 客户端拼本地静态字段」的二次组装，
+     * 避免两边字段漂移导致 UI 显示错位。
+     */
+    party: s.party,
     ppByMonster: s.ppByMonster,
     rewards: s.rewards,
-    captured: s.captured ? { id: s.captured.id, specId: s.captured.specId, level: s.captured.level } : null,
+    captured: s.captured,
     consumed: s.consumed,
     actions: s.actions,
   };

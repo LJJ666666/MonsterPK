@@ -8,6 +8,7 @@ import { idleElapsedMinutes } from "@/game/idle";
 import { SCHEMA_VERSION, SAVE_VERSION, migrateSaveState } from "@/stores/saveVersion";
 import { markRebase } from "@/lib/rebase";
 import type { IntentResult } from "@/lib/intents";
+import { battleApi, canUseServerBattle, toBattleState, toFailure, type ActionInput } from "@/lib/battleApi";
 
 /**
  * P1-2：关键随机与经济结算统一走服务端裁决。
@@ -23,6 +24,68 @@ async function intent(
   return runIntent(type, payload, apply);
 }
 
+/**
+ * P3-1c：服务端战斗动作的统一出口。
+ *
+ * 客户端在这里只做三件事：置 pending（防连点）、转发意图、把服务端返回的状态映射成
+ * 前端 BattleState。**没有任何数值计算**——伤害、命中、敌方选招、捕获、奖励全在服务端。
+ *
+ * 结算（finished）时服务端已经把结果写进存档并广播 `session.state`；
+ * 这里额外用一次 GET 兜底，避免 WS 未连接时本地存档停留在战前状态。
+ */
+async function runServerBattleAction(
+  set: (partial: any) => void,
+  get: () => GameState,
+  action: ActionInput,
+): Promise<void> {
+  const state = get();
+  const battle = state.battle;
+  if (!battle?.serverId || battle.finished || battle.pending) return;
+
+  const battleId = battle.serverId;
+  const slot = state.slot;
+  set({ battle: { ...battle, pending: true } });
+
+  try {
+    const { view, settled } = await battleApi.action(slot, battleId, action);
+    set({ battle: toBattleState(view) });
+    if (settled) await refreshSaveFromServer(slot);
+  } catch (e) {
+    const f = toFailure(e);
+    const cur = get().battle;
+    // 期间可能已经开了新一场战斗，别把日志写到别的战斗上
+    if (!cur || cur.serverId !== battleId) return;
+    if (f.code === "BATTLE_NOT_FOUND") {
+      set({
+        battle: pushLog(
+          { ...cur, pending: false, finished: true },
+          ["这场战斗在服务端已经不存在（可能超时或已在别处结束），请重新开局。"],
+        ),
+      });
+      return;
+    }
+    // 网络失败 / 业务拒绝都只回滚 pending：战斗真值仍在服务端，本地不做任何「补偿计算」，
+    // 否则就变成了客户端自己推算战果，正是 P3 要根除的东西。
+    set({ battle: pushLog({ ...cur, pending: false }, [`操作未生效：${f.message}`]) });
+  }
+}
+
+/** 结算后主动拉一次存档（WS 快照的 HTTP 兜底）。失败静默：下一场开局仍以服务端为准。 */
+async function refreshSaveFromServer(slot: number): Promise<void> {
+  try {
+    const [{ api }, { suppressNextUpload }] = await Promise.all([
+      import("@/lib/api"),
+      import("@/lib/sync"),
+    ]);
+    const cloud = await api.getSave(slot);
+    if (!cloud?.data) return;
+    suppressNextUpload();
+    useGameStore.getState().importSaveJson(cloud.data, slot as 1 | 2 | 3, { keepBattle: true });
+  } catch {
+    /* 拉不到就等 WS 快照 */
+  }
+}
+
 type GameState = {
   slot: 1 | 2 | 3;
   save1: SaveData | null;
@@ -35,14 +98,20 @@ type GameState = {
   newGame: (playerName: string, starterSpecId: (typeof STARTERS)[number]) => void;
   resetSave: (slotToReset?: 1 | 2 | 3) => void;
   travelTo: (locationId: LocationId) => void;
-  importSaveJson: (json: string, targetSlot?: 1 | 2 | 3) => { ok: true } | { ok: false; reason: string };
+  importSaveJson: (
+    json: string,
+    targetSlot?: 1 | 2 | 3,
+    opts?: { keepBattle?: boolean },
+  ) => { ok: true } | { ok: false; reason: string };
   exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
   
-  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string) => { ok: true } | { ok: false; reason: string };
+  startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   useMove: (moveId: MoveId) => Promise<void>;
   useItem: (itemId: ItemId) => Promise<void>;
   switchTo: (partyIndex: number) => void;
   flee: () => void;
+  /** P3-1c：刷新/断线重连后取回服务端仍存活的战斗（战斗态不进存档）。 */
+  resumeBattle: () => Promise<void>;
   healAll: () => void;
   useItemOutsideBattle: (itemId: ItemId, partyIndex: number) => void;
   buyItem: (itemId: ItemId, amount: number) => Promise<void>;
@@ -150,6 +219,81 @@ function consumeItem(inv: Record<ItemId, number>, itemId: ItemId) {
   return { ok: true as const, inv: { ...inv, [itemId]: qty - 1 } };
 }
 
+/**
+ * 本地降级战斗的开局（P3-1c 之前的唯一路径，服务端不可达时才会走到）。
+ *
+ * 为什么保留：后端挂掉/断网时至少还能打，不至于整个游戏不可玩。
+ * 为什么安全：本地战斗的奖励仍走 `battle_reward` 意图由服务端裁决，
+ * 所以降级 ≠ 可以改数据；改档照样会在提交时被拒。
+ *
+ * 与 P3-1c 之前的行为完全一致：顺带把该幻兽标进图鉴「已见」。
+ * 服务端路径不需要这段——服务端在结算时统一写 collection。
+ */
+function beginLocalEncounter(
+  set: (partial: any) => void,
+  get: () => GameState,
+  theme: EncounterTheme,
+  areaName: string,
+  levelMin: number,
+  levelMax: number,
+  areaId?: string,
+): { ok: true } | { ok: false; reason: string } {
+  const state = get();
+  const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+  if (!save) return { ok: false, reason: "请先创建或导入存档" };
+
+  const playerActiveIndex = findFirstAliveIndex(save.party);
+  const level = Math.floor(Math.random() * (levelMax - levelMin + 1)) + levelMin;
+  const { enemy, label } = generateEncounter(theme, level);
+
+  if (state.testShiny) enemy.isShiny = true;
+  if (state.testMaxStats) {
+    const bounds = getMonsterStatBounds(enemy.specId);
+    enemy.initStats = bounds.initMax;
+    enemy.growthRates = bounds.gMax;
+    const levelups = Math.max(0, enemy.level - 1);
+    enemy.maxHp = enemy.initStats.hp + enemy.growthRates.hp * levelups;
+    enemy.hp = enemy.maxHp;
+    enemy.atk = enemy.initStats.atk + enemy.growthRates.atk * levelups;
+    enemy.def = enemy.initStats.def + enemy.growthRates.def * levelups;
+    enemy.spAtk = enemy.initStats.spAtk + enemy.growthRates.spAtk * levelups;
+    enemy.spDef = enemy.initStats.spDef + enemy.growthRates.spDef * levelups;
+    enemy.spd = enemy.initStats.spd + enemy.growthRates.spd * levelups;
+  }
+
+  const prevSeenLocations = save.collection[enemy.specId]?.seenLocations ?? [];
+  const seenLocations = prevSeenLocations.includes(save.locationId)
+    ? prevSeenLocations
+    : [...prevSeenLocations, save.locationId];
+
+  const collection = {
+    ...save.collection,
+    [enemy.specId]: {
+      seen: true,
+      captured: save.collection[enemy.specId]?.captured ?? false,
+      timesCaptured: save.collection[enemy.specId]?.timesCaptured ?? 0,
+      seenLocations,
+    },
+  };
+  const battle: BattleState = {
+    theme,
+    areaName,
+    areaId,
+    levelMin,
+    levelMax,
+    turn: 1,
+    log: [`遭遇：${label}`, "（本地模式：未连上服务端，战斗结果仍需服务端裁决才会计入存档）"],
+    playerActiveIndex,
+    playerStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
+    enemyStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
+    enemy,
+    ppByMonster: initPP([...save.party, enemy]),
+    finished: false,
+  };
+  set({ [`save${state.slot}`]: { ...save, collection, lastSavedAt: nowIso() }, battle } as any);
+  return { ok: true };
+}
+
 const customStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     try {
@@ -192,6 +336,16 @@ export const useGameStore = create<GameState>()(
       setSlot: (slot) => set({ slot }),
       leaveBattle: () => {
         const state = get();
+        // P3-1c：战斗没打完就离开 = 放弃这场（不结算奖励）。
+        // 必须显式告诉服务端，否则那场战斗会在服务端挂到 30min TTL 才回收，
+        // 期间再开局会被当成「已有战斗」而行为异常。
+        const current = state.battle;
+        if (current?.serverId && !current.finished) {
+          const slot = state.slot;
+          void battleApi.abandon(slot, current.serverId).catch(() => {
+            /* 已超时/已结束都无所谓，服务端会自己回收 */
+          });
+        }
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (state.battle?.result === "player_fainted" && save) {
           // 全灭惩罚：回到最近的恢复点，并恢复所有队伍状态
@@ -254,7 +408,7 @@ export const useGameStore = create<GameState>()(
         set({ [`save${state.slot}`]: { ...save, locationId, visitedLocationIds: visited, lastSavedAt: nowIso() } } as any);
       },
 
-      importSaveJson: (json, targetSlot) => {
+      importSaveJson: (json, targetSlot, opts) => {
         const s = targetSlot ?? get().slot;
         try {
           const parsed = JSON.parse(json) as SaveData;
@@ -267,7 +421,12 @@ export const useGameStore = create<GameState>()(
           const visitedLocationIds = (parsed.visitedLocationIds ?? [locationId]) as LocationId[];
           set({
             [`save${s}`]: { ...parsed, locationId, lastHealLocationId, visitedLocationIds, lastSavedAt: nowIso() },
-            battle: null,
+            // P3-1c：战斗态不进存档，也不该被存档快照打断。
+            //  - 导入/恢复存档（换档语义）→ 必须清战斗，否则会把旧战斗套到新档上；
+            //  - 服务端权威快照（结算广播 / 别的设备写入）→ 保留战斗，
+            //    因为结算时 UI 还要靠 battle 展示「对手倒下 / 捕获成功」，
+            //    一旦清空 Arena 会直接跳回「尚未开始遭遇」。
+            ...(opts?.keepBattle ? {} : { battle: null }),
           } as any);
           return { ok: true };
         } catch {
@@ -283,76 +442,75 @@ export const useGameStore = create<GameState>()(
         return { ok: true, json: JSON.stringify({ ...save, lastSavedAt: nowIso() }, null, 2) };
       },
 
-      startEncounter: (theme, areaName, levelMin, levelMax, areaId) => {
+      startEncounter: async (theme, areaName, levelMin, levelMax, areaId) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         if (!save) return { ok: false, reason: "请先创建或导入存档" };
         if (save.party.length === 0) return { ok: false, reason: "队伍为空" };
-        const playerActiveIndex = findFirstAliveIndex(save.party);
-        const level = Math.floor(Math.random() * (levelMax - levelMin + 1)) + levelMin;
-        let { enemy, label } = generateEncounter(theme, level);
-        
-        if (state.testShiny) enemy.isShiny = true;
-        if (state.testMaxStats) {
-          const bounds = getMonsterStatBounds(enemy.specId);
-          enemy.initStats = bounds.initMax;
-          enemy.growthRates = bounds.gMax;
-          // 重新计算当前 HP 和 maxHp
-          const levelups = Math.max(0, enemy.level - 1);
-          enemy.maxHp = enemy.initStats.hp + enemy.growthRates.hp * levelups;
-          enemy.hp = enemy.maxHp;
-          enemy.atk = enemy.initStats.atk + enemy.growthRates.atk * levelups;
-          enemy.def = enemy.initStats.def + enemy.growthRates.def * levelups;
-          enemy.spAtk = enemy.initStats.spAtk + enemy.growthRates.spAtk * levelups;
-          enemy.spDef = enemy.initStats.spDef + enemy.growthRates.spDef * levelups;
-          enemy.spd = enemy.initStats.spd + enemy.growthRates.spd * levelups;
+
+        // P3-1c：主路径走服务端。敌人、队伍副本、每回合判定全部由服务端生成，
+        // 客户端只拿到一份不可信也无所谓的展示态（改它不影响结算）。
+        //
+        // 只在「网络层不通」时降级到本地战斗；业务拒绝（队伍全灭 / 区域没怪 / 存档异常）
+        // 必须如实报错——否则会出现「服务端说打不了，客户端却自己开了一场」的诡异状态，
+        // 而且那场本地战斗的奖励在提交时也会被服务端拒掉。
+        if (canUseServerBattle()) {
+          try {
+            const view = await battleApi.start({
+              slot: state.slot,
+              theme,
+              areaName,
+              areaId,
+              levelMin,
+              levelMax,
+              testFlags: {
+                testShiny: state.testShiny,
+                testMaxStats: state.testMaxStats,
+                testOHKO: state.testOHKO,
+              },
+            });
+            set({ battle: toBattleState(view) } as any);
+            return { ok: true };
+          } catch (e) {
+            const f = toFailure(e);
+            if (!f.transient) return { ok: false, reason: f.message };
+            // transient：后端不可达 → 继续走下面的本地降级
+          }
         }
-        
-        const prevSeenLocations = save.collection[enemy.specId]?.seenLocations ?? [];
-        const seenLocations = prevSeenLocations.includes(save.locationId)
-          ? prevSeenLocations
-          : [...prevSeenLocations, save.locationId];
 
-        // Ensure we also mark the first evolution (if any) as seen, to match traditional Pokédex logic
-        // where encountering an evolution stage also reveals its base, but here we just mark the encountered one as seen.
-        // Wait, the user's prompt means: when you see a monster, it gets unlocked (seen).
-        // If it's an evolution, should we mark its base as seen?
-        // Actually, just tracking the encountered `enemy.specId` is enough.
-        // We will just let the UI handle the `???` rendering for missing dexNums.
+        return beginLocalEncounter(set, get, theme, areaName, levelMin, levelMax, areaId);
+      },
 
-        const collection = {
-          ...save.collection,
-          [enemy.specId]: {
-            seen: true,
-            captured: save.collection[enemy.specId]?.captured ?? false,
-            timesCaptured: save.collection[enemy.specId]?.timesCaptured ?? 0,
-            seenLocations,
-          },
-        };
-        const battle: BattleState = {
-          theme,
-          areaName,
-          areaId,
-          levelMin,
-          levelMax,
-          turn: 1,
-          log: [`遭遇：${label}`],
-          playerActiveIndex,
-          playerStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
-          enemyStatMods: { atk: 0, def: 0, spAtk: 0, spDef: 0, spd: 0, accuracy: 0, evasion: 0 },
-          enemy,
-          ppByMonster: initPP([...save.party, enemy]),
-          finished: false,
-        };
-        set({ [`save${state.slot}`]: { ...save, collection, lastSavedAt: nowIso() }, battle } as any);
-        return { ok: true };
+      resumeBattle: async () => {
+        const state = get();
+        // 本地已有战斗（进行中或正在展示结果）就不覆盖它
+        if (state.battle || !canUseServerBattle()) return;
+        const slot = state.slot;
+        try {
+          const view = await battleApi.current(slot);
+          if (!view) return;
+          const now = get();
+          // 请求期间可能切了槽位 / 开了新战斗，别把别人的战斗盖上去
+          if (now.battle || now.slot !== slot) return;
+          set({ battle: toBattleState(view) } as any);
+        } catch {
+          /* 取不到就当作没有战斗：下一场开局会重新创建 */
+        }
       },
 
       switchTo: (partyIndex) => {
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         const battle = state.battle;
-        if (!save || !battle || battle.finished) return;
+        if (!battle || battle.finished) return;
+
+        // P3-1c：服务端战斗只发意图。换人会让敌方获得一次行动，这段判定在服务端跑。
+        if (battle.serverId) {
+          void runServerBattleAction(set, get, { type: "switch", partyIndex });
+          return;
+        }
+
+        if (!save) return;
         const next = save.party[partyIndex];
         if (!next || next.hp <= 0) return;
         if (partyIndex === battle.playerActiveIndex) return;
@@ -372,7 +530,15 @@ export const useGameStore = create<GameState>()(
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         const battle = state.battle;
-        if (!save || !battle || battle.finished) return;
+        if (!battle || battle.finished) return;
+
+        // P3-1c：逃跑成功率（速度差决定 75% / 50%）由服务端掷骰。
+        if (battle.serverId) {
+          void runServerBattleAction(set, get, { type: "flee" });
+          return;
+        }
+
+        if (!save) return;
         const player = save.party[battle.playerActiveIndex];
         const enemy = battle.enemy;
         const chance = player.spd >= enemy.spd ? 0.75 : 0.5;
@@ -388,7 +554,21 @@ export const useGameStore = create<GameState>()(
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         const battle = state.battle;
-        if (!save || !battle || battle.finished) return;
+        if (!battle || battle.finished) return;
+
+        // P3-1c：道具消耗、回复量、捕获成败全部由服务端裁决。
+        // 这里按道具类型分流：capture 走捕获判定，其余（heal / status_heal）走道具使用。
+        if (battle.serverId) {
+          const kind = ITEM_SPECS[itemId]?.kind;
+          await runServerBattleAction(
+            set,
+            get,
+            kind === "capture" ? { type: "capture", itemId } : { type: "item", itemId },
+          );
+          return;
+        }
+
+        if (!save) return;
         const item = ITEM_SPECS[itemId];
         const consumed = consumeItem(save.inventory, itemId);
         if (!consumed.ok) {
@@ -460,7 +640,17 @@ export const useGameStore = create<GameState>()(
         const state = get();
         const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
         let battle = state.battle;
-        if (!save || !battle || battle.finished) return;
+        if (!battle || battle.finished) return;
+
+        // P3-1c：服务端战斗 → 只发「我要用这招」。
+        // PP 够不够、打多少、谁先手、敌方选什么招，全部由服务端判定，
+        // 本地连预判都不做（预判失败会让 UI 闪一下错误结果，比不预判更差）。
+        if (battle.serverId) {
+          await runServerBattleAction(set, get, { type: "move", moveId });
+          return;
+        }
+
+        if (!save) return;
 
         let player = save.party[battle.playerActiveIndex];
         if (!player) return;

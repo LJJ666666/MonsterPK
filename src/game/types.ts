@@ -285,4 +285,19 @@ export type BattleState = {
   finished: boolean;
   /** 战斗结束的最终结果。captured=成功捕获，enemy_fainted=击败敌方，fled=成功逃跑，player_fainted=我方全灭。 */
   result?: "captured" | "enemy_fainted" | "fled" | "player_fainted";
+
+  // ───────────────────────── P3-1c 服务端战斗 ─────────────────────────
+  /**
+   * 服务端战斗 id。有值 = 本场由服务端裁决（动作转发 `/api/battle/action`）；
+   * 空 = 本地降级战斗（服务端不可达时才会走到）。
+   */
+  serverId?: string;
+  /**
+   * 服务端下发的我方队伍副本，战斗内的 HP / 经验以它为准。
+   * 战斗中**不写存档**：把 HP 变低、经验变高写进 save 会触发自动上传，
+   * 而服务端只在结算时认可这些变化，中途上传会被判「凭空变强」。
+   */
+  serverParty?: MonsterInstance[];
+  /** 服务端动作在途：防止连点造成重复发意图。 */
+  pending?: boolean;
 };

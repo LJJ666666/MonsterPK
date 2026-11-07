@@ -270,3 +270,53 @@ IDLE_LEVEL / CLEARED_AREA_LEVEL`，全部是「格式 + 越界」共用一个 co
 
 **教训**：风控 code 的语义粒度 = 封号决策的粒度。一个 code 承载两种性质，迟早会把其中最轻的那半
 当成最重的那半处理。凡是「格式 / 越界」混写的判断，都要先问一句：这半边真的够封号吗。
+
+## 23. P3-1c 踩到的三个坑：快照清战斗 / 条件 Hook / 动作 Promise 被吞（2026-11-07）
+
+### 23.1 服务端结算广播到达的瞬间，战斗画面被踢回空态
+
+现象：战斗结束（对手倒下 / 捕获成功），UI 本该停在结果面板，实际直接跳回
+「尚未开始遭遇 —— 你可以从营地进入训练场」。
+
+根因：`importSaveJson()` 一直是「导入存档」的语义，实现里硬写 `battle: null`
+（换档必须清战斗，否则旧战斗会套到新档上）。P2-2 之后它多了一个调用方——
+`lib/session.ts` 应用服务端 `session.state` 权威快照。而战斗结束时服务端会
+`commitState()` 并广播快照，于是「结算快照到达」被当成「换档」，`battle` 被清空。
+
+讽刺的是两边都认为自己是对的：`importSaveJson` 按换档处理没错，`session.ts`
+应用快照也没错。错在**一个函数承担了两种语义**——和 §22 的 `MONEY` 是同一类问题。
+
+修法：`importSaveJson(json, slot, { keepBattle })`，`session.ts` 传 `true`。
+换档路径（`syncOnLogin`、玩家主动导入）保持默认清空。
+
+**教训**：一个状态字段的「清空时机」也要有单一语义。`battle` 不进存档，
+它的生命周期就该由战斗模块独占，存档模块不该顺手清它。
+
+### 23.2 `Arena` 的 `latestLog` 是条件 Hook，开局瞬间必崩
+
+现象：点「快速开始」进入战斗时白屏，控制台
+`Rendered more hooks than during the previous render`。
+
+根因：`Arena.tsx` 里 `const latestLog = useMemo(...)` 写在了 `if (!battle) return <空态>`
+**之后**。无战斗时组件只跑 N 个 Hook，有战斗时跑到第 N+1 个 —— React 直接抛错。
+这个 bug 从 P1 就存在，只是每次「从训练场空态点进战斗」都会触发；因为开发时通常
+从营地直接进战斗（`battle` 早已有值），所以一直没被发现。
+
+修法：把 `useMemo` 提到 early return 之前。**所有 Hook 必须在任何 return 之前**，
+`rules.test` 之类测不出来，只能靠 code review 或真实浏览器冒烟。
+
+**教训**：headless 冒烟的真正价值就在这里——单测和 E2E 都不会渲染 React 组件树。
+
+### 23.3 `useMove` 里 `void runServerBattleAction(...)` 让 `await` 变成空操作
+
+现象：`await useMove(id)` 之后立刻断言状态，`turn` 还是旧值。
+
+根因：`useMove` 声明成 `async`，但服务端分支写的是 `void runServerBattleAction(...)`——
+`void` 掉之后函数立刻返回，`await` 等于什么都没等。写测试时才发现。
+
+修法：`useMove` / `useItem` 改成 `await runServerBattleAction(...)`，语义变成
+「等这一回合真的跑完」。`switchTo` / `flee` 的对外签名是 `void`（UI 直接 `onClick`），
+保持 fire-and-forget，但内部仍然置 `pending` 防连点。
+
+**教训**：给 `async` 函数加 `void` 前缀前，先问一句「调用方会不会想 await 它」。
+声明成 async 又立刻返回 Promise 未决态，是最容易骗过自己的写法。

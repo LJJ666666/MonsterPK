@@ -660,10 +660,15 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                       tone="danger"
                       className="!border-[color:var(--danger-border)] !text-[color:var(--danger-text)] text-xs h-10 flex items-center justify-center"
                       style={{ "--danger-border": dangerColor, "--danger-text": textColor } as any}
-                      onClick={() => {
-                        const res = startEncounter(wa.encounters[0], wa.name, wa.levelMin, wa.levelMax, wa.id);
+                      onClick={async () => {
+                        // P3-1c：开局由服务端生成敌人与队伍副本，失败要把原因讲清楚
+                        //（队伍全灭 / 区域没怪 / 未连上服务端），不能静默什么都不发生。
+                        const res = await startEncounter(wa.encounters[0], wa.name, wa.levelMin, wa.levelMax, wa.id);
                         if (res.ok) {
                           navigate("/arena");
+                        } else {
+                          // strict:false 下联合类型收窄失效（bug_log §18），显式断言
+                          setDialog({ name: "训练场", text: (res as { ok: false; reason: string }).reason });
                         }
                       }}
                     >

@@ -92,4 +92,37 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // ───────────────────── P3-1c 服务端战斗（服务端裁决全部过程）─────────────────────
+  /** 开局：客户端只说明「在哪打」，敌人与队伍副本由服务端生成。 */
+  battleStart: (body: {
+    slot: number;
+    theme: string;
+    areaName: string;
+    areaId?: string | null;
+    levelMin: number;
+    levelMax: number;
+    testFlags?: { testShiny?: boolean; testMaxStats?: boolean; testOHKO?: boolean };
+  }) =>
+    request("/api/battle/start", { method: "POST", body: JSON.stringify(body) }),
+  /** 发一个战斗动作（技能/道具/捕获/换人/逃跑），服务端推进一回合。 */
+  battleAction: (body: {
+    battleId: string;
+    slot: number;
+    action:
+      | { type: "move"; moveId: string }
+      | { type: "item"; itemId: string }
+      | { type: "capture"; itemId: string }
+      | { type: "switch"; partyIndex: number }
+      | { type: "flee" };
+  }) =>
+    request("/api/battle/action", { method: "POST", body: JSON.stringify(body) }),
+  /** 刷新/重连后取回服务端仍存活的战斗（战斗态不进存档）。 */
+  battleCurrent: (slot: number) => request(`/api/battle/current?slot=${slot}`),
+  /** 放弃战斗：不结算奖励，仅丢弃会话。 */
+  battleAbandon: (battleId: string, slot: number) =>
+    request("/api/battle/abandon", {
+      method: "POST",
+      body: JSON.stringify({ battleId, slot }),
+    }),
 };

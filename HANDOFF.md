@@ -149,10 +149,10 @@ C:\Users\Six\.workbuddy\user-2f146fb9-76c5-420d-95cd-5fad8c99318f-personal\MEMOR
 
 ## 6. 验收清单
 
-**首选：一条命令跑完全部（约 35s，跑完自动清理测试账号）**
+**首选：一条命令跑完全部（约 45s，跑完自动清理测试账号）**
 
 ```bash
-npm run verify                    # 期望 VERIFY_OK（15 阶段）
+npm run verify                    # 期望 VERIFY_OK（16 阶段）
 ```
 
 它等价于下面这些，且会先探活 5173 / 3001、缺服务的阶段自动 SKIP：
@@ -162,18 +162,19 @@ npm run verify                    # 期望 VERIFY_OK（15 阶段）
 python scripts/check_home_env.py          # ENV_CHECK_OK（[WARN] 按提示处理）
 python scripts/doc_check.py               # DOC_CHECK_OK
 python scripts/sync_memory.py --check     # [一致] 且两侧 sha256 相同
-npm run check && npm test                 # 前端 0 错误 / 47 passed
-cd backend && npm run check && npm test   # 后端 0 错误 / 160 passed
+npm run check && npm test                 # 前端 0 错误 / 81 passed
+cd backend && npm run check && npm test   # 后端 0 错误 / 162 passed
 cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 
 # B. 需要服务已起（后端 3001 + 前端 5173）
-cd backend && npm run e2e               # 57/57 E2E_OK
+cd backend && npm run e2e               # 62/62 E2E_OK
 cd backend && npm run e2e:p12           # 38/38 E2E_P12_OK
 cd backend && npm run e2e:p21           # 34/34 E2E_P21_OK
 cd backend && npm run e2e:p22           # 24/24 E2E_P22_OK（在线权威态）
-cd backend && npm run e2e:p31           # 39/39 E2E_P31_OK（服务端战斗）
-cd backend && npm run e2e:hardening     # 112/112 E2E_HARDENING_OK（对抗攻防）
-node scripts/ui_smoke_p21.mjs           # 15/15 UI_SMOKE_OK（EDGE_PATH 可覆盖）
+cd backend && npm run e2e:p31           # 48/48 E2E_P31_OK（服务端战斗 + P3-1c 契约）
+cd backend && npm run e2e:hardening     # 114/114 E2E_HARDENING_OK（对抗攻防）
+node scripts/ui_smoke_p21.mjs           # 15/15 UI_SMOKE_OK（真实 Edge headless）
+node scripts/ui_smoke_p31c.mjs          # 15/15 UI_SMOKE_P31C_OK（前端走服务端战斗）
 ```
 
 **子集与小技巧**
@@ -181,6 +182,7 @@ node scripts/ui_smoke_p21.mjs           # 15/15 UI_SMOKE_OK（EDGE_PATH 可覆�
 ```bash
 npm run verify:quick              # 只跑 check + unit，不需要服务（改完代码先跑这个）
 npm run verify:e2e                # 只跑六组 E2E
+npm run verify:smoke              # 只跑两个浏览器冒烟（p21 通道 + p31c 战斗链路）
 npm run verify:hardening          # 只跑对抗套件
 npm run verify -- --skip=smoke    # 跳过浏览器冒烟
 npm run verify -- --strict        # CI：服务没起视为失败

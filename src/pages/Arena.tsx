@@ -21,14 +21,21 @@ function resultText(r: string | undefined) {
 
 export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
-  const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter } = useGameStore();
+  const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, resumeBattle } = useGameStore();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
 
   const saves = [save1, save2, save3];
   const save = saves[slot - 1];
 
-  const party = save?.party ?? [];
-  const active = battle && save ? party[battle.playerActiveIndex] : null;
+  // P3-1c：我方队伍以服务端下发的战斗副本为准——战斗内的 HP / 经验只存在于那份副本里，
+  // 存档要等结算才更新。本地降级战斗没有 serverParty，回落到存档队伍。
+  const party = battle?.serverParty ?? save?.party ?? [];
+  const active = battle ? party[battle.playerActiveIndex] ?? null : null;
+
+  // 刷新 / 断线重连后取回服务端仍存活的战斗（战斗态不进存档）
+  useEffect(() => {
+    void resumeBattle();
+  }, []);
 
   const [playerHit, setPlayerHit] = useState(false);
   const [enemyHit, setEnemyHit] = useState(false);
@@ -59,6 +66,11 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
       .filter((x) => x.qty > 0 && (x.spec.kind === "capture" || x.spec.kind === "heal" || x.spec.kind === "status_heal"));
   }, [save]);
 
+  // 提取最新的对战日志以精简显示。
+  // 注意：这个 useMemo 必须放在下面的 early return 之前——否则「无战斗 → 有战斗」
+  // 会让 Hook 数量从 N 变成 N+1，React 直接抛 "Rendered more hooks than during the previous render"。
+  const latestLog = useMemo(() => (battle ? battle.log.slice(-4) : []), [battle?.log]);
+
   if (!save) {
     return (
       <div className="mx-auto flex min-h-screen max-w-4xl items-center justify-center px-5">
@@ -79,8 +91,8 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
             <div>尚未开始遭遇。你可以从营地进入训练场，或在此快速开始一场草地遭遇。</div>
             <div className="flex flex-wrap gap-2">
               <PixelButton
-                onClick={() => {
-                  const res = startEncounter("grass", "测试草地", 1, 5);
+                onClick={async () => {
+                  const res = await startEncounter("grass", "测试草地", 1, 5);
                   if (!res.ok) return;
                 }}
               >
@@ -99,13 +111,6 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   const enemySpec = MONSTER_SPECS[battle.enemy.specId];
   const playerSpec = MONSTER_SPECS[active.specId];
   const activePP = battle.ppByMonster?.[active.id] ?? {};
-
-  // 提取最新的对战日志以精简显示
-  const latestLog = useMemo(() => {
-    if (!battle) return [];
-    // 返回最后4条日志（通常是一个回合的交互结果）
-    return battle.log.slice(-4);
-  }, [battle?.log]);
 
   return (
     <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl sm:border-x-2 sm:border-[color:var(--stroke)]">
@@ -137,6 +142,12 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
         </div>
         <div className="mt-1 text-xs text-[color:var(--muted)]">
           回合 {battle.turn} · {battle.theme.toUpperCase()}
+          {battle.serverId ? (
+            <span className="ml-2 text-[color:var(--accent)]">服务端裁决</span>
+          ) : (
+            <span className="ml-2 text-amber-500">本地模式（结果需服务端确认）</span>
+          )}
+          {battle.pending && <span className="ml-2 animate-pulse text-[color:var(--accent)]">处理中…</span>}
         </div>
       </div>
 
@@ -213,7 +224,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                   <PixelButton tone={panel === "switch" ? "primary" : "muted"} size="sm" onClick={() => setPanel("switch")}>
                     换位
                   </PixelButton>
-                  <PixelButton tone="muted" size="sm" onClick={() => flee()}>
+                  <PixelButton tone="muted" size="sm" onClick={() => flee()} disabled={battle.pending}>
                     逃跑
                   </PixelButton>
                 </div>
@@ -227,7 +238,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                         <PixelButton
                           key={id}
                           onClick={() => useMove(id)}
-                          disabled={battle.finished || active.hp <= 0 || curPP <= 0}
+                          disabled={battle.finished || battle.pending || active.hp <= 0 || curPP <= 0}
                         >
                           <div className="flex flex-col items-center py-1">
                             <span className={ELEMENT_COLORS[MOVE_SPECS[id].element]}>{MOVE_SPECS[id].name}</span>
@@ -250,7 +261,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       <PixelButton
                         key={x.id}
                         tone={x.spec.kind === "capture" ? "primary" : "muted"}
-                        disabled={battle.finished || x.qty <= 0}
+                        disabled={battle.finished || battle.pending || x.qty <= 0}
                         onClick={() => useItem(x.id)}
                       >
                         {x.spec.name} <span className="ml-1 text-xs opacity-70">x{x.qty}</span>
@@ -265,7 +276,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       <PixelButton
                         key={m.id}
                         tone={idx === battle.playerActiveIndex ? "muted" : "primary"}
-                        disabled={battle.finished || m.hp <= 0 || idx === battle.playerActiveIndex}
+                        disabled={battle.finished || battle.pending || m.hp <= 0 || idx === battle.playerActiveIndex}
                         onClick={() => switchTo(idx)}
                       >
                         <div className="flex flex-col items-center">
@@ -304,8 +315,8 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                     </PixelButton>
                     <PixelButton
                       tone="primary"
-                      onClick={() => {
-                        const res = startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
+                      onClick={async () => {
+                        const res = await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
                         if (res.ok) setPanel("moves");
                       }}
                     >

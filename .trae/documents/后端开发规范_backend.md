@@ -1011,3 +1011,74 @@ P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 
    上云后可加短 TTL 缓存，但不能缓存过久，否则顶号不即时生效。
 4. P4-2 联机对战仍需操作级同步：野怪是「抢一次」的互斥资源，
    回合制实时同屏不能靠整档 CAS 或实例池解决。
+
+---
+
+## 23. P4-2a 只读派生榜（2026-11-07）
+
+**定位**：第一个「跨账号只读读模型」。不新增权威源、不改存档结构、不引入房间，
+只验通「服务端落库存档真值 → 纯函数派生 → 只读下发」这条链路。
+产品口径与排期见 `.trae/documents/P4-2_多人玩法排期_2026-11-07.md` §4。
+
+### 23.1 战力定义（`game/power.ts`）
+
+- 单宠战力 = **有效六维之和**：`maxHp + atk + def + spAtk + spDef + spd`；
+  全队战力 = `party` 各只之和（不含 `box`）；单宠榜取 `party ∪ box` 最高一只。
+- **必须用 `maxHp`，绝不能用 `hp`**。当前血量会随战斗 / 治疗 / 全灭惩罚波动，
+  用它会「打一仗掉榜、回血刷榜」。`safe()` 把 NaN / Infinity / 负数 / 字符串归零。
+- 战力**不代表实战强弱**，不得用于匹配 / 伤害 / 奖励 / 解锁 / 任何判定；
+  UI 固定标注「战力仅为六维总和，不代表实战强弱」。否则它变成隐藏实力分数，必被刷。
+- **公式待定**：系数 / 权重 / 取整 / 等级修正均未实现，先简单求和占位。
+- **装备扩展点**：`effectiveStats(panel, bonus)` = 基础面板 + 服务端独立装备加成，
+  **不写回 `MonsterInstance`**（会污染 `digestOf` / authority 摘要与 CAS 风控）。
+  战力函数只依赖有效六维，装备上线时零改动；不要塞种族值 / 等级 / 技能 PP。
+
+### 23.2 派生口径（`game/rank.ts`）
+
+| 榜 | 主值 | 次级排序 | 说明 |
+|---|---|---|---|
+| `monster_power` | 最强一只六维和 | 全队战力 | 战力免责文案 |
+| `team_power` | party 六维和 | 队伍只数 | 战力免责文案 |
+| `summoner_level` | 派生等级 | 图鉴捕获数 | `1 + 首通×2 + floor(队伍等级和/10) + 图鉴捕获数`，上限 9999 |
+| `progress` | `clearedAreas` 数量 | 最高区域 `level` | 客户端上报进度无效 |
+
+- **不加 `playerLevel` 字段**：`SaveData` 没有该字段，新增会联动 `SCHEMA_VERSION` /
+  `EXPECTED_SAVE_VERSION` / migrate 三处；榜单尚在暂定阶段，先只读派生。
+- 排序按 `主值 → 次值 → 用户名 → 槽位` 稳定降序，同分完全可复现；
+  `limit` 钳制 1~50；`isMe` 只用于前端高亮，**不参与排序**；行内不下发 `userId`。
+- `deriveMetrics(save)` 输入是**已解析且已过 `validateSaveData()`** 的对象，
+  非对象返回 null；额外字段（客户端伪造的 `power` / `playerLevel` / `rankScore`）不参与派生。
+
+### 23.3 接口与只读闸门（`modules/rank.ts`）
+
+- `GET /api/rank` → 四榜元数据；`GET /api/rank/:type?limit=N` → 单张榜。
+  **只有 GET**：无 POST / PUT / 意图 / WS 上行写入口，写请求自然 404。
+- `preHandler: fastify.authenticate`：未登录 401；顶号旧 token 由守卫统一 403 `SESSION_REPLACED`。
+- 显式伪造字段白名单 `FORBIDDEN_RANK_QUERY_KEYS`（power / score / level / playerLevel /
+  clearedAreas / progress / data 等）命中即 400 `RANK_INPUT_FORBIDDEN`；
+  未知类型 400 `RANK_TYPE_UNKNOWN`；`limit` 越界 400。未知其它 query 字段 strip 忽略。
+- `loadRankSources()` 从 `Save` 表读**落库真值**（`commitState()` 写内存必落 DB），
+  用 `validateSaveData()` 过滤脏档；**排除封号账号与 `role='admin'`**
+  （管理员测试菜单能造满属性 / 满金币，放进全服榜会污染数据）。
+- 响应固定带 `readonly: true` / `source: 'server_save'` / `generatedAt` / `eligible` / `skipped`。
+- `/api/health` 的 `rank` 统计是纯常量（types / readonly / source），**不查库**。
+
+### 23.4 读模型与前端
+
+- **实时派生（TTL=0 的 Read Model）**：不缓存、不落库、不周期刷新。
+  原型规模小且「写档后立刻可见」；后续有规模再换周期快照，接口与前端零改动。
+- 前端 `lib/rank.ts` 只做防御性解析（`parseRankBoard` 丢弃非法行）与文案，
+  **不计算战力、不缓存可改写真值**；`api.rankBoard()` 走统一 `request()`，
+  顶号只读下线态由传输层硬闸覆盖。
+- `RankBoardModal` 在 `Camp.tsx` 顶部第二行「榜单」入口打开；四榜 Tab、
+  加载 / 错误 / 空态、免责条、`isMe` 高亮、375px 无横向溢出。
+  **切 Tab 用 `cancelled` 标志丢弃过期响应**，否则快速连点会出现
+  「Tab 是推图、说明却是战力榜」的错位（bug_log §28）。
+
+### 23.5 边界
+
+1. 榜单是**全服按账号+槽位**的静态派生视图：无周期结算、无榜单奖励、无跨服、无实时逐帧刷新。
+2. 多实例部署时 DB 是共享真值，读模型天然可用；但排行榜规模上来后要换周期快照，别在每请求扫全表。
+3. 战力公式、装备加成口径、榜单周期与分组、剧情解锁点仍是待定项，不影响本阶段接口。
+4. **本阶段没有改 `SCHEMA_VERSION` / Prisma schema / 迁移**。
+

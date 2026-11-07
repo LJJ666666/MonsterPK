@@ -11,6 +11,7 @@ import { IDLE_CAP_MINUTES, idleCapsuleExpectation, idleCapsulesPerHour, idleElap
 import { useIsAdmin } from "@/lib/admin";
 
 import TypeChartModal from "@/components/TypeChartModal";
+import RankBoardModal from "@/components/RankBoardModal";
 
 import { MonsterName } from "@/components/MonsterName";
 
@@ -145,6 +146,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [dialog, setDialog] = useState<{ name: string; text: string } | null>(null);
   const [bagFilter, setBagFilter] = useState<"all" | "heal" | "item" | "skill" | "quest">("all");
   const [showTypeChart, setShowTypeChart] = useState(false);
+  const [showRank, setShowRank] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
   const [dexSelectedSpecId, setDexSelectedSpecId] = useState<string | null>(null);
   const [dexSearchQuery, setDexSearchQuery] = useState("");
@@ -1071,13 +1073,17 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             </button>
           </div>
         </div>
-        <div className="mt-1 text-xs text-[color:var(--muted)]">
-          {save.playerName} · ¥{save.money}
+        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[color:var(--muted)]">
+          <span className="truncate">{save.playerName} · ¥{save.money}</span>
+          <button className="flex-none text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
+            榜单
+          </button>
         </div>
       </div>
 
       {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
+      {showRank && <RankBoardModal onClose={() => setShowRank(false)} />}
 
       {notice && (
         <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/15 px-4 py-2 text-xs text-[color:var(--danger)]">

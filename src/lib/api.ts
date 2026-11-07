@@ -161,6 +161,13 @@ export const api = {
     request(`/api/wild?areaId=${encodeURIComponent(areaId)}&theme=${encodeURIComponent(theme)}`
       + `&levelMin=${levelMin}&levelMax=${levelMax}`),
 
+  // ───────────────────── P4-2a 只读派生榜（服务端真值，客户端零写入口）─────────────────────
+  /** 榜单类型清单（只读元数据）。 */
+  rankTypes: () => request("/api/rank"),
+  /** 读一张榜；limit 由服务端钳制 1~50，不允许上报任何分数 / 战力 / 进度。 */
+  rankBoard: (type: string, limit = 20) =>
+    request(`/api/rank/${encodeURIComponent(type)}?limit=${limit}`),
+
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**
    * 治疗 / 战斗外道具 / 进化 / 学招 / 队伍整理 / 移动。

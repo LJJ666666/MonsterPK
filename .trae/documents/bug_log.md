@@ -546,3 +546,59 @@ A 传 `levelMax=60` 就能让 B 看到 60 级野怪，等于客户端改别人�
 复位，用户重新登录后所有 API 仍被本地拦截，表现为「登录成功但一切空白」。
 同时 `resetSessionReplaced()` 也要在 `setToken()` 调，否则第二次顶号不再弹窗。
 这类「全局一次性标志」必须在登录入口统一复位，写单测盖住（`sessionReplaced.test.ts`）。
+
+---
+
+## 28. P4-2a 只读派生榜的六个坑与边界（2026-11-07）
+
+### 28.1 冒烟探针的 `waitFor` 双调度把 `next()` 跑了两次
+
+headless Edge 探针里 `waitFor()` 同时挂 MutationObserver 和 `setTimeout` 递归，
+条件成立时两条链都会调 `next()`。表现为 `out.disclaimer` 第一次记 true、
+第二次在已切到推图榜的页面上重新计算变成 false，断言莫名红。
+**修**：`once(label, fn)` + 全局 `completed[label]`，`waitFor` 开头先查已完成标记，
+超时分支也跳过已完成的 label。这类探针 bug 会伪装成「产品 UI 偶发不对」，先查探针。
+
+### 28.2 探针点太快，暴露了真实的 Tab 竞态缺陷
+
+`RankBoardModal` 原实现 `useEffect(() => load(tab), [tab])` 没有取消标志：
+快速切 Tab 时先发的 `monster_power` 请求后到，覆盖 `progress` 的响应，
+界面出现「Tab 是推图、数值单位也是区，但说明/免责还是战力榜」。
+**这不是测试问题，是前端缺陷**：修成 effect 内 `let cancelled = false`，
+cleanup 置 true，`.then/.catch/.finally` 全部先判 `cancelled`；
+loading 期间免责与说明回落固定文案，不展示上一张榜的残留。
+同时把探针的 board 等待条件收紧到「有行 + 不在 loading」，避免人为制造竞态。
+
+### 28.3 E2E 推图榜 0 分账号被 `limit=50` 截断
+
+DB 里残留测试存档超过 50 份，`clearedAreas` 为空的账号 value=0 排不进 top50，
+「high 两区 > low 零区」断言只查到 high 一条。
+**修**：给三个测试账号各造 1~2 个真实首通区（low Lv.3 / mid Lv.10 / high Lv.18），
+断言改成 `high=2 > low=1`，并顺带验证「同数量按 secondary 排序」；
+**不要把断言改成只查 high** —— 那会把「榜单截取」这个真实行为掩盖掉。
+
+### 28.4 `cleared.reduce` 在 `strict:false` 下推断成 `unknown`
+
+`Object.values(Record<string, unknown>)` 得到 `unknown[]`，
+`reduce((max, a) => Math.max(max, ...), 0)` 报
+`TS2345 Argument of type 'unknown'` / `TS2322 Type 'unknown' is not assignable to number`。
+**修**：显式泛型 `cleared.reduce<number>(...)`。这是 §18「判别联合不收窄」的同类复发，
+凡是 `unknown` 集合聚合都要给 reduce 初值泛型。
+
+### 28.5 `--dump-dom` 时 `data-probe` 一直是 PENDING
+
+第一层 `waitFor` 条件不成立时跑满 400×50ms，正好耗尽 `--virtual-time-budget=20000`，
+Edge 在探针调用 `finish()` 前就 dump 了 DOM，看起来像「页面白屏」。
+**修**：iframe `load` 时先落一次初始快照（含 `initialTxt` / `initialButtons`），
+重试上限调到 200、budget 提到 30000，`window.onerror` 也写进诊断。
+诊断字段保留在脚本里，下次再挂能一眼看出卡在哪一层。
+
+### 28.6 三条设计边界（不是缺陷，但别踩）
+
+1. **实时派生而非周期快照**：契约原写「快照 + 周期刷新」，实现为 TTL=0 的 Read Model，
+   理由与后续替换路径写在规范 §23.4 / 排期文档 §4 实现记录里，别当成漏做。
+2. **封号与管理员账号不上榜**：管理员测试菜单能造满属性 / 满金币，
+   不排除会污染全服榜；`loadRankSources()` 用 Prisma `where` 一次过滤。
+3. **战力公式仍待定**：只实现「有效六维简单求和」，系数 / 权重 / 取整未做；
+   别把「六维总和」误当实战评分拿去做匹配或奖励判定。
+

@@ -41,12 +41,13 @@ plan_text = text(plan_path) if plan_path.exists() else ""
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（230 / 96 / 41 / 25 / 48 / 50 / 41 / 30 / 115 / 13 / 20）",
-     all(x in memory_text for x in ["**230**", "**96**", "**41**", "**25**", "**48**", "**50**",
-                                    "**30**", "115", "**13/13**", "**15/15**", "**20/20**"])),
+    ("MEMORY.md 写入最终数字（249 / 105 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 115 / 17 / 22）",
+     all(x in memory_text for x in ["**249**", "**105**", "**41**", "**25**", "**48**", "**50**",
+                                    "**30**", "**39**", "115", "**17/17**", "**13/13**",
+                                    "**15/15**", "**22/22**"])),
     ("MEMORY.md 记录降级与旧意图下线",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P4-2", "下一步 P4-2" in memory_text),
+    ("MEMORY.md 下一步为 P4-2b", "下一步 P4-2b" in memory_text),
     ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
     ("MEMORY.md 记录 P4-0 写入并发控制",
      "写入并发控制（P4-0）" in memory_text and "REVISION_CONFLICT" in memory_text and "slotLock.ts" in memory_text),
@@ -64,10 +65,12 @@ checks = [
     ("任务表已拆 P4-2 五阶段并写明排期状态",
      all(f"| P4-2{c} |" in task_text for c in "abcde")
      and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 记 P4-2 口径与下一步 P4-2a",
-     "P4-2 📋 排期" in memory_text and "下一步 P4-2a" in memory_text
-     and "P4-2_多人玩法排期_2026-11-07.md" in memory_text),
+    ("MEMORY.md 记 P4-2a 实现与下一步 P4-2b",
+     "P4-2a ✅" in memory_text and "下一步 P4-2b" in memory_text
+     and "P4-2_多人玩法排期_2026-11-07.md" in memory_text
+     and "GET /api/rank" in memory_text and "effectiveStats" in memory_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
+    ("每日日志记 P4-2a 实现", "P4-2a 只读派生榜" in log_text and "E2E_P42A_OK" in log_text),
     ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
      all(x in plan_text for x in [
          "maxHp", "spAtk", "六维总属性", "不代表实战强弱", "effectiveStats",
@@ -77,10 +80,36 @@ checks = [
     ("每日日志记战力口径补充", "六维总属性" in log_text and "effectiveStats" in log_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
     ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
-    ("bug_log 含 §17 ~ §27", all(f"## {n}." in bug_text for n in range(17, 28))),
+    ("bug_log 含 §17 ~ §28", all(f"## {n}." in bug_text for n in range(17, 29))),
     ("规范含 §22 顶号与共享野怪", "## 22." in spec_text and "22.7" in spec_text),
+    ("规范含 §23 P4-2a 只读派生榜",
+     "## 23." in spec_text and "23.3 接口与只读闸门" in spec_text
+     and "RANK_INPUT_FORBIDDEN" in spec_text and "TTL=0" in spec_text),
+    ("排期文档记 P4-2a 实现记录与实时派生决策",
+     "✅ 已实现" in plan_text and "E2E_P42A_OK" in plan_text
+     and "UI_SMOKE_P42A_OK" in plan_text and "TTL=0" in plan_text),
     ("verify 已注册 e2e:p41 / smoke:p41",
      "e2e:p41" in verify_text and "smoke:p41" in verify_text and '"e2e:p41"' in pkg_text),
+    ("verify 已注册 e2e:p42a / smoke:p42a",
+     "e2e:p42a" in verify_text and "smoke:p42a" in verify_text
+     and '"e2e:p42a"' in pkg_text and "ui_smoke_p42a.mjs" in verify_text),
+    ("P4-2a 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/power.ts",
+         "backend/src/game/rank.ts",
+         "backend/src/modules/rank.ts",
+         "backend/tests/power.test.ts",
+         "backend/tests/rank.test.ts",
+         "backend/tests/e2e_p42a_rank.mjs",
+         "scripts/ui_smoke_p42a.mjs",
+         "src/lib/rank.ts",
+         "src/lib/rank.test.ts",
+         "src/components/RankBoardModal.tsx",
+     ])),
+    ("任务表记 P4-2a ✅ 与 39/17 验收",
+     "**✅ 已实现（2026-11-07）**" in task_text
+     and "E2E_P42A_OK" in task_text and "UI_SMOKE_P42A_OK" in task_text),
+    ("任务表下一步为 P4-2b", "下一步建议" in task_text and "下一步 P4-2b" in task_text),
     ("P4-1 关键文件齐全",
      all((ROOT / p).exists() for p in [
          "backend/src/lib/wildRegistry.ts",

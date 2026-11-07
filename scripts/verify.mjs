@@ -55,10 +55,12 @@ const STAGES = [
   { id: 'e2e:p32', name: 'E2E 服务端存档写操作（P3-2）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p32'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p4', name: 'E2E 写入并发控制（P4）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p4'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p41', name: 'E2E 顶号与共享野怪（P4-1）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p41'], need: 'backend', timeout: 300_000 },
-  { id: 'e2e:hardening', name: 'E2E 对抗攻防（114 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:p42a', name: 'E2E 只读派生榜（P4-2a）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42a'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p41', name: '375px 共享野怪 UI（P4-1）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p41.mjs'], need: 'both', timeout: 300_000 },
+  { id: 'smoke:p42a', name: '375px 只读派生榜 UI（P4-2a）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42a.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -67,8 +69,8 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a'],
   docs: ['docs:doc', 'docs:memory'],
 };
 

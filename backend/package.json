@@ -23,6 +23,7 @@
     "e2e:p32": "node tests/e2e_p32_mutations.mjs",
     "e2e:p4": "node tests/e2e_p4_cas.mjs",
     "e2e:p41": "node tests/e2e_p41_wild.mjs",
+    "e2e:p42a": "node tests/e2e_p42a_rank.mjs",
     "e2e:hardening": "node tests/e2e_hardening.mjs",
     "clean:e2e": "node scripts/clean-test-data.mjs"
   },

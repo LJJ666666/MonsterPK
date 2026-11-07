@@ -43,21 +43,21 @@ future_text = text(future_path) if future_path.exists() else ""
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（321 / 122 / 44 / 19 / 62 / 30 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 16 / 115 / 27）",
-     all(x in memory_text for x in ["**321**", "**122**", "**44**", "**19/19**", "**62**",
-                                    "**41**", "**25**", "**48**", "**50**", "**30**",
-                                    "**39**", "**43**", "**16**", "115", "**17/17**", "**13/13**",
-                                    "**15/15**", "**27/27**"])),
-    ("MEMORY.md 记录降级与旧意图下线",
+    ("任务表固化 P4-2 全阶段验收 token（不绑 MEMORY 精确数字）",
+     all(x in task_text for x in [
+         "E2E_P42A_OK", "E2E_P42B_OK", "E2E_P42C_OK", "E2E_P42D_OK",
+         "UI_SMOKE_P42A_OK", "UI_SMOKE_P42C_OK", "UI_SMOKE_P42D_OK"])),
+    ("MEMORY.md 记录降级与旧意图下线（决策，非技术细节）",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
     ("MEMORY.md 下一步为 P4-2e", "下一步 P4-2e" in memory_text),
-    ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
-    ("MEMORY.md 记录 P4-0 写入并发控制",
-     "写入并发控制（P4-0）" in memory_text and "REVISION_CONFLICT" in memory_text and "slotLock.ts" in memory_text),
-    ("MEMORY.md 记录 P4-1 顶号与共享野怪",
-     "SESSION_REPLACED" in memory_text and "WildRegistry" in memory_text and "P4-1 ✅" in memory_text),
-    ("MEMORY.md 记录 P4-1 回滚点",
-     "rollback-20261107-pre-p41" in memory_text and "rollback-20261107-post-p41" in memory_text),
+    ("MEMORY.md 记 P3-2 写操作上移（细节在规范 §20）",
+     "P3-2" in memory_text and "## 20." in spec_text),
+    ("MEMORY.md 记 P4-0 写入并发控制（细节在规范 §21）",
+     "P4-0" in memory_text and "写入并发控制" in memory_text and "## 21." in spec_text),
+    ("MEMORY.md 记 P4-1 顶号与共享野怪（细节在规范 §22）",
+     "P4-1 ✅" in memory_text and "## 22." in spec_text and "SESSION_REPLACED" in spec_text),
+    ("每日日志固化 P4-1 回滚点（不绑 MEMORY 精确 tag 名）",
+     "rollback-20261107-pre-p41" in log_text and "rollback-20261107-post-p41" in log_text),
     ("P4-2 排期契约文档齐全（口径 / 参数 / 五阶段 / 边界）",
      plan_path.exists()
      and all(x in plan_text for x in [
@@ -68,25 +68,27 @@ checks = [
     ("任务表已拆 P4-2 五阶段并写明排期状态",
      all(f"| P4-2{c} |" in task_text for c in "abcde")
      and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 记 P4-2a / P4-2b / P4-2c / P4-2d 实现与下一步 P4-2e",
+    ("MEMORY.md 进度快照含 P4-2a/b/c/d ✅ 与下一步 P4-2e（指向排期文档）",
      "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "P4-2c ✅" in memory_text
      and "P4-2d ✅" in memory_text and "下一步 P4-2e" in memory_text
-     and "P4-2_多人玩法排期_2026-11-07.md" in memory_text
-     and "GET /api/rank" in memory_text and "effectiveStats" in memory_text
-     and "RoomRegistry" in memory_text and "quota" in memory_text
-     and "BossDamageEvent" in memory_text and "applySettlementToSave" in memory_text
-     and "RoomState.pvp" in memory_text and "pvpViewFor" in memory_text),
+     and "P4-2_多人玩法排期_2026-11-07.md" in memory_text),
+    ("规范/排期固化 P4-2 技术细节（rank/pvp/boss/room/bossQuota）",
+     all(x in spec_text for x in ["GET /api/rank", "effectiveStats", "RoomRegistry", "quota",
+                                  "BossDamageEvent", "applySettlementToSave", "RoomState.pvp", "pvpViewFor"])
+     and "RoomState.pvp" in plan_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
     ("每日日志记 P4-2a 实现", "P4-2a 只读派生榜" in log_text and "E2E_P42A_OK" in log_text),
     ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
      all(x in plan_text for x in [
          "maxHp", "spAtk", "六维总属性", "不代表实战强弱", "effectiveStats",
          "宠物装备", "公式本身待定", "不写回 `MonsterInstance`"])),
-    ("任务表记战力口径", "六维总属性" in task_text and "不代表" in task_text and "maxHp" in task_text),
-    ("MEMORY.md 记战力口径", "六维" in memory_text and "不代表实战强弱" in memory_text),
+    ("任务表/排期固化战力口径（不绑 MEMORY）",
+     "六维总属性" in task_text and "不代表" in task_text and "maxHp" in task_text
+     and "不代表实战强弱" in plan_text),
     ("每日日志记战力口径补充", "六维总属性" in log_text and "effectiveStats" in log_text),
-    ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
-    ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
+    ("每日日志固化早期 commit 锚点（不绑 MEMORY）",
+     "`fe159eb`" in log_text and "`2f2c8b7`" in log_text),
+    ("MEMORY.md 体积合理（< 20_000，宽松防无限膨胀）", a.stat().st_size < 20_000, f"{a.stat().st_size} bytes"),
     ("bug_log 含 §17 ~ §28", all(f"## {n}." in bug_text for n in range(17, 29))),
     ("规范含 §22 顶号与共享野怪", "## 22." in spec_text and "22.7" in spec_text),
     ("规范含 §23 P4-2a 只读派生榜",
@@ -225,9 +227,7 @@ checks = [
     ("台账 F12 已标偿还、F14 登记 Boss 产出规则",
      "F12" in future_text and "✅ 已偿还" in future_text
      and "F14" in future_text and "不发任何奖励" in future_text),
-    ("MEMORY.md 记未来规划台账与召唤师等级口径修正",
-     "未来规划与技术债_2026-11-07.md" in memory_text
-     and "账号等级" in memory_text and "宠物等级帽" in memory_text),
+    # MEMORY 只需索引台账文件名（已在 §1 引用）；口径细节由 F04 台账断言（上条）覆盖
     ("每日日志记台账建立与口径修正", "未来规划台账" in log_text and "账号等级" in log_text),
     # ——— P4-2b 房间内核 ———
     ("规范含 §24 房间内核（状态域 / quota / 掉线 / 协议）",

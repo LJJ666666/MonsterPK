@@ -8,6 +8,7 @@ import { WsRegistry } from '../lib/wsRegistry';
 import { GameSessionRegistry, type SessionStats } from '../lib/gameSession';
 import { BattleRegistry } from '../lib/battleSession';
 import { WildRegistry } from '../lib/wildRegistry';
+import { RoomRegistry } from '../lib/roomRegistry';
 
 /** 在线 WebSocket 连接登记表（P2-1 已在用）。 */
 export const wsRegistry = new WsRegistry();
@@ -17,6 +18,8 @@ export const gameSessions = new GameSessionRegistry();
 export const battles = new BattleRegistry();
 /** 按区域的共享野怪实例池（P4-1b），跨账号共享同一份实例。 */
 export const wilds = new WildRegistry();
+/** P4-2b 房间状态域（roomId）：纯逻辑 + 可替换 storage，P5-1 迁共享存储时只换 adapter。 */
+export const rooms = new RoomRegistry();
 
 /** 把一条服务端消息发给该账号的所有在线连接；返回实际送达条数。 */
 export function broadcastToUser(userId: string, data: string): number {
@@ -26,6 +29,11 @@ export function broadcastToUser(userId: string, data: string): number {
 /** P4-1b：跨账号全量广播（共享野怪状态），返回实际送达条数。 */
 export function broadcastAll(data: string): number {
   return wsRegistry.broadcastAll(data);
+}
+
+/** P4-2b：给一批账号发同一份消息（去重），返回实际送达条数。 */
+export function broadcastToMany(userIds: string[], data: string): number {
+  return wsRegistry.broadcastToMany(userIds, data);
 }
 
 export function getSessionStats(): SessionStats {

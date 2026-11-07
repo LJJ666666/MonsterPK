@@ -15,7 +15,7 @@ import { cleanupByPrefix } from '../tests/lib/harness.mjs';
 
 const DRY = process.argv.includes('--dry');
 /** 各代 E2E / 冒烟脚本用过的账号前缀（含 P1-2 / P2-1 时期的旧命名）。 */
-const BASE_PREFIXES = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_'];
+const BASE_PREFIXES = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_'];
 const extra = process.argv
   .find((a) => a.startsWith('--prefix='))
   ?.split('=').slice(1).join('=')

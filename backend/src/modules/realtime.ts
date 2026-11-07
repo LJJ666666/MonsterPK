@@ -37,12 +37,15 @@ import {
   buildRejectResponse,
   deadAfterMs,
 } from '../lib/wsProtocol';
-import { wsRegistry, gameSessions, wilds } from './sessionBus';
+import { wsRegistry, gameSessions, wilds, battles, rooms } from './sessionBus';
 import { publishWild } from './wild';
+import {
+  publishRooms, sweepRooms, applyRoomIntent, applyRoomAutopilot,
+} from './room';
+import { tokenDigest } from '../lib/roomAuth';
 import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
-import { battles } from './sessionBus';
 
 export function getRealtimeStats(): { connections: number; users: number } {
   return { connections: wsRegistry.size, users: wsRegistry.userCount };
@@ -135,7 +138,11 @@ export function registerRealtime(fastify: FastifyInstance): void {
         if ('code' in session) {
           return reject(socket, 403, session.code, session.reason, userId);
         }
-        wss.handleUpgrade(req, socket, head, (ws) => onConnected(fastify, ws, userId, heartbeatMs));
+        // P4-2b：把 token 指纹带进连接生命周期，房间座位据此判断「同 token 同设备」。
+        wss.handleUpgrade(
+          req, socket, head,
+          (ws) => onConnected(fastify, ws, userId, heartbeatMs, tokenDigest(token)),
+        );
       } catch (err) {
         fastify.log.error({ event: 'ws_upgrade_error', err }, 'ws upgrade failed');
         reject(socket, 500, 'INTERNAL', '服务器内部错误');
@@ -201,8 +208,20 @@ export function registerRealtime(fastify: FastifyInstance): void {
   }, heartbeatMs);
   timer.unref?.();
 
+  // P4-2b 房间时间线与 30s 心跳解耦：回合超时是秒级，不能等一个心跳周期才推进。
+  // 250ms 扫描纯内存状态，房间稳定时 tick 不产生变更、也不广播。
+  const roomTimer = setInterval(() => {
+    try {
+      sweepRooms(Date.now());
+    } catch (err) {
+      fastify.log.error({ event: 'room_sweep_error', err }, 'room sweep failed');
+    }
+  }, 250);
+  roomTimer.unref?.();
+
   fastify.addHook('onClose', async () => {
     clearInterval(timer);
+    clearInterval(roomTimer);
     for (const c of wsRegistry.all()) {
       try {
         c.socket.send(encodeServerMessage({ type: 'bye', reason: '服务器正在关闭' }));
@@ -221,6 +240,7 @@ function onConnected(
   ws: any,
   userId: string,
   heartbeatMs: number,
+  digest: string,
 ): void {
   const now = Date.now();
   const conn: WsConnection = {
@@ -262,6 +282,11 @@ function onConnected(
     }),
   );
   fastify.log.info({ event: 'ws_connected', userId, connectionId: conn.id }, 'ws connected');
+
+  // P4-2b：同一 token 同一设备才算重连 —— 座位按 (userId, tokenDigest) 匹配。
+  // 换设备登录会签出新 token（sv 递增）→ 指纹不同 → 座位保持掉线、不转移。
+  const rejoined = rooms.reconnect(userId, digest, conn.id, now);
+  if (rejoined.length > 0) publishRooms(rejoined);
 
   // P2-2：连接就绪后把该用户已有槽位的权威快照推下去（重连等于拉最新状态）。
   void (async () => {
@@ -328,6 +353,46 @@ function onConnected(
       return;
     }
 
+    // P4-2b：房间上行只有「意图」与「请求重推」，都不直接写状态。
+    if (msg.type === 'room.resync') {
+      const list = rooms.listForUser(userId).filter(
+        (r) => msg.roomId === undefined || r.roomId === msg.roomId,
+      );
+      for (const r of list) {
+        if (ws.readyState !== 1) break;
+        ws.send(encodeServerMessage({ type: 'room.state', room: rooms.view(r, userId) }));
+      }
+      return;
+    }
+    if (msg.type === 'room.action') {
+      // 与 REST 共用同一套服务层：withRoomLock 串行 → 服务端裁决 → 广播 room.state。
+      void (async () => {
+        try {
+          const res = msg.action === 'intent'
+            ? await applyRoomIntent({
+                roomId: msg.roomId,
+                userId,
+                intent: String(msg.intent ?? ''),
+                nonce: msg.nonce,
+              })
+            : await applyRoomAutopilot({
+                roomId: msg.roomId,
+                userId,
+                targetSeat: Number(msg.targetSeat),
+                enabled: msg.action === 'autopilot_on',
+                nonce: msg.nonce,
+              });
+          // 业务拒绝只回 error，不断连；协议层伪造类型才关 1008。
+          if ('code' in res && ws.readyState === 1) {
+            ws.send(encodeServerMessage({ type: 'error', code: res.code, reason: res.reason }));
+          }
+        } catch (err) {
+          fastify.log.error({ event: 'room_action_error', userId, err }, 'room action failed');
+        }
+      })();
+      return;
+    }
+
     const ts = 'ts' in msg ? msg.ts : undefined;
     ws.send(
       encodeServerMessage({
@@ -341,6 +406,10 @@ function onConnected(
   ws.on('close', () => {
     wsRegistry.remove(conn.id);
     detachConnection(conn.id);
+    // P4-2b：断线只标记座位、保留回合态；按 connectionId 精确匹配，
+    // 新连接先建好、旧连接迟到 close 时不会误标掉线。
+    const changed = rooms.markDisconnected(userId, conn.id, Date.now());
+    if (changed.length > 0) publishRooms(changed);
     fastify.log.info({ event: 'ws_closed', userId, connectionId: conn.id }, 'ws closed');
   });
   ws.on('error', () => {

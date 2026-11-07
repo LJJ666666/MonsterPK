@@ -19,6 +19,19 @@ export function slotLockKey(userId: string, slot: number): string {
 }
 
 /**
+ * P4-2b：房间状态的串行化键。与 `userId:slot` 共用同一条队列实现，
+ * 只是 key 加 `room:` 前缀 —— 锁本身零改动，满足契约「薄封装」的要求。
+ * 房间 owner key 是 `roomId`，一个房间的所有写操作必须排在同一条链上。
+ */
+export function roomLockKey(roomId: string): string {
+  return `room:${roomId}`;
+}
+
+export function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
+  return withSlotLock(roomLockKey(roomId), fn);
+}
+
+/**
  * 在槽位临界区内执行 fn。
  * 前一个任务失败不能阻断后续任务，所以 then 的两个回调都指向 fn 的调用。
  */

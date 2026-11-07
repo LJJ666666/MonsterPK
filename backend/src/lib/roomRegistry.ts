@@ -1,0 +1,506 @@
+/**
+ * P4-2b 房间内核：纯逻辑状态机 + 可替换存储适配器。
+ *
+ * 设计约束（契约 §5 / 三条不变式）：
+ *  - **零 IO**：不 import ws / fastify / prisma；时间、RNG、配置、ID 全部注入，单测可用假时钟推进 60 秒。
+ *  - **可替换 storage**：所有读写只经 `RoomStorage` 接口；默认内存实现，P5-1 多实例时换共享存储
+ *    而不改状态机（这是 F10 硬门槛的预留口）。
+ *  - **同步无 await**：与 `WildRegistry.claim()` 同理，Node 单线程下一个方法调用内部不会交错；
+ *    跨 await 的「读→判定→写」由路由层的 `withRoomLock()` 串行。
+ *  - 客户端只发意图、只收 `RoomView` 全量快照；这里没有任何「按客户端上报的状态写字段」的路径。
+ */
+import { randomUUID } from 'node:crypto';
+import {
+  type AutopilotPolicy, type QuotaUsage, type Rng, type RoomConfig, type RoomMode,
+  type RoomResult, type RoomSeat, type RoomState, type RoomView, type RoomSeatView,
+  RandomAutopilotPolicy, roomConfigFor,
+} from './roomTypes';
+
+/** 可替换存储：换 Redis / Postgres 时实现这 7 个同步语义的适配即可。 */
+export interface RoomStorage {
+  get(roomId: string): RoomState | undefined;
+  set(room: RoomState): void;
+  delete(roomId: string): void;
+  all(): RoomState[];
+  getQuota(key: string): QuotaUsage;
+  setQuota(key: string, usage: QuotaUsage): void;
+  quotaKeys(): string[];
+}
+
+const emptyUsage = (): QuotaUsage => ({ held: 0, committed: 0 });
+
+export class InMemoryRoomStorage implements RoomStorage {
+  private readonly rooms = new Map<string, RoomState>();
+  private readonly quotas = new Map<string, QuotaUsage>();
+
+  get(roomId: string): RoomState | undefined { return this.rooms.get(roomId); }
+  set(room: RoomState): void { this.rooms.set(room.roomId, room); }
+  delete(roomId: string): void { this.rooms.delete(roomId); }
+  all(): RoomState[] { return Array.from(this.rooms.values()); }
+  getQuota(key: string): QuotaUsage { return { ...(this.quotas.get(key) ?? emptyUsage()) }; }
+  setQuota(key: string, usage: QuotaUsage): void { this.quotas.set(key, { ...usage }); }
+  quotaKeys(): string[] { return Array.from(this.quotas.keys()); }
+}
+
+/** tick 的产出，供调用方广播与记录日志。 */
+export type TickReport = {
+  changedRoomIds: string[];
+  timedOut: number;
+  autopiloted: number;
+  abandoned: string[];
+  deleted: string[];
+};
+
+export type RoomRegistryOptions = {
+  storage?: RoomStorage;
+  configFor?: (mode: RoomMode) => RoomConfig;
+  policy?: AutopilotPolicy;
+  idFactory?: () => string;
+};
+
+type Member = { userId: string; tokenDigest: string; connectionId: string | null };
+
+const ok = <T>(value: T): RoomResult<T> => ({ ok: true, value });
+const fail = <T>(code: string, reason: string): RoomResult<T> => ({ ok: false, code, reason });
+
+/** nonce 只留最近 64 个，防重放又不让房间无限膨胀。 */
+const MAX_SEEN_NONCES = 64;
+const ROOM_ID_MAX_LEN = 96;
+const INTENT_MAX_LEN = 64;
+
+function validIntent(intent: unknown): intent is string {
+  return typeof intent === 'string' && intent.length > 0 && intent.length <= INTENT_MAX_LEN
+    && /^[A-Za-z0-9_\-]+$/.test(intent);
+}
+
+/** quota key 允许冒号分段（如 `boss:daily:2026-11-07`），但仍是纯字符、限长，只作内存 Map 键。 */
+function validQuotaKey(key: unknown): key is string {
+  return typeof key === 'string' && key.length > 0 && key.length <= INTENT_MAX_LEN
+    && /^[A-Za-z0-9_:\-]+$/.test(key);
+}
+
+export class RoomRegistry {
+  private readonly storage: RoomStorage;
+  private readonly configFor: (mode: RoomMode) => RoomConfig;
+  private readonly policy: AutopilotPolicy;
+  private readonly idFactory: () => string;
+
+  constructor(opts: RoomRegistryOptions = {}) {
+    this.storage = opts.storage ?? new InMemoryRoomStorage();
+    this.configFor = opts.configFor ?? ((mode) => roomConfigFor(mode));
+    this.policy = opts.policy ?? new RandomAutopilotPolicy();
+    this.idFactory = opts.idFactory ?? (() => randomUUID());
+  }
+
+  config(mode: RoomMode): RoomConfig { return this.configFor(mode); }
+
+  get(roomId: string): RoomState | undefined { return this.storage.get(roomId); }
+
+  /** 找该用户所在的所有房间（resync / 广播用）。 */
+  listForUser(userId: string): RoomState[] {
+    return this.storage.all().filter((r) => r.seats.some((s) => s.userId === userId));
+  }
+
+  quotaUsage(key: string): QuotaUsage { return this.storage.getQuota(key); }
+
+  stats() {
+    const all = this.storage.all();
+    const byStatus: Record<string, number> = {};
+    for (const r of all) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+    return {
+      rooms: all.length,
+      byStatus,
+      quotaKeys: this.storage.quotaKeys().length,
+      seats: all.reduce((n, r) => n + r.seats.length, 0),
+    };
+  }
+
+  /** 生成公开视图；`self` 按接收者计算，因此广播要按成员分别生成。 */
+  view(room: RoomState, viewerUserId: string): RoomView {
+    const seats: RoomSeatView[] = room.seats.map((s) => ({
+      seat: s.seat,
+      label: `座位 ${s.seat + 1}`,
+      online: s.online,
+      autopilot: s.autopilot,
+      submitted: room.submitted.includes(s.seat),
+      self: s.userId === viewerUserId,
+    }));
+    return {
+      roomId: room.roomId,
+      mode: room.mode,
+      status: room.status,
+      revision: room.revision,
+      turn: room.turn,
+      deadlineAt: room.deadlineAt,
+      seats,
+      lastAction: room.lastAction
+        ? { seat: room.lastAction.seat, intent: room.lastAction.intent, kind: room.lastAction.kind }
+        : null,
+      quota: room.quota ? { key: room.quota.key, state: room.quota.state } : null,
+      endReason: room.endReason,
+      updatedAt: room.updatedAt,
+    };
+  }
+
+  private bump(room: RoomState, now: number): void {
+    room.revision += 1;
+    room.updatedAt = now;
+    this.storage.set(room);
+  }
+
+  /** quota hold：只校验余量并占一个名额，**不消耗次数**。 */
+  private holdQuota(key: string, limit: number): boolean {
+    const usage = this.storage.getQuota(key);
+    if (usage.held + usage.committed >= limit) return false;
+    usage.held += 1;
+    this.storage.setQuota(key, usage);
+    return true;
+  }
+
+  /** commit / release 都幂等；已 committed 的房间再 abandon 不会倒扣。 */
+  private finishQuota(room: RoomState, commit: boolean): void {
+    const q = room.quota;
+    if (!q || q.state !== 'held') return;
+    const usage = this.storage.getQuota(q.key);
+    usage.held = Math.max(0, usage.held - 1);
+    if (commit) usage.committed += 1;
+    this.storage.setQuota(q.key, usage);
+    q.state = commit ? 'committed' : 'released';
+  }
+
+  create(params: {
+    mode: RoomMode;
+    owner: Member;
+    quotaKey?: string;
+    /** 由服务端从配置读，绝不接受客户端传值。 */
+    quotaLimit?: number;
+    now: number;
+    roomId?: string;
+  }): RoomResult<RoomState> {
+    if (!params.owner?.userId || !params.owner.tokenDigest) {
+      return fail('ROOM_BAD_MEMBER', '成员身份不完整');
+    }
+    const roomId = params.roomId ?? this.idFactory();
+    if (typeof roomId !== 'string' || roomId.length === 0 || roomId.length > ROOM_ID_MAX_LEN) {
+      return fail('ROOM_BAD_ID', '房间标识不合法');
+    }
+    if (this.storage.get(roomId)) return fail('ROOM_EXISTS', '房间已存在');
+    const cfg = this.configFor(params.mode);
+    const key = params.quotaKey;
+    if (key !== undefined && !validQuotaKey(key)) {
+      return fail('ROOM_BAD_QUOTA_KEY', '次数键不合法');
+    }
+    if (key !== undefined && !this.holdQuota(key, params.quotaLimit ?? 3)) {
+      return fail('ROOM_QUOTA_EXHAUSTED', '本周期挑战次数已用完');
+    }
+    const seat: RoomSeat = {
+      seat: 0,
+      userId: params.owner.userId,
+      tokenDigest: params.owner.tokenDigest,
+      connectionId: params.owner.connectionId,
+      online: params.owner.connectionId !== null,
+      disconnectedAt: params.owner.connectionId === null ? params.now : null,
+      autopilot: false,
+    };
+    const room: RoomState = {
+      roomId,
+      mode: params.mode,
+      status: 'forming',
+      revision: 1,
+      createdAt: params.now,
+      updatedAt: params.now,
+      seats: [seat],
+      turn: 1,
+      deadlineAt: 0,
+      submitted: [],
+      lastAction: null,
+      quota: key === undefined ? null : { key, state: 'held' },
+      allOfflineSince: seat.online ? null : params.now,
+      seenNonces: [],
+      endReason: null,
+    };
+    // 满 1 人即开局的场景（单人 Boss 预留）：b 阶段固定 2 人，故 forming。
+    if (cfg.maxSeats <= 1) this.start(room, params.now, cfg);
+    this.storage.set(room);
+    return ok(room);
+  }
+
+  private start(room: RoomState, now: number, cfg: RoomConfig): void {
+    room.status = 'active';
+    room.deadlineAt = now + cfg.roundTimeoutMs;
+    room.allOfflineSince = room.seats.every((s) => !s.online) ? now : null;
+  }
+
+  join(params: { roomId: string; member: Member; now: number }): RoomResult<RoomState> {
+    const room = this.storage.get(params.roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.status !== 'forming') return fail('ROOM_CLOSED', '房间已开局');
+    if (!params.member?.userId || !params.member.tokenDigest) {
+      return fail('ROOM_BAD_MEMBER', '成员身份不完整');
+    }
+    const cfg = this.configFor(room.mode);
+    if (room.seats.length >= cfg.maxSeats) return fail('ROOM_FULL', '房间已满');
+    if (room.seats.some((s) => s.userId === params.member.userId)) {
+      return fail('ROOM_DUPLICATE_MEMBER', '不能重复加入房间');
+    }
+    room.seats.push({
+      seat: room.seats.length,
+      userId: params.member.userId,
+      tokenDigest: params.member.tokenDigest,
+      connectionId: params.member.connectionId,
+      online: params.member.connectionId !== null,
+      disconnectedAt: params.member.connectionId === null ? params.now : null,
+      autopilot: false,
+    });
+    if (room.seats.length >= cfg.maxSeats) this.start(room, params.now, cfg);
+    else if (room.seats.every((s) => !s.online)) room.allOfflineSince = params.now;
+    else room.allOfflineSince = null;
+    this.bump(room, params.now);
+    return ok(room);
+  }
+
+  /**
+   * WS 断开：按 (userId, connectionId) 精确匹配座位。
+   * 精确匹配是关键 —— 新连接先建好、旧连接随后 close 时，不能把新连接标成掉线。
+   * 顶号踢掉的旧连接也走这里，表现就是「成员掉线」，座位保留等待同一 token 重连。
+   */
+  markDisconnected(userId: string, connectionId: string, now: number): string[] {
+    const changed: string[] = [];
+    for (const room of this.listForUser(userId)) {
+      if (room.status === 'abandoned' || room.status === 'settled') continue;
+      const seat = room.seats.find((s) => s.userId === userId && s.connectionId === connectionId);
+      if (!seat) continue;
+      seat.online = false;
+      seat.connectionId = null;
+      seat.disconnectedAt = now;
+      if (room.status === 'active') room.status = 'paused';
+      if (room.seats.every((s) => !s.online) && room.allOfflineSince === null) {
+        room.allOfflineSince = now;
+      }
+      this.bump(room, now);
+      changed.push(room.roomId);
+    }
+    return changed;
+  }
+
+  /**
+   * 重连：必须 (userId, tokenDigest) 同时匹配才恢复座位。
+   * 换设备登录 → sessionVersion 递增 → JWT `sv` 变化 → tokenDigest 不同 → **不匹配**，
+   * 座位保持 disconnected，不会把新连接塞进旧房间（契约 §4 与 P4-1 顶号的边界）。
+   */
+  reconnect(userId: string, tokenDigest: string, connectionId: string, now: number): string[] {
+    const changed: string[] = [];
+    for (const room of this.listForUser(userId)) {
+      if (room.status === 'abandoned' || room.status === 'settled') continue;
+      const seat = room.seats.find(
+        (s) => s.userId === userId && s.tokenDigest === tokenDigest && !s.online,
+      );
+      if (!seat) continue;
+      seat.online = true;
+      seat.connectionId = connectionId;
+      seat.disconnectedAt = null;
+      seat.autopilot = false; // 本人回来了，托管自动撤销
+      room.allOfflineSince = null;
+      if (room.status === 'paused') room.status = 'active';
+      // 契约「超时计时清零」：重连后重新给一整个回合窗口。
+      if (room.deadlineAt > 0) room.deadlineAt = now + this.configFor(room.mode).roundTimeoutMs;
+      this.bump(room, now);
+      changed.push(room.roomId);
+    }
+    return changed;
+  }
+
+  /**
+   * 开启 / 关闭托管：只能由**在线**成员给**掉线且已超过 offer 窗口**的队友开，
+   * 不能给自己开，也不能给在线队友开。是否开启是「可选」，不是自动接管。
+   */
+  offerAutopilot(params: {
+    roomId: string;
+    actorUserId: string;
+    targetSeat: number;
+    enabled: boolean;
+    now: number;
+    /** WS 上行必带；与回合意图共用 seenNonces 去重。 */
+    nonce?: string;
+  }): RoomResult<RoomState> {
+    const room = this.storage.get(params.roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.status !== 'active' && room.status !== 'paused') {
+      return fail('ROOM_CLOSED', '房间已结束');
+    }
+    const actor = room.seats.find((s) => s.userId === params.actorUserId);
+    if (!actor || !actor.online) return fail('ROOM_FORBIDDEN', '只有在线成员可以操作托管');
+    const target = room.seats.find((s) => s.seat === params.targetSeat);
+    if (!target) return fail('ROOM_SEAT_NOT_FOUND', '目标座位不存在');
+    if (target.userId === params.actorUserId) return fail('AUTOPILOT_SELF', '不能托管自己');
+    if (target.online) return fail('AUTOPILOT_TARGET_ONLINE', '目标成员在线，无需托管');
+    if (params.enabled) {
+      const since = target.disconnectedAt ?? params.now;
+      if (params.now - since < this.configFor(room.mode).autopilotOfferMs) {
+        return fail('AUTOPILOT_TOO_EARLY', '队友仍在重连窗口内，暂不能托管');
+      }
+    }
+    if (target.autopilot === params.enabled) return ok(room);
+    if (params.nonce !== undefined) {
+      if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
+      if (room.seenNonces.includes(params.nonce)) return fail('INTENT_REPLAY', '该意图已提交');
+      room.seenNonces.push(params.nonce);
+      if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
+    }
+    target.autopilot = params.enabled;
+    this.bump(room, params.now);
+    return ok(room);
+  }
+
+  /** 提交一个回合意图；nonce 去重。全员提交 → 立即推进回合。 */
+  submitIntent(params: {
+    roomId: string;
+    actorUserId: string;
+    intent: string;
+    nonce: string;
+    now: number;
+  }): RoomResult<{ room: RoomState; advanced: boolean }> {
+    const room = this.storage.get(params.roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.status !== 'active' && room.status !== 'paused') {
+      return fail('ROOM_CLOSED', '房间已结束');
+    }
+    const seat = room.seats.find((s) => s.userId === params.actorUserId);
+    if (!seat) return fail('ROOM_FORBIDDEN', '你不在该房间');
+    if (!seat.online) return fail('ROOM_SEAT_OFFLINE', '当前成员已掉线');
+    if (!validIntent(params.intent)) return fail('ROOM_BAD_INTENT', '意图不合法');
+    if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
+    if (room.seenNonces.includes(params.nonce)) return fail('INTENT_REPLAY', '该意图已提交');
+    if (room.submitted.includes(seat.seat)) {
+      return fail('TURN_ALREADY_SUBMITTED', '本回合已提交过意图');
+    }
+    room.seenNonces.push(params.nonce);
+    if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
+    room.submitted.push(seat.seat);
+    room.lastAction = { seat: seat.seat, intent: params.intent, kind: 'manual', at: params.now };
+    let advanced = false;
+    if (room.submitted.length >= room.seats.length) {
+      this.advanceTurn(room, params.now, this.configFor(room.mode));
+      advanced = true;
+    }
+    this.bump(room, params.now);
+    return ok({ room, advanced });
+  }
+
+  private advanceTurn(room: RoomState, now: number, cfg: RoomConfig): void {
+    room.turn += 1;
+    room.submitted = [];
+    room.deadlineAt = now + cfg.roundTimeoutMs;
+  }
+
+  /** 正常结算：quota `hold → commit`，次数只有到这里才真的扣。 */
+  settle(roomId: string, now: number): RoomResult<RoomState> {
+    const room = this.storage.get(roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.status === 'settled') return ok(room);
+    if (room.status === 'abandoned') return fail('ROOM_CLOSED', '房间已解散');
+    room.status = 'settled';
+    room.endReason = 'settled';
+    room.deadlineAt = 0;
+    this.finishQuota(room, true);
+    this.bump(room, now);
+    return ok(room);
+  }
+
+  /** 主动放弃 / 全员掉线 / forming 超时：quota `hold → release`，不扣次数、不结算。 */
+  abandon(roomId: string, now: number, reason: string): RoomResult<RoomState> {
+    const room = this.storage.get(roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.status === 'abandoned') return ok(room);
+    if (room.status === 'settled') return fail('ROOM_CLOSED', '房间已结算');
+    room.status = 'abandoned';
+    room.endReason = reason;
+    room.deadlineAt = 0;
+    this.finishQuota(room, false);
+    this.bump(room, now);
+    return ok(room);
+  }
+
+  /** 服务端代放：托管座位走 `autopilot`，超时未交的座位走 `timeout`。 */
+  private autoSubmit(
+    room: RoomState,
+    seat: RoomSeat,
+    kind: 'autopilot' | 'timeout',
+    now: number,
+    rng: Rng,
+    report: TickReport,
+  ): void {
+    const intent = this.policy.pick({ roomId: room.roomId, seat: seat.seat, turn: room.turn }, rng);
+    if (!intent) return;
+    room.submitted.push(seat.seat);
+    room.lastAction = { seat: seat.seat, intent, kind, at: now };
+    if (kind === 'autopilot') report.autopiloted += 1;
+    else report.timedOut += 1;
+  }
+
+  /**
+   * 推进一个房间的时间线。纯逻辑、注入 now / rng，单测可用假时钟一次跳 60 秒。
+   * 顺序有讲究：先判「全员掉线解散」与「forming 超时」，再推进回合，避免已解散房间还被代放。
+   */
+  tick(roomId: string, now: number, rng: Rng, report: TickReport): void {
+    const room = this.storage.get(roomId);
+    if (!room) return;
+    const cfg = this.configFor(room.mode);
+    if (room.status === 'abandoned' || room.status === 'settled') {
+      if (now - room.updatedAt > cfg.ttlMs) {
+        this.storage.delete(roomId);
+        report.deleted.push(roomId);
+      }
+      return;
+    }
+    if (room.status === 'forming' && now - room.createdAt > cfg.ttlMs) {
+      this.abandon(roomId, now, 'forming_timeout');
+      report.abandoned.push(roomId);
+      report.changedRoomIds.push(roomId);
+      return;
+    }
+    if (room.allOfflineSince !== null && now - room.allOfflineSince >= cfg.allOfflineGraceMs) {
+      this.abandon(roomId, now, 'all_offline');
+      report.abandoned.push(roomId);
+      report.changedRoomIds.push(roomId);
+      return;
+    }
+    if (room.status !== 'active' && room.status !== 'paused') return;
+
+    let changed = false;
+    // 1) 已开启托管的掉线座位：回合一开始就代放，不必等 20s 超时。
+    for (const seat of room.seats) {
+      if (!seat.autopilot || seat.online || room.submitted.includes(seat.seat)) continue;
+      this.autoSubmit(room, seat, 'autopilot', now, rng, report);
+      changed = true;
+    }
+    // 2) 全员交齐 → 立即推进。
+    if (room.submitted.length >= room.seats.length) {
+      this.advanceTurn(room, now, cfg);
+      changed = true;
+    } else if (room.deadlineAt > 0 && now >= room.deadlineAt) {
+      // 3) 回合超时 → 服务端用注入 RNG 代放所有未提交座位，正常推进回合。
+      for (const seat of room.seats) {
+        if (room.submitted.includes(seat.seat)) continue;
+        this.autoSubmit(room, seat, 'timeout', now, rng, report);
+      }
+      this.advanceTurn(room, now, cfg);
+      changed = true;
+    }
+    if (changed) {
+      this.bump(room, now);
+      report.changedRoomIds.push(roomId);
+    }
+  }
+
+  /** 定时扫描所有房间；调用方负责给 changedRoomIds 广播 room.state。 */
+  sweep(now: number, rng: Rng): TickReport {
+    const report: TickReport = {
+      changedRoomIds: [], timedOut: 0, autopiloted: 0, abandoned: [], deleted: [],
+    };
+    for (const room of this.storage.all()) {
+      this.tick(room.roomId, now, rng, report);
+    }
+    return report;
+  }
+}

@@ -1081,4 +1081,92 @@ P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 
 2. 多实例部署时 DB 是共享真值，读模型天然可用；但排行榜规模上来后要换周期快照，别在每请求扫全表。
 3. 战力公式、装备加成口径、榜单周期与分组、剧情解锁点仍是待定项，不影响本阶段接口。
 4. **本阶段没有改 `SCHEMA_VERSION` / Prisma schema / 迁移**。
+5. **召唤师等级是占位派生，不是产品口径**：杰哥 11-07 修正为「人物/账号等级 + 宠物等级帽」，见 `未来规划与技术债_2026-11-07.md` **F04**；偿还前不得声称已实现。
+
+## 24. P4-2b 房间内核（第四个状态域）
+
+### 24.1 归属与不变式
+
+房间是继 `userId:slot` / `battleId` / `areaId` 之后的**第四个状态域**，owner key = `roomId`。
+三条不变式不变：一个可变状态一个 owner key；一次写一个串行化键（房间用 `room:xxx`）；
+客户端只发意图、只收全量快照。**`commitState()` 仍是写个人档的唯一入口**，房间态不落个人档。
+
+```ts
+// lib/slotLock.ts —— 薄封装，锁本身零改动
+export function roomLockKey(roomId: string) { return `room:${roomId}`; }
+export function withRoomLock<T>(roomId: string, fn: () => Promise<T>) {
+  return withSlotLock(roomLockKey(roomId), fn);
+}
+```
+
+### 24.2 状态机与座位（`lib/roomRegistry.ts`）
+
+`forming → active → paused → abandoned | settled`；`paused` 可由同 token 重连回 `active`。
+`revision` 每次变更 +1，`RoomView` 按接收者分别生成（`self` 不同），
+**不下发** `tokenDigest` / `connectionId` / 他人 `userId` / 次数余量。
+每个座位每回合提交一次意图；**全员交齐立即推进**，否则等 `ROUND_TIMEOUT_MS` 由服务端代放剩余座位。
+
+`paused` 仍推进回合：一个人掉线不能卡死全房。全员掉线超 `ALL_OFFLINE_GRACE_MS` 才解散。
+
+### 24.3 quota 三段式（「都掉了不算次数」）
+
+| 时机 | 动作 | `held` / `committed` |
+|---|---|---|
+| `create` | `hold`：只校验余量、不消耗 | `+1 / 0` |
+| `settle` | `commit`：正常结算才扣 | `-1 / +1` |
+| `abandon` / 全员掉线 / forming 超时 | `release` | `-1 / 0` |
+
+三段幂等，已 `committed` 再 abandon 不倒扣。**上限由服务端 `ROOM_QUOTA_LIMIT` 决定**，
+客户端只能给 `quotaKey` 隔离键；请求体里出现 `status` / `revision` / `turn` / `quotaLimit` /
+`seats` 等真值字段一律 400 `ROOM_INPUT_FORBIDDEN`（不是「忽略后悄悄生效」）。
+
+### 24.4 掉线、重连与 P4-1 顶号
+
+- 座位存 **token 的 sha256**（`lib/roomAuth.ts`），不存明文。`reconnect()` 必须 `(userId, tokenDigest)` 双匹配。
+- 换设备登录 → `sessionVersion` 递增 → JWT `sv` 变化 → 新 token 指纹不同 → **座位保持掉线、不转移**。
+  旧 token 的所有 REST 仍由 `authenticate` 挡成 403 `SESSION_REPLACED`。
+- `markDisconnected(userId, connectionId, now)` 按 `connectionId` **精确匹配**：
+  新连接先建好、旧连接迟到的 `close` 事件不会把新连接标掉线（单测钉住）。
+- WS 断线只标记座位、保留回合态与座位号，并给房内其他人推 `room.state`。
+- **进房间必须有在线 WS**（`ROOM_WS_REQUIRED` 409），否则掉线检测没有锚点。
+
+### 24.5 阈值、超时与托管
+
+阈值按 `mode` 分档（`roomConfigFor()`），**客户端只能选 mode，不能传毫秒数**：
+`kernel` 是无玩法基准档，服务端短阈值 1.2s / 1.8s / 3.5s（可从 `ROOM_KERNEL_*` 调），
+用于内核验证与 CI；`pvp` / `coop` 用生产档 20s / 30s / 60s（`ROOM_*`）。
+
+- 回合超时 → `RandomAutopilotPolicy` 用注入 RNG 从可用意图里挑一个代放，正常推进回合。
+- 掉线超 `AUTOPILOT_OFFER_MS` 后，**房内在线成员可以**（不是自动）给掉线队友开托管；
+  开了之后该座位在回合开始即被代放，不必等 20s。重连后托管自动撤销。
+- `AutopilotPolicy` 是接口，后续 AI 直接替换；d/e 接真实战斗时改为 `pickUsableMove()`，状态机零改动。
+- **250ms 房间扫描定时器**与 30s 心跳解耦；REST `GET /api/room/:id` 也惰性 `tick()`。
+  时间只由服务端推进，客户端无法触发。
+
+### 24.6 协议与接口
+
+- 下行 `room.state`（全量快照，带 `revision`）；上行 `room.action`（`intent` /
+  `autopilot_on` / `autopilot_off`，必带 `nonce`）与 `room.resync`（只请求重推）。
+  **伪造 `room.state` 上行命中 `UNKNOWN_TYPE` 并关 1008**；多余字段一律在解析层丢弃。
+- REST 与 WS **共用同一服务层**（`modules/room.ts`）：`applyRoom*` 都经 `withRoomLock()` →
+  服务端裁决 → `publishRoom()` 按成员广播。WS 上行是意图，不是状态写入。
+- 路由：`POST /api/room/create` / `:id/join` / `:id/action` / `:id/autopilot` /
+  `:id/settle` / `:id/abandon`，`GET /api/room` / `:id` / `quota/:key`；
+  **没有整包 PUT**（404）。全部 `preHandler: fastify.authenticate`。
+- `/api/health` 加 `rooms` 统计（纯内存、不查库）。
+
+### 24.7 并发与可替换存储
+
+`RoomRegistry` 零 IO、注入 `now` / `rng` / `configFor` / `idFactory`，
+读写只经 `RoomStorage` 接口（默认 `InMemoryRoomStorage`）—— P5-1 换共享存储不改状态机。
+同步 Map 操作在 Node 单线程下不会交错，**房间锁保护的是路由层跨 await 组合**；
+`roomLock.test.ts` 用「读 → await → 写」确定性证明去锁会超卖（3 个并发全成功）、加锁只 1 个成功。
+**P5-1 换异步 adapter 时 quota 必须另加 key 级锁**，否则会超卖（台账 F10）。
+
+### 24.8 边界
+
+- b 阶段**无玩法**：不算伤害、不写个人档、不发奖励、不做匹配、无玩法 UI；前端只有协议层与幂等应用。
+- 不改 `SCHEMA_VERSION` / Prisma schema / 迁移。
+- 未来规划（周期结算、榜单奖励、单机隔离版、账号等级、装备、托管 AI 等）统一登记在
+  `未来规划与技术债_2026-11-07.md`，本阶段不实现。
 

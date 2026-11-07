@@ -4,7 +4,10 @@
 import { useEffect, useState } from "react";
 import { api, API_BASE, UNAUTHORIZED_EVENT, BANNED_EVENT, BAN_CODE } from "./api";
 import { getToken, isTokenValid } from "./auth";
-import { SESSION_STATE_EVENT, WILD_STATE_EVENT, type SessionStateMessage, type WildStateMessage } from "./sessionState";
+import {
+  SESSION_STATE_EVENT, WILD_STATE_EVENT, ROOM_STATE_EVENT,
+  type SessionStateMessage, type WildStateMessage, type RoomStateMessage,
+} from "./sessionState";
 import {
   SESSION_REPLACED_CODE, notifySessionReplaced,
 } from "./sessionReplaced";
@@ -65,6 +68,27 @@ export function isWildStateMessage(m: ServerEnvelope | null): m is WildStateMess
     && typeof m.revision === "number"
     && Number.isFinite(m.revision)
     && Array.isArray(m.monsters);
+}
+
+/**
+ * P4-2b：校验房间全量快照形状。脏包一律不派发，避免把伪造的回合/座位塞进 UI。
+ * 注意只校验「形状」，revision 的幂等判断在 lib/room.ts。
+ */
+export function isRoomStateMessage(m: ServerEnvelope | null): m is RoomStateMessage {
+  if (!m || m.type !== "room.state" || !m.room || typeof m.room !== "object" || Array.isArray(m.room)) return false;
+  const r = m.room as Record<string, any>;
+  const modes = ["kernel", "pvp", "coop"];
+  const statuses = ["forming", "active", "paused", "abandoned", "settled"];
+  if (typeof r.roomId !== "string" || r.roomId.length === 0 || r.roomId.length > 96) return false;
+  if (!modes.includes(r.mode) || !statuses.includes(r.status)) return false;
+  if (typeof r.revision !== "number" || !Number.isFinite(r.revision) || r.revision < 0) return false;
+  if (typeof r.turn !== "number" || typeof r.deadlineAt !== "number" || typeof r.updatedAt !== "number") return false;
+  if (!Array.isArray(r.seats)) return false;
+  for (const s of r.seats) {
+    if (!s || typeof s !== "object" || typeof s.seat !== "number" || typeof s.label !== "string") return false;
+    for (const k of ["online", "autopilot", "submitted", "self"]) if (typeof s[k] !== "boolean") return false;
+  }
+  return true;
 }
 
 export type WsPhase =
@@ -272,6 +296,11 @@ function connect() {
       // P4-1b：共享野怪状态也是全量快照，只转发，由 lib/wild.ts 维护视图。
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(WILD_STATE_EVENT, { detail: m }));
+      }
+    } else if (isRoomStateMessage(m)) {
+      // P4-2b：房间快照按成员分别下发，只转发；幂等应用由 lib/room.ts 负责。
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(ROOM_STATE_EVENT, { detail: m }));
       }
     } else if (m.type === "error") {
       setPhase("online", m.reason);

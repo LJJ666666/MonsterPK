@@ -10,11 +10,19 @@
  *
  * 注意：4KB / 20 条每秒限制针对**上行**；下行快照是完整存档，不受 maxPayload 约束。
  */
+import type {
+  RoomIntentKind, RoomMode, RoomQuotaState, RoomStatus,
+} from './roomTypes';
+
 /** 握手路径。刻意独立于 /api/*，方便网关按路径分流 WebSocket 流量。 */
 export const WS_PATH = '/ws';
 /** 协议版本：P2-2 保持 1，用 hello.capabilities 声明新增能力，避免旧客户端被拒。 */
 export const WS_PROTOCOL_VERSION = 1;
-export const WS_CAPABILITIES = ['session.state', 'session.resync', 'battle.state', 'wild.state'];
+export const WS_CAPABILITIES = [
+  'session.state', 'session.resync', 'battle.state', 'wild.state',
+  // P4-2b：房间全量快照 + 上行意图（意图由服务端裁决，上行没有写状态入口）。
+  'room.state', 'room.action', 'room.resync',
+];
 
 /** 服务端底层 ping 周期；连接超过两个周期无响应即判定死连接。 */
 export const WS_HEARTBEAT_MS = 30_000;
@@ -87,7 +95,21 @@ export function isOriginAllowed(
 /** 客户端 → 服务端：控制消息。业务状态只能由服务端下发，上行没有写入口。 */
 export type ClientMessage =
   | { type: 'ping'; ts?: number }
-  | { type: 'session.resync'; slot?: number };
+  | { type: 'session.resync'; slot?: number }
+  /**
+   * P4-2b 房间意图：只带「我要做什么」，绝不带房间状态 / 回合结果 / quota 次数。
+   * nonce 必填且服务端去重，防网络重放；`room.state` 没有对应的上行类型。
+   */
+  | {
+      type: 'room.action';
+      roomId: string;
+      action: 'intent' | 'autopilot_on' | 'autopilot_off';
+      nonce: string;
+      intent?: string;
+      targetSeat?: number;
+    }
+  /** 只请求「重推我所在房间的快照」，不携带任何状态数据。 */
+  | { type: 'room.resync'; roomId?: string };
 
 /** 会话快照消息体（P2-2）。 */
 export type SessionStatePayload = {
@@ -137,6 +159,35 @@ export type WildStatePayload = {
   }[];
 };
 
+/**
+ * P4-2b 房间全量快照。按成员分别下发（`self` 随接收者变化），
+ * revision 单调递增，客户端按 (roomId, revision) 幂等应用。
+ * 上行没有 `room.state` 类型，伪造会命中 UNKNOWN_TYPE 并被关 1008。
+ */
+export type RoomStatePayload = {
+  type: 'room.state';
+  room: {
+    roomId: string;
+    mode: RoomMode;
+    status: RoomStatus;
+    revision: number;
+    turn: number;
+    deadlineAt: number;
+    seats: {
+      seat: number;
+      label: string;
+      online: boolean;
+      autopilot: boolean;
+      submitted: boolean;
+      self: boolean;
+    }[];
+    lastAction: { seat: number; intent: string; kind: RoomIntentKind } | null;
+    quota: { key: string; state: RoomQuotaState } | null;
+    endReason: string | null;
+    updatedAt: number;
+  };
+};
+
 /** 服务端 → 客户端：控制消息 + 权威态快照。 */
 export type ServerMessage =
   | {
@@ -154,11 +205,23 @@ export type ServerMessage =
   | { type: 'bye'; reason: string; code?: string }
   | SessionStatePayload
   | BattleStatePayload
-  | WildStatePayload;
+  | WildStatePayload
+  | RoomStatePayload;
 
 export type ParseResult =
   | { ok: true; message: ClientMessage }
   | { ok: false; code: string; reason: string };
+
+const ROOM_ACTIONS = new Set(['intent', 'autopilot_on', 'autopilot_off']);
+const ROOM_ID_PATTERN = /^[A-Za-z0-9_:\-]+$/;
+const TOKEN_FIELD_PATTERN = /^[A-Za-z0-9_\-]+$/;
+
+function validRoomId(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 && v.length <= 96 && ROOM_ID_PATTERN.test(v) ? v : undefined;
+}
+function validTokenField(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 && v.length <= 64 && TOKEN_FIELD_PATTERN.test(v) ? v : undefined;
+}
 
 /** 解析并校验客户端消息：长度 → JSON → 形状 → 白名单类型，四层都拒绝未知输入。 */
 export function parseClientMessage(
@@ -189,6 +252,36 @@ export function parseClientMessage(
       ? obj.slot
       : undefined;
     return { ok: true, message: slot === undefined ? { type: 'session.resync' } : { type: 'session.resync', slot } };
+  }
+  if (obj.type === 'room.resync') {
+    // 只请求重推；带任何状态字段都忽略，不回显、不采信。
+    const roomId = validRoomId(obj.roomId);
+    return { ok: true, message: roomId === undefined ? { type: 'room.resync' } : { type: 'room.resync', roomId } };
+  }
+  if (obj.type === 'room.action') {
+    const roomId = validRoomId(obj.roomId);
+    const nonce = validTokenField(obj.nonce);
+    if (roomId === undefined || nonce === undefined || !ROOM_ACTIONS.has(String(obj.action))) {
+      return { ok: false, code: 'BAD_SHAPE', reason: '房间意图格式不正确' };
+    }
+    const action = obj.action as 'intent' | 'autopilot_on' | 'autopilot_off';
+    const intent = validTokenField(obj.intent);
+    if (action === 'intent' && intent === undefined) {
+      return { ok: false, code: 'BAD_SHAPE', reason: '缺少回合意图' };
+    }
+    const targetSeat = typeof obj.targetSeat === 'number' && Number.isInteger(obj.targetSeat)
+      && obj.targetSeat >= 0 && obj.targetSeat <= 7 ? obj.targetSeat : undefined;
+    if (action !== 'intent' && targetSeat === undefined) {
+      return { ok: false, code: 'BAD_SHAPE', reason: '缺少托管目标座位' };
+    }
+    // 与 session.resync 同口径：多余字段（含伪造的状态 / 次数 / 回合结果）一律丢弃。
+    return {
+      ok: true,
+      message: {
+        type: 'room.action', roomId, action, nonce,
+        ...(action === 'intent' ? { intent } : { targetSeat }),
+      },
+    };
   }
   return {
     ok: false,

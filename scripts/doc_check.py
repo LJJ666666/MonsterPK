@@ -37,17 +37,19 @@ handoff_text = text(ROOT / "HANDOFF.md")
 verify_text = text(ROOT / "scripts" / "verify.mjs")
 plan_path = DOCS / "P4-2_多人玩法排期_2026-11-07.md"
 plan_text = text(plan_path) if plan_path.exists() else ""
+future_path = DOCS / "未来规划与技术债_2026-11-07.md"
+future_text = text(future_path) if future_path.exists() else ""
 
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（249 / 105 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 115 / 17 / 22）",
-     all(x in memory_text for x in ["**249**", "**105**", "**41**", "**25**", "**48**", "**50**",
-                                    "**30**", "**39**", "115", "**17/17**", "**13/13**",
-                                    "**15/15**", "**22/22**"])),
+    ("MEMORY.md 写入最终数字（280 / 114 / 41 / 25 / 48 / 50 / 41 / 30 / 39 / 43 / 115 / 17 / 23）",
+     all(x in memory_text for x in ["**280**", "**114**", "**41**", "**25**", "**48**", "**50**",
+                                    "**30**", "**39**", "**43**", "115", "**17/17**", "**13/13**",
+                                    "**15/15**", "**23/23**"])),
     ("MEMORY.md 记录降级与旧意图下线",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P4-2b", "下一步 P4-2b" in memory_text),
+    ("MEMORY.md 下一步为 P4-2c", "下一步 P4-2c" in memory_text),
     ("MEMORY.md 记录 P3-2 写操作上移", "POST /api/game/:op" in memory_text and "checkPartyStateRegression" in memory_text),
     ("MEMORY.md 记录 P4-0 写入并发控制",
      "写入并发控制（P4-0）" in memory_text and "REVISION_CONFLICT" in memory_text and "slotLock.ts" in memory_text),
@@ -60,15 +62,16 @@ checks = [
      and all(x in plan_text for x in [
          "全员掉线", "不扣次数", "可选", "ROUND_TIMEOUT_MS", "AUTOPILOT_OFFER_MS",
          "ALL_OFFLINE_GRACE_MS", "hold", "commit", "release", "pickUsableMove",
-         "roomId", "P4-2a", "P4-2e", "未开工", "同一 token 同一设备",
+         "roomId", "P4-2a", "P4-2e", "c~e 仍为排期", "同一 token 同一设备",
          "playerLevel", "SCHEMA_VERSION", "共享存储"])),
     ("任务表已拆 P4-2 五阶段并写明排期状态",
      all(f"| P4-2{c} |" in task_text for c in "abcde")
      and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 记 P4-2a 实现与下一步 P4-2b",
-     "P4-2a ✅" in memory_text and "下一步 P4-2b" in memory_text
+    ("MEMORY.md 记 P4-2a / P4-2b 实现与下一步 P4-2c",
+     "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "下一步 P4-2c" in memory_text
      and "P4-2_多人玩法排期_2026-11-07.md" in memory_text
-     and "GET /api/rank" in memory_text and "effectiveStats" in memory_text),
+     and "GET /api/rank" in memory_text and "effectiveStats" in memory_text
+     and "RoomRegistry" in memory_text and "quota" in memory_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
     ("每日日志记 P4-2a 实现", "P4-2a 只读派生榜" in log_text and "E2E_P42A_OK" in log_text),
     ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
@@ -109,7 +112,7 @@ checks = [
     ("任务表记 P4-2a ✅ 与 39/17 验收",
      "**✅ 已实现（2026-11-07）**" in task_text
      and "E2E_P42A_OK" in task_text and "UI_SMOKE_P42A_OK" in task_text),
-    ("任务表下一步为 P4-2b", "下一步建议" in task_text and "下一步 P4-2b" in task_text),
+    ("任务表下一步为 P4-2c", "下一步建议" in task_text and "下一步 P4-2c" in task_text),
     ("P4-1 关键文件齐全",
      all((ROOT / p).exists() for p in [
          "backend/src/lib/wildRegistry.ts",
@@ -197,6 +200,63 @@ checks = [
     ("HANDOFF 验收以 npm run verify 为首选", "npm run verify" in handoff_text),
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
+    # ——— P4-2 未来规划台账与口径修正 ———
+    ("未来规划台账存在且 F01~F13 齐全",
+     future_path.exists()
+     and all(f"F{n:02d}" in future_text for n in range(1, 14))
+     and "最终是要设计偿还的" in future_text and "不阻塞" in future_text),
+    ("台账 F04：账号等级 + 宠物等级帽 + 当前为占位偏差",
+     all(x in future_text for x in [
+         "账号等级", "人物", "宠物等级上限", "N+5", "占位", "playerLevel",
+         "SCHEMA_VERSION", "不得声称"])),
+    ("台账 F01/F02/F03 登记周期结算 / 榜单奖励 / 单机隔离版",
+     all(x in future_text for x in ["周期结算", "榜单奖励", "单机隔离版", "现在先不用纠结"])),
+    ("契约 §4 标召唤师等级为占位、非产品口径",
+     "⚠️ 占位派生" in plan_text and "已知偏差" in plan_text
+     and "账号等级决定宠物等级帽" in plan_text),
+    ("后端榜单描述已标占位，避免误导玩家",
+     "占位派生" in text(ROOT / "backend" / "src" / "game" / "rank.ts")),
+    ("任务表 P4-2a 行标注已知偏差并指向 F04",
+     "已知偏差" in task_text and "F04" in task_text),
+    ("MEMORY.md 记未来规划台账与召唤师等级口径修正",
+     "未来规划与技术债_2026-11-07.md" in memory_text
+     and "账号等级" in memory_text and "宠物等级帽" in memory_text),
+    ("每日日志记台账建立与口径修正", "未来规划台账" in log_text and "账号等级" in log_text),
+    # ——— P4-2b 房间内核 ———
+    ("规范含 §24 房间内核（状态域 / quota / 掉线 / 协议）",
+     "## 24." in spec_text
+     and all(x in spec_text for x in [
+         "roomLockKey", "hold", "commit", "release", "tokenDigest",
+         "ROOM_WS_REQUIRED", "250ms", "RoomStorage", "room.action"])),
+    ("bug_log 含 §17 ~ §29", all(f"## {n}." in bug_text for n in range(17, 30))),
+    ("任务表记 P4-2b ✅ 与 43/43 验收",
+     "P4-2b" in task_text and "E2E_P42B_OK" in task_text and "已实现" in task_text),
+    ("排期文档记 P4-2b 实现记录与自选决策",
+     "已实现（2026-11-07" in plan_text and "E2E_P42B" in plan_text
+     and "阈值按 `mode` 分档" in plan_text and "去锁确定性" in plan_text),
+    ("verify 已注册 e2e:p42b",
+     "e2e:p42b" in verify_text and '"e2e:p42b"' in pkg_text
+     and "e2e_p42b_room.mjs" in verify_text),
+    ("P4-2b 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/lib/roomTypes.ts",
+         "backend/src/lib/roomRegistry.ts",
+         "backend/src/lib/roomAuth.ts",
+         "backend/src/modules/room.ts",
+         "backend/tests/roomRegistry.test.ts",
+         "backend/tests/roomLock.test.ts",
+         "backend/tests/roomProtocol.test.ts",
+         "backend/tests/e2e_p42b_room.mjs",
+         "src/lib/room.ts",
+         "src/lib/room.test.ts"])),
+    ("房间协议声明与前端幂等已落盘",
+     "room.state" in text(ROOT / "backend" / "src" / "lib" / "wsProtocol.ts")
+     and "applyRoomSnapshot" in text(ROOT / "src" / "lib" / "room.ts")
+     and "ROOM_STATE_EVENT" in text(ROOT / "src" / "lib" / "sessionState.ts")),
+    ("测试账号清理前缀含 p42b_",
+     "p42b_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")
+     and "p42b_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
+    ("每日日志记 P4-2b 实现", "P4-2b 房间内核" in log_text and "E2E_P42B_OK" in log_text),
 ]
 
 for name, ok, *detail in checks:

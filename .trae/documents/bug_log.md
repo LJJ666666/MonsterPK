@@ -602,3 +602,63 @@ Edge 在探针调用 `finish()` 前就 dump 了 DOM，看起来像「页面白�
 3. **战力公式仍待定**：只实现「有效六维简单求和」，系数 / 权重 / 取整未做；
    别把「六维总和」误当实战评分拿去做匹配或奖励判定。
 
+## 29. P4-2b 房间内核的坑
+
+### 29.1 quota key 里的冒号被 intent 正则拒了（实测 11 个单测集体红）
+
+`create()` 复用了 `validIntent()`（只允许 `[A-Za-z0-9_-]`）校验 `quotaKey`，
+而业务上自然写法是 `boss:daily` / `boss:daily:2026-11-07`，
+结果 `twoPlayers()` 里 11 个用例全挂在 `create 应成功`。
+**修**：拆出 `validQuotaKey()` 允许冒号分段（仍限长 64、纯字符，只作内存 Map 键）；
+`intent` / `nonce` 继续用严格正则。别为了省一个函数把两种字段混用一个校验器。
+
+### 29.2 托管窗口比回合超时长，不是 bug（测试时序写错）
+
+生产档 `AUTOPILOT_OFFER_MS=30s > ROUND_TIMEOUT_MS=20s`，kernel 档同理（1.8s > 1.2s）。
+所以**第一回合必然先超时随机代放**，托管是给后续回合用的；
+单测若直接「开托管 → tick → 断言 timedOut=0」会失败，因为那时 deadline 早就过了。
+**修**：测试先让第一回合自然超时推进（拿到新 deadline），再在下一回合 deadline 之前 tick，
+验证 `autopiloted=1 / timedOut=0`。语义写进规范 §24.5，别改阈值去迁就测试。
+
+### 29.3 `sweep()` 多写了一次 `bump()`，revision 会跳号
+
+初版 `sweep()` 遍历 tick 后又对 `changedRoomIds` 逐个 `bump()`，
+一次超时会把 revision 抬两次。虽然仍单调，但客户端幂等基线会出现空洞。
+**修**：删掉多余的 bump，`roomRegistry.test.ts` 加「一次 tick 只抬一次 revision」硬断言。
+`tick()` 内部的所有路径必须且只能自己 bump 一次。
+
+### 29.4 旧连接迟到的 `close` 会把新连接标掉线
+
+`ws.close()` 的 close 事件是异步的：同 token 重连时若先 `reconnect()` 再收到旧连接 close，
+朴素实现会按 `userId` 把座位重新标成掉线，房间卡在 paused。
+**修**：`markDisconnected(userId, connectionId, now)` 按 `connectionId` **精确匹配**座位，
+旧 id 一律不命中；单测「旧连接 close 不能把新连接标掉线」钉住。
+
+### 29.5 房间扫描不能挂在 30s 心跳上
+
+`realtime.ts` 的心跳定时器周期是 30s，而 kernel 档回合超时 1.2s、全掉解散 3.5s；
+把 `rooms.sweep()` 塞进心跳里，E2E 要等半分钟才推进一次。
+**修**：独立 250ms `roomTimer`（`unref()`），`onClose` 里一并 `clearInterval`；
+REST `GET /api/room/:id` 再顺带惰性 `tick()`，双保险。纯内存扫描、房间稳定时零广播。
+
+### 29.6 REST 与 WS 的 token 指纹必须同源
+
+座位指纹来自 REST 请求的 `Authorization: Bearer`，重连指纹来自 WS upgrade query 的 `token`；
+两处必须是同一枚 token 字符串，否则 `reconnect()` 永远匹配不上、座位永久掉线。
+`lib/roomAuth.ts` 统一 `sha256(token)`，只存摘要不存明文。**改认证头格式必须同步改这里**。
+
+### 29.7 `offerAutopilot` 的 nonce 别在 no-op 前消费
+
+初版先校验/登记 `nonce` 再判「状态没变化直接返回」，幂等重试会白白吃掉一个 nonce，
+且改了 `seenNonces` 却没 bump revision。
+**修**：先判 no-op 返回，再消费 nonce；登记与 bump 必须在同一条变更路径上。
+
+### 29.8 三条不是缺陷但容易误判的设计边界
+
+1. **进房间必须有在线 WS**（`ROOM_WS_REQUIRED`）：E2E 先 `openWs()` 再 `create/join`，
+   不是为了刁难，是没有 `connectionId` 就无法做掉线检测。
+2. **quota hold 不靠房间锁**：同步 Map 操作在单线程内原子；房间锁保护的是路由层跨 await 组合。
+   `roomLock.test.ts` 照 P4-0 做法做了去锁确定性证明（§26 的教训）。
+3. **kernel 短阈值不是测试后门**：客户端只能选 `mode`，毫秒数一律服务端配置；
+   kernel 房不产出奖励、不写个人档，与真实玩法互不影响。
+

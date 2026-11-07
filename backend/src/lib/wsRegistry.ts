@@ -99,6 +99,13 @@ export class WsRegistry {
     return sent;
   }
 
+  /** P4-2b：按一批 userId 广播同一份文本（去重），返回实际送达条数。 */
+  broadcastToMany(userIds: string[], data: string): number {
+    let sent = 0;
+    for (const userId of new Set(userIds)) sent += this.broadcastToUser(userId, data);
+    return sent;
+  }
+
   remove(id: string): boolean {
     const conn = this.byId.get(id);
     if (!conn) return false;

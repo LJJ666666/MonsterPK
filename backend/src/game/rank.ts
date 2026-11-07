@@ -39,7 +39,7 @@ export const RANK_META: Record<RankType, RankMeta> = {
   },
   summoner_level: {
     type: 'summoner_level', label: '召唤师等级', unit: '级',
-    description: '由首通区域数、队伍等级与图鉴捕获数派生，不是存档字段',
+    description: '占位派生（首通数/队伍等级/图鉴），非产品口径；账号等级与宠物等级帽待设计（台账 F04）',
     disclaimer: '等级为只读派生值，不代表剧情进度',
   },
   progress: {

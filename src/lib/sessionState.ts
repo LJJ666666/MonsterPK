@@ -7,6 +7,8 @@
 export const SESSION_STATE_EVENT = "mpk:session-state";
 /** P4-1b 共享野怪：服务端全量广播的区域野怪列表。 */
 export const WILD_STATE_EVENT = "mpk:wild-state";
+/** P4-2b 房间：服务端按成员分别下发的房间全量快照。 */
+export const ROOM_STATE_EVENT = "mpk:room-state";
 
 export type SessionStateMessage = {
   type: "session.state";
@@ -37,6 +39,36 @@ export type WildStateMessage = {
   areaId: string;
   revision: number;
   monsters: WildMonsterView[];
+};
+
+/** P4-2b：房间公开视图，服务端保证不含 tokenDigest / connectionId / 他人 userId。 */
+export type RoomSeatView = {
+  seat: number;
+  label: string;
+  online: boolean;
+  autopilot: boolean;
+  submitted: boolean;
+  self: boolean;
+};
+
+export type RoomView = {
+  roomId: string;
+  mode: "kernel" | "pvp" | "coop";
+  status: "forming" | "active" | "paused" | "abandoned" | "settled";
+  revision: number;
+  turn: number;
+  deadlineAt: number;
+  seats: RoomSeatView[];
+  lastAction: { seat: number; intent: string; kind: "manual" | "autopilot" | "timeout" } | null;
+  quota: { key: string; state: "held" | "committed" | "released" } | null;
+  endReason: string | null;
+  updatedAt: number;
+};
+
+/** 与 wild.state 一样是下行全量快照；上行没有 room.state 类型。 */
+export type RoomStateMessage = {
+  type: "room.state";
+  room: RoomView;
 };
 
 /** 每个槽位最近一次「已被本地认可」的权威态版本号（-1 = 尚未建立基线）。 */

@@ -33,7 +33,7 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 ## 4. 运行命令与环境
 - 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**交接后服务不自动恢复**，先 curl 探活。
 - **校验（首选一条命令）**：`npm run verify` —— **20 阶段**（check/test/build + 内容表 + 九组 E2E + 冒烟 ×3 + 文档与镜像），约 **51s**（**20/20** `VERIFY_OK`），自动清测试账号。子集 `--only=` / `--skip=`，CI 用 `--strict`；报告 `.verify-report.json`（gitignore）。
-- **分项数字**：前端 `check` 0 / `test`（**96**）/ `build`；后端 `check` 0 / `test`（**230**）/ `check:content` 一致；E2E 依次 **62** / **30** / **41** / **25** / **48** / **50** / **41** / **30**（`E2E_P41_OK`）/ 115；headless 375px **15/15** + **15/15** + **13/13**（`UI_SMOKE_P41_OK`）；文档自检 55。E2E 需服务已起；RNG 用例须重复跑（§17）；改 `data.ts` 须 `gen:content` 一起提交。
+- **分项数字**：前端 `check` 0 / `test`（**96**）/ `build`；后端 `check` 0 / `test`（**230**）/ `check:content` 一致；E2E 依次 **62** / **30** / **41** / **25** / **48** / **50** / **41** / **30**（`E2E_P41_OK`）/ 115；headless 375px **15/15** + **15/15** + **13/13**（`UI_SMOKE_P41_OK`）；文档自检 59。E2E 需服务已起；RNG 用例须重复跑（§17）；改 `data.ts` 须 `gen:content` 一起提交。
 - **清理**：`cd backend && npm run clean:e2e`（`--dry` 预览、`--prefix=` 追加）。只删测试前缀、**永不删 admin**；verify 自动执行一次。
 - **账号管理**：`cd backend && npm run admin -- grant|revoke|ban|unban|list|audit <用户名>`。⚠️ 不授权用测试菜单会被封号。**绝不写死用户名**。
 - 本机 `D:\MyJob\MonsterPK`；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ `prisma migrate deploy` → `generate` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore；无 `save_data.json` 时 `/api/save` 404 正常。
@@ -53,18 +53,18 @@ React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7。路由 `/` �
 - **测试底座**：`harness.mjs` + `saveWriter.mjs`（跟踪 revision）；`e2e_hardening.mjs` 115 项；`numericRules.test.ts` 31 项；`verify.mjs` 编排；`clean-test-data.mjs` 清账号。
 - **服务端写操作（P3-2）**：`POST /api/game/:op`（heal/use_item/evolve/learn_move 含 `discard`/队伍整理/travel/new_game）全部 `commitState(source='action')`；`checkPartyStateRegression()` 堵住 `digestOf` 不含 HP 的盲区；价格/挂机/初始背包/御三家/出生地全由内容表派生。见 §20。
 - **写入并发控制（P4-0）**：PUT 与意图**必须带 `revision`**（缺 400 `REVISION_REQUIRED`），过期 409 `REVISION_CONFLICT` 回带快照（server-wins），校验在风控/nonce 前；`slotLock.ts` 按 `userId:slot` 串行读→校→写（**`commitState()` 不取锁**）；前端 409 → `healFromConflict()` **不重试**、意图裁决后写回新 revision。见 §21、bug_log §26。
-- **能力边界**：**已挡**改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/伪造 rebase/普通账号调测试菜单/WS 伪造状态写入/伪造战斗动作与越权 battleId/GG 改内存/旧意图刷奖励/旧版本整包覆盖（CAS 409）/**顶号后旧设备继续写**/**抢已占野怪**/**改共享世界主题等级**；**未挡**加速器改动画节奏（不影响结算）/改本地展示态（只影响自己）。管理员只在服务端判定。
+- **能力边界**：**已挡**改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/伪造 rebase/普通账号调测试菜单/WS 伪造状态/伪造战斗动作/越权 battleId/GG 改内存/旧意图刷奖励/CAS 409 旧版本覆盖/**顶号后旧设备继续写**/**抢已占野怪**/**改共享世界主题等级**；**未挡**加速器改动画节奏/改本地展示态（只影响自己）。管理员只在服务端判定。
 
 ## 6. 已修的坑（详见 `.trae/documents/bug_log.md`）
 - 后台任务报 `exit 4` / `0xC0000142` 是**进程被宿主回收**，非代码崩溃。
 - **`lib/env.ts` `.env` 路径曾算错**（`../.env` → `backend/src/.env`），`JWT_SECRET` 长期回落硬编码默认值（严重安全缺陷）；11-05 改 `../../.env` 实测生效。**改配置代码必须实测 `process.env.XXX` 有值。**
 - §25 P3-2 本地权威残留（任意地点回满、**HP 摘要盲区**、死道具、全灭惩罚可逃）；§26 CAS 六坑（6 个 E2E 集体红 → `saveWriter.mjs`；**锁改直通 E2E 仍全绿，只能靠 `slotLock.test.ts` 单测**；并发载荷须「变穷」）。
 - §27 P4-1 七坑：只断 WS 会刷新互踢死循环（→ `sessionVersion`/JWT `sv`）/ 四组 E2E 打红**不加兼容开关** / 判别联合第三次复发（`'code' in result`）/ Prisma 迁移先停 :3001 / **全局 wild revision 设计错** / 客户端 fallback 改跨账号共享真值 / `setToken()` 忘复位下线态。
-- §10~§24：白屏/Hook、vitest EPERM、Prisma 锁、框架混跑、`.env` 路径、E2E 契约、strict 收窄、死断言、个体值、MONEY 码、奖励后门。
+- §10~§24：白屏/Hook、EPERM、Prisma 锁、框架混跑、`.env`、E2E 契约、strict 收窄、死断言、个体值、MONEY 码、奖励后门。
 
 ## 7. 进度与遗留
 - **已完成**：P1-2/P1-3（nonce；**内容缺口**：仅 `spark_mouse` 有道具进化）、P2-1/P2-2、P3-1a/1b/1c（**不做离线降级**、**下线 `battle_reward`/`capture`**）、P3-2、P4-0（CAS+槽位锁）、P4-1；缺陷修复（个体值 144 项 / money 码，§21/§22）。
 - **P4-1 ✅（11-07）**：顶号下线 + 共享野怪；`WildRegistry` 每区域 3 只、claim 原子互斥、按区域 revision；旧 token REST 403 `SESSION_REPLACED`，前端只读下线态不合并本地改动。证据：`verify` **20/20** `VERIFY_OK`、后端 **230** / 前端 **96** / `e2e:p41` **30** / `ui_smoke_p41` **13/13**；`p21` **41**、`p22` **25**、`p4` **41**、`hardening` 115 四组改顶号语义（**不加兼容开关**）。规范 §22 / bug_log §27。
-- **P4-2 📋 排期（11-07 杰哥拍板，tx 拆阶段，代码未开工）**：口径——掉线等待重连、**全员掉线退房不扣次数**、超时另一人**可选**托管（AI 后续设计）、共斗限时（1v1 暂 20s 未放技能服务端随机放）、榜单暂定单宠/全队战力·召唤师等级·推图。风险递增五阶段 **a 只读派生榜 → b 房间内核 → c 单人 Boss 伤害排名 → d 1v1 PVP → e 共斗/副本**，唯一缺口是 `roomId` 房间状态域。契约 `P4-2_多人玩法排期_2026-11-07.md`：阈值 `ROUND_TIMEOUT_MS=20s`/`AUTOPILOT_OFFER_MS=30s`/`ALL_OFFLINE_GRACE_MS=60s` 服务端可调；quota `hold→commit→release`；**只同一 token 同设备算重连**（换设备触发顶号按掉线处理）；`game/rules.ts:78` `pickUsableMove()` 已能超时随机放；**全库无战力公式且 `SaveData` 无 `playerLevel`**，a 先派生、不加字段以避开 `SCHEMA_VERSION` 迁移；`applySettlement()`（`modules/battle.ts:98`）私有待抽取；野怪/房间/锁单进程，P5-1 前迁共享存储且 b 做可替换 adapter。**下一步 P4-2a 只读派生榜**。
+- **P4-2 📋 排期（11-07 杰哥拍板，tx 拆阶段，代码未开工）**：口径——掉线等待重连、**全员掉线退房不扣次数**、超时另一人**可选**托管（AI 后续设计）、共斗限时（1v1 暂 20s 未放技能服务端随机放）、榜单暂定单宠/全队战力（**六维总和、不代表实战强弱**、用 `maxHp`、装备加成走有效面板）·召唤师等级·推图。风险递增五阶段 **a 只读派生榜 → b 房间内核 → c 单人 Boss 伤害排名 → d 1v1 PVP → e 共斗/副本**，唯一缺口是 `roomId` 房间状态域。契约 `P4-2_多人玩法排期_2026-11-07.md`：阈值 `ROUND_TIMEOUT_MS=20s`/`AUTOPILOT_OFFER_MS=30s`/`ALL_OFFLINE_GRACE_MS=60s` 服务端可调；quota `hold→commit→release`；**只同一 token 同设备算重连**（换设备触发顶号按掉线处理）；`game/rules.ts:78` `pickUsableMove()` 已能超时随机放；**全库无战力公式且 `SaveData` 无 `playerLevel`**，a 先派生、不加字段以避开 `SCHEMA_VERSION` 迁移；`applySettlement()`（`modules/battle.ts:98`）私有待抽取；野怪/房间/锁单进程，P5-1 前迁共享存储且 b 做可替换 adapter。**下一步 P4-2a 只读派生榜**。
 - **Git**：`fe159eb`→`2f2c8b7`→`04a35a8`→`93c1c50`→`d6205a8`→`e7ca63c`（P4-1）→`4b8d58b`→**`277c4b2`（P4-2 排期）**均已推送；`rollback-20261107-pre-p41`、`rollback-20261107-post-p41`、`rollback-20261107-pre-p42-plan`、`rollback-20261107-post-p42-plan` 在远端。`dev.db`/`.env` gitignore。
 - **回家交接**：`HANDOFF.md` + `check_home_env.py` / `doc_check.py`；11-07 已在 `D:\MyJob\MonsterPK` 重建并 `ENV_CHECK_OK`。

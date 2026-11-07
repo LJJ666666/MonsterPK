@@ -68,6 +68,13 @@ checks = [
      "P4-2 📋 排期" in memory_text and "下一步 P4-2a" in memory_text
      and "P4-2_多人玩法排期_2026-11-07.md" in memory_text),
     ("每日日志记 P4-2 排期拍板", "P4-2 多人玩法排期" in log_text and "全员掉线" in log_text),
+    ("P4-2a 战力定义已钉死（六维 / maxHp / 不代表强弱 / 装备扩展）",
+     all(x in plan_text for x in [
+         "maxHp", "spAtk", "六维总属性", "不代表实战强弱", "effectiveStats",
+         "宠物装备", "公式本身待定", "不写回 `MonsterInstance`"])),
+    ("任务表记战力口径", "六维总属性" in task_text and "不代表" in task_text and "maxHp" in task_text),
+    ("MEMORY.md 记战力口径", "六维" in memory_text and "不代表实战强弱" in memory_text),
+    ("每日日志记战力口径补充", "六维总属性" in log_text and "effectiveStats" in log_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
     ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
     ("bug_log 含 §17 ~ §27", all(f"## {n}." in bug_text for n in range(17, 28))),

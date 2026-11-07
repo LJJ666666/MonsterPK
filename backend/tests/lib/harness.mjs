@@ -15,6 +15,7 @@ import WebSocket from 'ws';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { makeSaveWriter } from './saveWriter.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** backend/ 根目录（tests/lib/ 回退两级）。 */
@@ -299,15 +300,21 @@ export function validSave(overrides = {}) {
   };
 }
 
-/** 存档相关接口。slot 默认 1。 */
+/**
+ * 存档相关接口。slot 默认 1。
+ * P4：`put` 自动带 revision（CAS），逐 token/槽位跟踪当前版本；
+ * 需要构造版本冲突用例时显式传 `{ revision: n }`。
+ */
+const saveWriter = makeSaveWriter(api);
+
 export const save = {
-  put: (token, data, extra = {}, slot = 1) =>
-    api(`/api/save?slot=${slot}`, {
-      method: 'PUT', token,
-      body: { data: asText(data), ...extra },
-    }),
+  put: saveWriter.put,
   get: (token, slot = 1) => api(`/api/save?slot=${slot}`, { token }),
   session: (token, slot = 1) => api(`/api/session?slot=${slot}`, { token }),
+  /** 手工改本地跟踪的版本号（模拟「其它端已经写过」）。 */
+  setRevision: saveWriter.set,
+  /** 读取当前跟踪的版本号（不请求服务端）。 */
+  revisionOf: saveWriter.revOf,
 };
 
 // —————————————————————————— 战斗 ——————————————————————————

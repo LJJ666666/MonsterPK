@@ -13,11 +13,11 @@ export type SessionStateMessage = {
   data: string;
   updatedAt: number;
   schemaVersion: string;
-  source: "hydrate" | "put" | "intent";
+  source: "hydrate" | "put" | "intent" | "battle" | "action";
   online: number;
 };
 
-/** 每个槽位最近一次「已被本地认可」的权威态版本号。 */
+/** 每个槽位最近一次「已被本地认可」的权威态版本号（-1 = 尚未建立基线）。 */
 const lastSeen: Record<number, number> = {};
 /** 正在进行的意图数量：发意图 → 提交裁决结果期间不能让远端快照覆盖本地。 */
 let inFlight = 0;
@@ -28,10 +28,35 @@ export function getLastSeenRevision(slot: number): number {
   return lastSeen[slot] ?? -1;
 }
 
+/**
+ * P4：写入用的基线版本号，未知时返回 null。
+ * 与 getLastSeenRevision 的区别：-1 是「不知道」，0 是「知道，且服务端还没有存档」，
+ * 两者在 CAS 里语义完全不同（后者是新建存档的合法基线），不能混用。
+ */
+export function getWriteRevision(slot: number): number | null {
+  const v = lastSeen[slot];
+  return typeof v === "number" && v >= 0 ? v : null;
+}
+
 /** 本端 PUT 成功后也要记下 revision，否则自己的回显快照会被当成远端更新重复应用。 */
 export function noteRevision(slot: number, revision: number): void {
   if (typeof revision !== "number" || !Number.isFinite(revision)) return;
   if (revision > getLastSeenRevision(slot)) lastSeen[slot] = revision;
+}
+
+/**
+ * 强制覆盖本地记录的版本号（登录 / 换账号 / 冲突自愈后使用）。
+ * 与 noteRevision 的「只增」不同：换账号时新账号的 revision 可能更小，
+ * 只增策略会让本地一直带着旧账号的版本号去写，触发无谓的 409。
+ */
+export function setRevision(slot: number, revision: number): void {
+  if (typeof revision !== "number" || !Number.isFinite(revision) || revision < 0) return;
+  lastSeen[slot] = revision;
+}
+
+/** 登出时清空所有槽位的版本号，避免下一个账号继承。 */
+export function forgetAllRevisions(): void {
+  for (const k of Object.keys(lastSeen)) delete lastSeen[k as any];
 }
 
 export function shouldApplySnapshot(m: SessionStateMessage): boolean {

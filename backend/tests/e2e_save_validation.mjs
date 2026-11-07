@@ -14,6 +14,7 @@
  * 输出：逐例 [PASS]/[FAIL]，末尾汇总；任一失败以 exit 1 结束。
  */
 import { PrismaClient } from '@prisma/client';
+import { makeSaveWriter } from './lib/saveWriter.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const BAN_CODE = 'ACCOUNT_BANNED';
@@ -65,8 +66,9 @@ async function request(path, { method = 'GET', token, body } = {}) {
   return { status: res.status, data };
 }
 
-const put = (token, data, slot = 1) =>
-  request(`/api/save?slot=${slot}`, { method: 'PUT', token, body: { data: asText(data) } });
+// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token × 槽位跟踪当前版本。
+const saveWriter = makeSaveWriter(request);
+const put = (token, data, slot = 1) => saveWriter.put(token, data, {}, slot);
 
 let pass = 0;
 let fail = 0;
@@ -139,7 +141,11 @@ async function main() {
   check('无 token → 401', noToken.status === 401, JSON.stringify(noToken.data));
   const badSlot = await put(main.token, validSave(), 9);
   check('非法 slot=9 → 400', badSlot.status === 400, JSON.stringify(badSlot.data));
-  const emptyBody = await request('/api/save?slot=1', { method: 'PUT', token: main.token, body: { data: '' } });
+  // 带正确 revision 才能测到「空文本」这一层（否则先被 REVISION_REQUIRED 拦下）。
+  const emptyBody = await request('/api/save?slot=1', {
+    method: 'PUT', token: main.token,
+    body: { data: '', revision: await saveWriter.revOf(main.token, 1) },
+  });
   check('空存档文本 → 400', emptyBody.status === 400, JSON.stringify(emptyBody.data));
 
   // ——————————————— E. 改系统时间：不封号、不生效 ———————————————

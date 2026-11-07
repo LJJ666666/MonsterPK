@@ -1,6 +1,7 @@
 // 登录态 token 的本地存取（仅存 token，存档仍在云端）。
 // 注意：token 合法性（过期）在本地只做轻量判断，真正的校验以后端 jwtVerify 为准。
 import { uuid } from "@/game/rules";
+import { forgetAllRevisions } from "./sessionState";
 
 const TOKEN_KEY = "mpk_token";
 // 每设备唯一标识：用于云端存档冲突判断（区分「同一设备」与「跨设备」写入）。
@@ -17,6 +18,9 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  // P4：登录态结束必须一并丢掉各槽位的写入基线版本，
+  // 否则下一个账号会带着上一个账号的 revision 去写，白白撞一次 409。
+  forgetAllRevisions();
 }
 
 // 取每设备唯一 clientId（首次访问时生成并持久化）

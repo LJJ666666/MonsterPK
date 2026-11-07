@@ -9,12 +9,13 @@
  * 裁决结果覆盖掉。
  */
 import { api } from "./api";
-import { commitIntent, setSyncError } from "./sync";
+import { commitIntent, ensureWriteRevision, recoverFromConflict, setSyncError } from "./sync";
 import { uuid } from "@/game/rules";
 import { useGameStore } from "@/stores/useGameStore";
 import type { SaveData } from "@/game/types";
-import { beginIntent, endIntent, type SessionStateMessage } from "./sessionState";
+import { beginIntent, endIntent, setRevision, type SessionStateMessage } from "./sessionState";
 import { flushDeferredSnapshot } from "./session";
+import { classifyUploadError } from "./syncErrors";
 
 export type IntentResult = Record<string, any>;
 
@@ -38,18 +39,35 @@ export async function runIntent(
     if (!exported.ok) return null;
 
     const nonce = uuid();
-    let res: { ok: boolean; nonce: string; result: IntentResult };
+    // P4：意图同样要声明基线版本。多人同时发意图时，后到的一方会被 409 拒绝，
+    // 而不是两端各算一遍、后落库的静默覆盖前一方。
+    let revision: number;
+    try {
+      revision = await ensureWriteRevision(slot);
+    } catch {
+      setSyncError("无法连接服务器，请稍后重试");
+      return null;
+    }
+    let res: { ok: boolean; nonce: string; revision?: number; result: IntentResult };
     try {
       res = await api.dispatchIntent(type, {
         slot,
         nonce,
         save: exported.json,
+        revision,
         payload,
       });
     } catch (e: any) {
+      if (classifyUploadError(e) === "conflict") {
+        recoverFromConflict(slot, e); // 服务端已更新：切过去，本次操作作废
+        return null;
+      }
       setSyncError(e?.message ?? "操作失败，请稍后重试");
       return null;
     }
+    // P4：服务端裁决时已经写过一版，提交结果必须基于裁决后的版本号，
+    // 否则 commitIntent 会拿「裁决前」的 revision 去撞自己的 CAS。
+    if (typeof res.revision === "number") setRevision(slot, res.revision);
 
     const s1 = useGameStore.getState();
     const save = s1[`save${slot}` as "save1"] as SaveData | null;

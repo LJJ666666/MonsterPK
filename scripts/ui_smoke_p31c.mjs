@@ -177,8 +177,9 @@ async function main() {
   if (!token) return report();
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  // P4：整包 PUT 必须带 revision（CAS）。新账号服务端没有存档，基线就是 0。
   const put = await apiJson('/api/save?slot=1', {
-    method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save) }),
+    method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status} ${JSON.stringify(put.data).slice(0, 120)}`);
 

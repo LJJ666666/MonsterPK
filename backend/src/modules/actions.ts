@@ -18,8 +18,11 @@ import { decideSaveAction } from '../lib/antiCheat';
 import { clampSaveTimestamps } from '../lib/serverClock';
 import { banAccount, BAN_CODE } from '../lib/account';
 import { digestOf, compareDigest, parseAuthority } from '../lib/authority';
+import { checkWriteRevision, type RevisionFailure } from '../lib/revision';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { decideIntent, INTENT_TYPES, type IntentType } from '../lib/settlements';
-import { commitState } from './session';
+import { commitState, currentState } from './session';
+import { gameSessions } from './sessionBus';
 
 const paramsSchema = z.object({ type: z.string().min(1).max(40) });
 const bodySchema = z.object({
@@ -28,6 +31,8 @@ const bodySchema = z.object({
   nonce: z.string().min(8).max(64),
   /** 发起意图时客户端的完整存档（尚未应用裁决结果）。 */
   save: z.string().min(1).max(5_000_000),
+  /** P4 前置：本次意图基于服务端第几版（CAS）。整数与非负由 checkWriteRevision 判定。 */
+  revision: z.number().optional(),
   payload: z.record(z.unknown()).default({}),
 });
 
@@ -43,8 +48,41 @@ export async function actionRoutes(fastify: FastifyInstance) {
     if (!INTENT_TYPES.includes(type)) {
       return reply.code(400).send({ error: '未知的操作类型' });
     }
-    const { slot, nonce, save, payload } = parsed.data;
+    const { slot } = parsed.data;
+    // P4：意图同样要关进槽位临界区——它也会读当前版本、写基线并登记 pending，
+    // 与并发的整包 PUT 交错就会撞出 TOCTOU。
+    return withSlotLock(slotLockKey(userId, slot), () => handleIntent(req, reply, userId, slot, type, parsed.data));
+  });
+
+  async function handleIntent(
+    req: any,
+    reply: any,
+    userId: string,
+    slot: number,
+    type: IntentType,
+    body: z.infer<typeof bodySchema>,
+  ) {
+    const { nonce, save, payload } = body;
     const isAdmin = req.account?.isAdmin ?? false;
+
+    // ⓪ P4 前置：CAS 版本校验。多人同时发意图时，后到的一方必须被拒，
+    //    否则两端会各自基于同一份旧数据算出结果，后落库的一方静默覆盖前一方。
+    //    放在消费 nonce 之前：冲突属并发而非攻击，不该吃掉一次性 nonce。
+    const server = await currentState(userId, slot);
+    const revCheck = checkWriteRevision(server?.revision ?? 0, body.revision);
+    if (!revCheck.ok) {
+      const bad = revCheck as RevisionFailure;
+      if (bad.code === 'REVISION_CONFLICT') {
+        return reply.code(409).send({
+          error: bad.reason,
+          code: 'REVISION_CONFLICT',
+          revision: bad.current,
+          data: server?.data ?? null,
+          updatedAt: server ? new Date(server.updatedAt).toISOString() : null,
+        });
+      }
+      return reply.code(400).send({ error: bad.reason, code: bad.code });
+    }
 
     // ① 消费 nonce：唯一索引冲突即重放。放在最前面，裁决失败也不退还。
     try {
@@ -120,6 +158,8 @@ export async function actionRoutes(fastify: FastifyInstance) {
       source: 'intent',
     });
     req.log.info({ userId, slot, kind: 'intent_decided', type, nonce, result: pending.result }, '服务端裁决完成');
-    return { ok: true, nonce, result: pending.result };
-  });
+    // P4：返回裁决后的版本号。客户端提交结果（PUT 带 intentNonce）必须基于这一版，
+    // 否则它手里还是「裁决前」的 revision，提交会被自己的 CAS 拒掉。
+    return { ok: true, nonce, revision: gameSessions.get(userId, slot)?.authority.revision ?? 0, result: pending.result };
+  }
 }

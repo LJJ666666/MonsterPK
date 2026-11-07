@@ -12,6 +12,7 @@
  */
 import WebSocket from 'ws';
 import { PrismaClient } from '@prisma/client';
+import { makeSaveWriter } from './lib/saveWriter.mjs';
 
 // P3-1c：管理员测试标记必须验证「身份由服务端查库判定」，所以本套件直连数据库提权。
 // 连不上就跳过该组，不让一个可选的验证点把整套 E2E 拖挂。
@@ -87,8 +88,9 @@ function validSave(overrides = {}) {
   };
 }
 
-const put = (token, data, extra = {}) =>
-  request('/api/save?slot=1', { method: 'PUT', token, body: { data: asText(data), ...extra } });
+// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token 跟踪当前版本，
+// 需要构造版本冲突时显式传 { revision: n }。
+const put = makeSaveWriter(request).put;
 const getSave = (token) => request('/api/save?slot=1', { token });
 const getSession = (token) => request('/api/session?slot=1', { token });
 const health = () => request('/api/health');

@@ -11,12 +11,13 @@
  *
  * 拒绝策略：全部是 400 + 业务码，不封号——玩家点错按钮和服务端判定不符不是作弊。
  */
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { parseAuthority, digestOf, freshAuthority, type AuthorityState } from '../lib/authority';
 import { MUTATION_OPS, applyMutation, createNewSave, MutationError, type MutationOp } from '../game/mutations';
 import { EXPECTED_SAVE_VERSION } from '../lib/saveValidator';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { commitState } from './session';
 import { battles, gameSessions } from './sessionBus';
 
@@ -78,7 +79,24 @@ export async function gameRoutes(fastify: FastifyInstance): Promise<void> {
     }
     const parsed = bodySchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '请求参数不正确', code: 'BAD_REQUEST' });
-    const body = parsed.data;
+
+    // 同一槽位的「读档 → 判定 → 写档」必须串行：这一段里有 await（读库 / commitState 落库），
+    // 并发请求能各自读到同一份旧档再分别写回，后落库的一方静默覆盖前一方。
+    // 与 PUT / 意图的 CAS 属同一类竞态，共用同一把槽位锁。
+    return withSlotLock(slotLockKey(userId, parsed.data.slot), () =>
+      handleGameOp(req, reply, userId, opRaw, parsed.data),
+    );
+  });
+}
+
+/** 写操作主体；调用方已持有该槽位的互斥锁。 */
+async function handleGameOp(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  userId: string,
+  opRaw: string,
+  body: z.infer<typeof bodySchema>,
+) {
 
     // —— P3-2b：新档由服务端生成（客户端不再自己掷初始幻兽）——
     if (opRaw === 'new_game') {
@@ -156,5 +174,4 @@ export async function gameRoutes(fastify: FastifyInstance): Promise<void> {
       req.log.info({ userId, slot: body.slot, op, code: (err as any)?.code }, '服务端存档写操作被拒绝');
       return fail(reply, err);
     }
-  });
 }

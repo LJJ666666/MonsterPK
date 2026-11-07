@@ -15,6 +15,7 @@
  */
 import { api } from "./api";
 import { isLoggedIn } from "./auth";
+import { setRevision } from "./sessionState";
 import type { BattleState, ItemId, MonsterInstance, MoveId, StatModifiers } from "@/game/types";
 
 /** 服务端 `battleView()` 的结构（字段随 P3-1c 扩展过，见 backend/src/game/battle.ts）。 */
@@ -136,6 +137,8 @@ export const battleApi = {
   ): Promise<{ view: ServerBattleView; settled: boolean; revision?: number }> {
     const res = await api.battleAction({ battleId, slot, action: action as any });
     if (!res?.battle) throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
+    // P4：结算会写档并推进版本，客户端要立刻对齐，否则下一次自动上传会撞 409。
+    if (res.settled && typeof res.revision === "number") setRevision(slot, res.revision);
     return { view: res.battle as ServerBattleView, settled: !!res.settled, revision: res.revision };
   },
 

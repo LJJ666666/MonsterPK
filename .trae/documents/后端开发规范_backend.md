@@ -843,13 +843,80 @@ P3-2 增加 `checkPartyStateRegression(prevRaw, nextRaw)`（`lib/authority.ts`�
 
 ### 20.7 仍然存在的边界（明确记录，不是遗漏）
 
-1. **旧档回滚竞态**：服务端写完档后，若客户端在窗口内把**旧档**整包 PUT 上来，
-   因为「更穷」属于允许方向，服务端会接受并回滚这次写入。当前靠
-   `commitState` 广播 + `suppressNextUpload` 把窗口压到很小，根治办法是普通 PUT
-   带 `revision` 前置条件（P3-2b 后续）。**在那之前不要在前端手动触发整包上传。**
+1. ~~**旧档回滚竞态**：服务端写完档后，若客户端在窗口内把**旧档**整包 PUT 上来，
+   因为「更穷」属于允许方向，服务端会接受并回滚这次写入。~~ **已在 §21 解决**：
+   普通 PUT 现在必须带 `revision`，旧档的版本号已经过期，服务端直接 409，
+   客户端切到服务端版本。
 2. **`travel` 只校验地点合法**：地图可达性依赖尚未上移的走路系统，客户端仍可
    「跳到任意已存在的城镇」。影响仅是省掉走路（步数无收益），P4 地图服务再收口。
 3. **减少成员/幻兽仍可由普通 PUT 达成**（持有数下降属于自损方向）。放生已上移，
    但如果客户端直接删掉队伍成员，服务端会接受。根治同上（整包 PUT 逐字段白名单）。
 4. **`migrateSaveState`** 在版本升级时会改本地档并上传，可能与 HP 校验冲突。
    开发阶段无老用户，暂按「真出现再处理」。
+
+---
+
+## 21. 写入版本控制（CAS）与槽位串行化（2026-11-07，P4 前置）
+
+P3-2 之后所有「改存档」的判断都在服务端，但兜底通路 `PUT /api/save` 仍然允许
+**不带版本**整包覆盖：两台设备同时玩，后到的 PUT 会静默盖掉前一台的进度
+（§20.7 第 1 条的洞）。P4 多人之前必须先堵掉，否则并发就是假的。
+本节记录把这条通路收敛成乐观锁之后的契约。
+
+### 21.1 各通道的版本要求
+
+| 通道 | revision | 冲突返回 |
+|---|---|---|
+| `PUT /api/save` | **必填** | 409 + `REVISION_CONFLICT` + `{ revision, data, updatedAt, schemaVersion }` |
+| `POST /api/actions/:type`（意图） | **必填** | 同上 |
+| `POST /api/game/:op` | 不需要（服务端自持存档状态） | —— |
+| `POST /api/battle/start` / `action` | 不需要（服务端自持战斗态） | —— |
+
+- 缺版本 → `400 REVISION_REQUIRED`；版本小于服务端当前版本 → `409 REVISION_CONFLICT`。
+- **语义是 server-wins**：先落库的赢，后到的一方拿服务端快照切过去。
+  不做 last-write-wins 合并，也不做字段级 merge —— 那需要操作日志，留给 P4。
+- 校验位置在**风控之前**：版本冲突是并发信号，不该先跑一遍反作弊判定。
+  同理，意图通道的 CAS 放在**消费 nonce 之前**，冲突不吃掉一次性 nonce。
+
+### 21.2 冲突不封号
+
+409 是「你手上是旧版本」而不是「你作弊」。E2E 钉住三件事：连续 10 次冲突仍是 409、
+账号 `banned=false`、服务端存档内容没被污染。冲突后带正确版本重写必须能成功（不会被锁死）。
+
+### 21.3 槽位锁：CAS 自身的 TOCTOU
+
+`lib/slotLock.ts` 提供 `withSlotLock(slotLockKey(userId, slot), fn)`，按 `userId:slot` 排队。
+
+- **为什么需要**：CAS 的正确性依赖「读版本 → 比对 → 写」三步不可分割，但中间有 `await`
+  （读库、`commitState` 落库），Node 单线程也会在这里让出事件循环。
+- **只锁路由层**，`commitState()` 自己不再取锁，否则同一次请求会自我死锁。
+- 已覆盖：`PUT /api/save`、`POST /api/actions/:type`、`POST /api/game/:op`、
+  `POST /api/battle/start`、`POST /api/battle/action`（后者有结算写档，重复结算会多写一次档）。
+- **诚实记录**：本机这个形状（undici 连接 + Prisma 队列 + 内存会话命中）下，把锁临时改成
+  直通，E2E 的并发用例**仍然只有一条成功** —— 说明 E2E 只能证明「对外契约」，
+  证不了临界区不交错。所以另加 `tests/slotLock.test.ts` 用确定性单测钉住不变量：
+  去掉锁时该文件第 1、2 条必失败（2026-11-07 实测 2 fail / 3 pass）。
+- **多实例部署要换实现**：进程内队列不够，需 DB 条件更新（`UPDATE ... WHERE revision = ?`）
+  或分布式锁。SQLite → Postgres 时可放进事务拿行锁。
+
+### 21.4 前端契约
+
+1. `ensureRevision(slot)`：发第一次写之前 GET 一次拿基线版本；同槽位探测去重（并发上传只探一次）；
+   服务端 404（无存档）→ 基线 0。
+2. PUT 收 409 → `healFromConflict()`：记下服务端 `revision`，`suppressNextUpload()` 后
+   `importSaveJson(服务端 data, { keepBattle: true })`，状态行提示「其他设备已更新，已切换为服务器版本」。
+   **不重试**——带旧 `revision` 的这份 data 永远不会被接受，反复重试只会把状态行卡在 error。
+3. 意图通道：发前 `ensureWriteRevision`；裁决成功后服务端在响应里返回**裁决后的新版本号**，
+   前端必须立刻写回跟踪表，否则紧接着的 `commitIntent`（PUT 带 `intentNonce`）会拿旧版本撞 409。
+4. `POST /api/game/:op` 与 `POST /api/battle/action` 返回的 `revision` 同样要 `noteRevision`，
+   否则下一次 PUT 用的还是旧版本。
+5. 登出 `clearToken()` 清空 revision 缓存与待探测态（不同账号版本号毫无关系）。
+
+### 21.5 仍然存在的边界
+
+1. `revision` 是**整档版本**，不是字段级版本，无法做字段合并。真正同屏多人（P4）需要操作级意图，
+   而不是整档 CAS。
+2. `clientId` 仍只用于判定「是否同一台设备」，不参与 CAS 判定。
+3. 槽位锁只解决单进程内竞态；多实例必须换实现（见 21.3）。
+4. 冲突时服务端**放弃**客户端那次写入，不做自动重放。若将来要做「本地改动不丢」，
+   需要把本地改动表达成意图再重放，不能整包重放。

@@ -42,6 +42,23 @@ async function accountWithSave(prefix, overrides = {}) {
   if (r.status !== 200) throw new Error(`基线存档失败 ${r.status}: ${r.text.slice(0, 200)}`);
   return acc;
 }
+/**
+ * P4：意图请求统一入口。带 revision（CAS），裁决成功后把新版本号写回跟踪表，
+ * 后面的 commitIntent（PUT 带 intentNonce）才能基于裁决后的版本提交。
+ */
+async function intentReq(token, type, body) {
+  const revision = await save.revisionOf(token, 1);
+  const res = await api(`/api/actions/${type}`, {
+    method: 'POST',
+    token,
+    body: { slot: 1, ...body, revision },
+  });
+  if (res.status === 200 && typeof res.data?.revision === 'number') {
+    save.setRevision(token, 1, res.data.revision);
+  }
+  return res;
+}
+
 const nonceOf = (tag) => `${tag}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 const jsonOf = (res) => {
   try { return JSON.parse(res.data.data); } catch { return null; }
@@ -163,7 +180,11 @@ async function main() {
     tooNew.status === 400 && tooNew.data?.code === 'VERSION_TOO_NEW',
     `status=${tooNew.status} code=${tooNew.data?.code}`);
 
-  const emptyData = await api('/api/save?slot=1', { method: 'PUT', token: authAcc.token, body: { data: '' } });
+  // 带正确 revision 才能测到「空文本」这一层（否则先被 REVISION_REQUIRED 拦下）。
+  const emptyData = await api('/api/save?slot=1', {
+    method: 'PUT', token: authAcc.token,
+    body: { data: '', revision: await save.revisionOf(authAcc.token, 1) },
+  });
   suite.check('空存档字符串 → 400（zod 拦截）', emptyData.status === 400, `status=${emptyData.status}`);
 
   const hugeBody = await api('/api/save?slot=1', {
@@ -244,10 +265,7 @@ async function main() {
       wsBanned.ok === false && wsBanned.status === 403,
       `status=${wsBanned.status}`);
 
-    const actBanned = await api('/api/actions/shop_buy', {
-      method: 'POST', token: bannedAcc.token,
-      body: { slot: 1, nonce: nonceOf('banned'), save: asText(validSave()), payload: { itemId: 'capsule_basic', amount: 1 } },
-    });
+    const actBanned = await intentReq(bannedAcc.token, 'shop_buy', { slot: 1, nonce: nonceOf('banned'), save: asText(validSave()), payload: { itemId: 'capsule_basic', amount: 1 } });
     suite.check('封号后调意图接口 → 403', actBanned.status === 403, `status=${actBanned.status}`);
   } else {
     suite.skip('封号后封锁链路', '本批次没有触发封号的用例');
@@ -281,19 +299,13 @@ async function main() {
     forgedNonce.status === 400 && forgedNonce.data?.code === 'AUTHORITY_MISMATCH',
     `status=${forgedNonce.status} code=${forgedNonce.data?.code}`);
 
-  const unknownType = await api('/api/actions/nuke_everything', {
-    method: 'POST', token: authz.token,
-    body: { slot: 1, nonce: nonceOf('unknown'), save: asText(validSave({ money: 700, inventory: { capsule_basic: 6, potion_small: 2 } })), payload: {} },
-  });
+  const unknownType = await intentReq(authz.token, 'nuke_everything', { slot: 1, nonce: nonceOf('unknown'), save: asText(validSave({ money: 700, inventory: { capsule_basic: 6, potion_small: 2 } })), payload: {} });
   suite.check('未知意图类型 → 400', unknownType.status === 400, `status=${unknownType.status}`);
 
   // shop_buy 正常链路：裁决 → 提交 → 重放
   const buyBase = validSave({ money: 700, inventory: { capsule_basic: 6, potion_small: 2 } });
   const buyNonce = nonceOf('buy');
-  const buy = await api('/api/actions/shop_buy', {
-    method: 'POST', token: authz.token,
-    body: { slot: 1, nonce: buyNonce, save: asText(buyBase), payload: { itemId: 'capsule_basic', amount: 1 } },
-  });
+  const buy = await intentReq(authz.token, 'shop_buy', { slot: 1, nonce: buyNonce, save: asText(buyBase), payload: { itemId: 'capsule_basic', amount: 1 } });
   suite.check('shop_buy 裁决成功且服务端给出价格（200 金币）',
     buy.status === 200 && buy.data?.result?.cost === 200,
     `status=${buy.status} cost=${buy.data?.result?.cost}`);
@@ -302,26 +314,17 @@ async function main() {
   const commit = await save.put(authz.token, applied, { intentNonce: buyNonce });
   suite.check('按裁决结果提交（钱 -200、道具 +1）→ 200', commit.status === 200, `status=${commit.status}`);
 
-  const replay = await api('/api/actions/shop_buy', {
-    method: 'POST', token: authz.token,
-    body: { slot: 1, nonce: buyNonce, save: asText(buyBase), payload: { itemId: 'capsule_basic', amount: 1 } },
-  });
+  const replay = await intentReq(authz.token, 'shop_buy', { slot: 1, nonce: buyNonce, save: asText(buyBase), payload: { itemId: 'capsule_basic', amount: 1 } });
   suite.check('同一 intentNonce 重放 → 409 INTENT_REPLAY',
     replay.status === 409 && replay.data?.code === 'INTENT_REPLAY',
     `status=${replay.status} code=${replay.data?.code}`);
 
-  const overBuy = await api('/api/actions/shop_buy', {
-    method: 'POST', token: authz.token,
-    body: { slot: 1, nonce: nonceOf('poor'), save: asText(validSave({ money: 0, inventory: { capsule_basic: 7, potion_small: 2 } })), payload: { itemId: 'capsule_master', amount: 1 } },
-  });
+  const overBuy = await intentReq(authz.token, 'shop_buy', { slot: 1, nonce: nonceOf('poor'), save: asText(validSave({ money: 0, inventory: { capsule_basic: 7, potion_small: 2 } })), payload: { itemId: 'capsule_master', amount: 1 } });
   suite.check('金币不足购买 → 400 INTENT_REJECTED',
     overBuy.status === 400 && overBuy.data?.code === 'INTENT_REJECTED',
     `status=${overBuy.status} code=${overBuy.data?.code}`);
 
-  const normalAdminTest = await api('/api/actions/admin_test', {
-    method: 'POST', token: authz.token,
-    body: { slot: 1, nonce: nonceOf('adm'), save: asText(validSave({ money: 500, inventory: { capsule_basic: 7, potion_small: 2 } })), payload: {} },
-  });
+  const normalAdminTest = await intentReq(authz.token, 'admin_test', { slot: 1, nonce: nonceOf('adm'), save: asText(validSave({ money: 500, inventory: { capsule_basic: 7, potion_small: 2 } })), payload: {} });
   suite.check('普通账号调测试菜单意图 → 400（且不封号）',
     normalAdminTest.status === 400 && normalAdminTest.data?.code === 'INTENT_REJECTED',
     `status=${normalAdminTest.status} code=${normalAdminTest.data?.code}`);
@@ -335,10 +338,7 @@ async function main() {
   const adminMe = await api('/api/auth/me', { token: adminAcc.token });
   suite.check('服务端判定管理员（role=admin）→ isAdmin=true', adminMe.data?.isAdmin === true, JSON.stringify(adminMe.data));
 
-  const adminTest = await api('/api/actions/admin_test', {
-    method: 'POST', token: adminAcc.token,
-    body: { slot: 1, nonce: nonceOf('admx'), save: asText(validSave()), payload: {} },
-  });
+  const adminTest = await intentReq(adminAcc.token, 'admin_test', { slot: 1, nonce: nonceOf('admx'), save: asText(validSave()), payload: {} });
   suite.check('管理员调测试菜单意图 → 200 并下发一次性授权 nonce',
     adminTest.status === 200 && typeof adminTest.data?.nonce === 'string',
     `status=${adminTest.status} nonce=${adminTest.data?.nonce}`);
@@ -544,6 +544,9 @@ async function main() {
     const gotAfter = await save.get(btAcc.token);
     const afterSave = jsonOf(gotAfter);
     if (afterSave) {
+      // P4：战斗结算推进了版本号，先把跟踪基线对齐，否则这一发 PUT 会先撞 409，
+      // 测不到「资源变富被权威摘要拒绝」这一层。
+      if (typeof revAfter === 'number') save.setRevision(btAcc.token, 1, revAfter);
       // 「更穷」是合法消耗（服务端允许），真正要挡的是「变富」——那才等于抹掉/改写战斗结果。
       afterSave.money = (afterSave.money ?? 0) + 10_000;
       const enriched = await save.put(btAcc.token, afterSave);

@@ -30,7 +30,8 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   if (!res.ok) {
     const err: any = new Error((data && data.error) || `请求失败 (${res.status})`);
     err.status = res.status; // 供调用方区分 404（该槽位无存档）与真实故障
-    err.code = data && data.code; // 供调用方识别 ACCOUNT_BANNED 等业务码
+    err.code = data && data.code; // 供调用方识别 ACCOUNT_BANNED / REVISION_CONFLICT 等业务码
+    err.body = data; // P4：409 冲突时带着服务端当前存档，客户端就地自愈要用
     if (res.status === 403 && data?.code === BAN_CODE) {
       // 封号：广播事件让全局弹窗展示原因并强制登出。这里不清 token，
       // 交给弹窗「确定」按钮处理，保证用户一定能看到封号提示。
@@ -54,8 +55,12 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   return data;
 }
 
-/** P1-2：整包 PUT 的附加标记（意图 nonce / 新档重建基线）。 */
-export type PutExtra = { intentNonce?: string; rebase?: boolean };
+/**
+ * P1-2 / P4：整包 PUT 的附加标记。
+ * `revision` 是必填的基线版本（CAS）：不匹配时服务端返回 409 REVISION_CONFLICT，
+ * 客户端据此切回服务端版本，而不是静默覆盖别人的进度。
+ */
+export type PutExtra = { revision: number; intentNonce?: string; rebase?: boolean };
 
 export const api = {
   health: () => request("/api/health"),
@@ -71,14 +76,15 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   getSave: (slot: number) => request(`/api/save?slot=${slot}`),
-  putSave: (slot: number, data: string, clientId?: string, extra?: PutExtra) =>
+  putSave: (slot: number, data: string, clientId: string | undefined, extra: PutExtra) =>
     request(`/api/save?slot=${slot}`, {
       method: "PUT",
       body: JSON.stringify({
         data,
+        revision: extra.revision,
         ...(clientId ? { clientId } : {}),
-        ...(extra?.intentNonce ? { intentNonce: extra.intentNonce } : {}),
-        ...(extra?.rebase ? { rebase: true } : {}),
+        ...(extra.intentNonce ? { intentNonce: extra.intentNonce } : {}),
+        ...(extra.rebase ? { rebase: true } : {}),
       }),
     }),
   /** P1-2：发意图给服务端裁决，返回 { ok, nonce, result }；结果不可由客户端伪造。 */
@@ -86,6 +92,8 @@ export const api = {
     slot: number;
     nonce: string;
     save: string;
+    /** P4：本次意图基于服务端第几版，冲突时服务端拒绝（409）。 */
+    revision: number;
     payload: Record<string, unknown>;
   }) =>
     request(`/api/actions/${encodeURIComponent(type)}`, {

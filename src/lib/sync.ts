@@ -1,4 +1,5 @@
-// 自动云同步引擎（P0-3；P1-2 增加「裁决结果立即提交」通道；P2-2 增加「远端快照不回传」）。
+// 自动云同步引擎（P0-3；P1-2 增加「裁决结果立即提交」通道；P2-2 增加「远端快照不回传」；
+// P4 前置增加「写入必须带 revision 的 CAS」）。
 // 设计要点：
 //  - 登录后按冲突策略自动恢复（last-write-wins，必要时把云端存档拉回本地）；
 //  - 本地存档变更后防抖自动 PUT（默认 1.5s），不阻塞操作；
@@ -6,15 +7,17 @@
 //  - P1-2：关键路径走「发意图 → 服务端裁决 → 应用结果 → commitIntent 立即带 nonce 提交」；
 //  - P2-2：应用服务端权威快照会写 store，必须抑制这一次自动上传，否则
 //    「收快照 → 上传 → 再广播」会形成多端回环；本端 PUT 成功后记下 revision，
-//    使自己的回显快照被幂等忽略。
+//    使自己的回显快照被幂等忽略；
+//  - P4：每次 PUT / 意图都必须声明「基于第几版」。版本不符时服务端 409 并把当前
+//    存档一起返回，这里直接应用那份快照——多人同时玩时以服务端为准，不覆盖别人的进度。
 import { useEffect, useState } from "react";
 import { api, type PutExtra } from "./api";
 import { getClientId } from "./auth";
 import { useGameStore } from "@/stores/useGameStore";
 import { decideSyncAction, type SyncDecision } from "./syncPolicy";
-import { classifyUploadError, uploadErrorMessage } from "./syncErrors";
+import { classifyUploadError, conflictPayloadOf, uploadErrorMessage } from "./syncErrors";
 import { takeRebase } from "./rebase";
-import { noteRevision } from "./sessionState";
+import { noteRevision, setRevision, getWriteRevision } from "./sessionState";
 
 export type SyncPhase = "idle" | "syncing" | "synced" | "offline" | "error";
 export type { SyncDecision };
@@ -73,9 +76,15 @@ export function useSyncStatus(): { phase: SyncPhase; info?: string } {
 }
 
 // —— 防抖上传 + 离线队列 ——
+/**
+ * 入队 / 防抖时还不知道该用哪一版（revision 要在真正发请求前才取），
+ * 所以这里只带「附加标记」，revision 由 attemptUpload 补齐。
+ */
+type UploadExtra = Omit<Partial<PutExtra>, "revision">;
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let pending: { slot: number; data: string; extra?: PutExtra } | null = null;
-const offlineQueue: { slot: number; data: string; extra?: PutExtra }[] = [];
+let pending: { slot: number; data: string; extra?: UploadExtra } | null = null;
+const offlineQueue: { slot: number; data: string; extra?: UploadExtra }[] = [];
 
 // —— P2-2：远端快照写入 store 时抑制一次自动上传 ——
 let suppressUploads = 0;
@@ -101,23 +110,106 @@ function exportSlot(slot: number): string | null {
   return r.ok ? r.json : null;
 }
 
-async function uploadNow(slot: number, data: string, extra?: PutExtra): Promise<any> {
+// —— P4：写入基线版本 ——
+// 同一槽位的探测请求合并成一个，避免首次同步时并发打好几次 GET。
+const revisionProbes = new Map<number, Promise<number>>();
+
+/**
+ * 取得该槽位的写入基线版本（CAS 的 compare 部分）。
+ * 本地还没有基线时问一次服务端：
+ *   · 有存档 → 用它的 revision（说明这一端是「接着别人的版本改」）；
+ *   · 404    → 记 0（服务端确实没有存档，本次 PUT 就是新建，基线 0 合法）。
+ * 注意这里必须用 setRevision 而不是 noteRevision：换账号后新账号的版本号可能更小。
+ */
+async function ensureRevision(slot: number): Promise<number> {
+  const known = getWriteRevision(slot);
+  if (known !== null) return known;
+  const inflight = revisionProbes.get(slot);
+  if (inflight) return inflight;
+  const probe = (async () => {
+    try {
+      const cloud = await api.getSave(slot);
+      const rev = typeof cloud?.revision === "number" ? cloud.revision : 0;
+      setRevision(slot, rev);
+      return rev;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        setRevision(slot, 0);
+        return 0;
+      }
+      throw e; // 网络 / 鉴权问题交给上层按 transient 处理
+    } finally {
+      revisionProbes.delete(slot);
+    }
+  })();
+  revisionProbes.set(slot, probe);
+  return probe;
+}
+
+/** 供意图通道复用：发意图前必须知道基线版本，否则服务端无法做 CAS。 */
+export const ensureWriteRevision = ensureRevision;
+
+/**
+ * P4：版本冲突就地自愈——服务端已经赢了这个槽位，本地切过去。
+ * 关键在于「不重试」：带旧 revision 的这份 data 永远不会被接受，
+ * 反复重试只会把状态行卡在 error；正确做法是丢掉本地这份快照、应用服务端那份。
+ */
+function healFromConflict(slot: number, e: unknown): boolean {
+  const p = conflictPayloadOf(e);
+  if (!p) {
+    setPhase("error", "存档版本冲突，请刷新页面后重试");
+    return false;
+  }
+  setRevision(slot, p.revision);
+  if (p.data) {
+    // 与 P2-2 同样的顺序：先抑制回传，再写 store。
+    suppressNextUpload();
+    const r = useGameStore
+      .getState()
+      .importSaveJson(p.data, slot as 1 | 2 | 3, { keepBattle: true });
+    setPhase("synced", r.ok ? "其他设备已更新，已切换为服务器版本" : "其他设备已更新，请刷新页面");
+    return r.ok;
+  }
+  setPhase("synced", "其他设备已更新，已切换为服务器版本");
+  return true;
+}
+
+/** 供意图通道复用：意图请求 409 时切到服务端版本，并让调用方把本次操作判为失败。 */
+export const recoverFromConflict = healFromConflict;
+
+async function uploadNow(slot: number, data: string, extra: PutExtra): Promise<any> {
   return api.putSave(slot, data, getClientId(), extra);
 }
 
 /**
- * 上传一次并分类结果（P1-1）。4xx 属永久失败，不入队；临时失败才入队。
+ * 上传一次并分类结果（P1-1 / P4）。4xx 属永久失败，不入队；临时失败才入队。
  * P2-2：成功响应的 revision 记进会话态，供快照幂等判断。
+ * P4：先补齐 revision 再发；409 冲突走自愈，既不重试也不入队。
  */
-async function attemptUpload(slot: number, data: string, extra?: PutExtra): Promise<"permanent" | "transient" | null> {
+async function attemptUpload(
+  slot: number,
+  data: string,
+  extra: UploadExtra = {},
+): Promise<"conflict" | "permanent" | "transient" | null> {
+  let revision: number;
+  try {
+    revision = await ensureRevision(slot);
+  } catch {
+    return "transient"; // 连基线版本都拿不到，等于离线
+  }
   try {
     setPhase("syncing");
-    const res = await uploadNow(slot, data, extra);
+    const res = await uploadNow(slot, data, { ...extra, revision });
     if (res && typeof res.revision === "number") noteRevision(slot, res.revision);
     setPhase("synced", "已同步到云端");
     return null; // 成功
   } catch (e) {
-    if (classifyUploadError(e) === "permanent") {
+    const kind = classifyUploadError(e);
+    if (kind === "conflict") {
+      healFromConflict(slot, e);
+      return "conflict";
+    }
+    if (kind === "permanent") {
       setPhase("error", uploadErrorMessage(e));
       return "permanent";
     }
@@ -125,7 +217,7 @@ async function attemptUpload(slot: number, data: string, extra?: PutExtra): Prom
   }
 }
 
-export function scheduleUpload(slot: number, data: string, delayMs = 1500, extra?: PutExtra): void {
+export function scheduleUpload(slot: number, data: string, delayMs = 1500, extra?: UploadExtra): void {
   pending = { slot, data, extra };
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
@@ -182,10 +274,14 @@ export async function syncOnLogin(slot: number): Promise<void> {
 
   try {
     const cloud = await api.getSave(slot);
+    // P4：先对齐基线版本。换账号 / 其他设备写过之后本地记录可能过期，
+    // 这里用 setRevision 强制覆盖，后续 PUT 才会带对 revision。
+    setRevision(slot, typeof cloud.revision === "number" ? cloud.revision : 0);
     const sameDevice = cloud.clientId === getClientId();
     const cloudTime = cloud.updatedAt ? Date.parse(cloud.updatedAt) : 0;
     const decision = decideSyncAction({ localExists, localTime, cloudExists: true, cloudTime, sameDevice });
     if (decision === "restore") {
+      suppressNextUpload(); // 刚拉下来的云端档不必再原样传回去
       const r = useGameStore
         .getState()
         .importSaveJson(cloud.data, slot as 1 | 2 | 3) as { ok: boolean; reason?: string };
@@ -208,6 +304,8 @@ export async function syncOnLogin(slot: number): Promise<void> {
     }
   } catch (e: any) {
     if (e?.status === 404) {
+      // 服务端没有存档：本次上传就是新建，基线版本为 0。
+      setRevision(slot, 0);
       const data = exportSlot(slot);
       if (data) {
         const outcome = await attemptUpload(slot, data);

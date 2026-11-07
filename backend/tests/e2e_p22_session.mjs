@@ -12,6 +12,7 @@
  * 输出：逐例 [PASS]/[FAIL]，末尾 E2E_P22_OK；任一失败 exit 1。
  */
 import WebSocket from 'ws';
+import { makeSaveWriter } from './lib/saveWriter.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
@@ -71,17 +72,27 @@ function validSave(overrides = {}) {
   };
 }
 
-const put = (token, data, extra = {}) =>
-  request('/api/save?slot=1', { method: 'PUT', token, body: { data: asText(data), ...extra } });
+// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token 跟踪当前版本，
+// 需要构造版本冲突时显式传 { revision: n }。
+const saveWriter = makeSaveWriter(request);
+const put = saveWriter.put;
 const get = (token) => request('/api/save?slot=1', { token });
 const session = (token, slot = 1) => request(`/api/session?slot=${slot}`, { token });
 const health = () => request('/api/health');
 const me = (token) => request('/api/auth/me', { token });
-const intent = (token, type, payload, save, nonce) =>
-  request(`/api/actions/${type}`, {
+// P4：意图也要带 revision（CAS）。裁决成功后服务端返回新版本号，这里立刻同步，
+// 否则紧接着的 commitIntent（PUT 带 intentNonce）会拿旧版本撞 409。
+const intent = async (token, type, payload, save, nonce) => {
+  const revision = await saveWriter.revOf(token, 1);
+  const res = await request(`/api/actions/${type}`, {
     method: 'POST', token,
-    body: { slot: 1, nonce, save: asText(save), payload },
+    body: { slot: 1, nonce, save: asText(save), payload, revision },
   });
+  if (res.status === 200 && typeof res.data?.revision === 'number') {
+    saveWriter.set(token, 1, res.data.revision);
+  }
+  return res;
+};
 const newNonce = () => `n_${RUN}_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 
 /** 建立一条 WS 连接，所有下行消息进队列，供 waitMsg 按条件取用。 */

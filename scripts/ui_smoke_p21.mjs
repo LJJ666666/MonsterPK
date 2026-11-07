@@ -98,10 +98,11 @@ async function main() {
   const regData = await reg.json();
   const token = regData.token;
   if (!token) throw new Error(`注册失败: ${JSON.stringify(regData)}`);
+  // P4：整包 PUT 必须带 revision（CAS）。新账号服务端没有存档，基线就是 0。
   const putRes = await fetch(`${API}/api/save?slot=1`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ data: JSON.stringify(save) }),
+    body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', putRes.status === 200, String(putRes.status));
 

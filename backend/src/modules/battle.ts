@@ -10,11 +10,12 @@
  * `settlements.ts` 删除——它们采信客户端上报的 `enemyLevel` / `baseRate`，
  * 战斗上移后等于零成本刷奖励的口子，不再保留兼容开关。
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { parseAuthority, digestOf, type AuthorityState } from '../lib/authority';
 import { BATTLE_TTL_MS } from '../lib/battleSession';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import {
   applyBattleAction, applyAdminTestFlags, battleView, BattleError, createBattle,
   type BattleAction, type BattleState,
@@ -199,7 +200,15 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const userId = (req.user as any).userId;
     const parsed = startSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '开局参数不合法' });
-    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags } = parsed.data;
+    // 开局要拿队伍快照，与写操作串行，避免读到半途的存档。
+    return withSlotLock(slotLockKey(userId, parsed.data.slot), () =>
+      runBattleStart(reply, userId, parsed.data),
+    );
+  });
+
+  /** 开局主体；调用方已持有槽位锁。 */
+  async function runBattleStart(reply: FastifyReply, userId: string, params: z.infer<typeof startSchema>) {
+    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags } = params;
 
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
 
@@ -264,14 +273,28 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     } catch (err) {
       return fail(reply, err);
     }
-  });
+  }
 
   /** 动作：服务端推进一回合；结束则结算写档并广播。 */
   fastify.post('/api/battle/action', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
     const parsed = actionSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '动作参数不合法' });
-    const { battleId, slot, action } = parsed.data;
+    // 同一槽位串行：动作流程里有 await 读档，并发两条动作会各自基于同一份战斗态推进，
+    // 结束判定还会重复结算写档。与 PUT / 存档写操作共用同一把槽位锁。
+    return withSlotLock(slotLockKey(userId, parsed.data.slot), () =>
+      runBattleAction(req, reply, userId, parsed.data),
+    );
+  });
+
+  /** 动作主体；调用方已持有槽位锁。 */
+  async function runBattleAction(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    userId: string,
+    params: z.infer<typeof actionSchema>,
+  ) {
+    const { battleId, slot, action } = params;
 
     const state = battles.get(userId, slot, battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在或已结束', code: 'BATTLE_NOT_FOUND' });
@@ -332,7 +355,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     return { ok: true, battle: battleView(next), settled: false };
-  });
+  }
 
   /** 查当前战斗：重连 / 刷新后用，避免把战斗态存到客户端。 */
   fastify.get('/api/battle/current', { preHandler: fastify.authenticate }, async (req, reply) => {

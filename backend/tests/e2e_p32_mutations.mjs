@@ -11,6 +11,7 @@
  * 输出：逐例 [PASS]/[FAIL]，末尾 E2E_P32_OK；任一失败 exit 1。
  */
 import WebSocket from 'ws';
+import { makeSaveWriter } from './lib/saveWriter.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
@@ -79,11 +80,19 @@ function validSave(overrides = {}) {
   };
 }
 
-const put = (token, data, extra = {}) =>
-  request('/api/save?slot=1', { method: 'PUT', token, body: { data: asText(data), ...extra } });
+// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token 跟踪当前版本，
+// 需要构造版本冲突时显式传 { revision: n }。
+const saveWriter = makeSaveWriter(request);
+const put = saveWriter.put;
 const getSave = (token) => request('/api/save?slot=1', { token });
-const op = (token, name, body = {}) =>
-  request(`/api/game/${name}`, { method: 'POST', token, body: { slot: 1, ...body } });
+// 服务端写操作也会推进版本号，成功后必须同步，否则下一次 PUT 会被自己的 CAS 拒掉。
+const op = async (token, name, body = {}) => {
+  const res = await request(`/api/game/${name}`, { method: 'POST', token, body: { slot: 1, ...body } });
+  if (res.status === 200 && typeof res.data?.revision === 'number') {
+    saveWriter.set(token, 1, res.data.revision);
+  }
+  return res;
+};
 
 function openWs(token) {
   return new Promise((resolve, reject) => {

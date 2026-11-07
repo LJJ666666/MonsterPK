@@ -61,6 +61,45 @@ export function sweepSessions(now: number): number {
   return gameSessions.sweep(now);
 }
 
+/** 当前写入版本号的只读视图（内存权威态优先，回落 DB，无存档视为 0）。 */
+export type CurrentState = {
+  revision: number;
+  data: string;
+  schemaVersion: string;
+  clientId: string | null;
+  updatedAt: number;
+};
+
+/**
+ * 读取某槽位「服务端当前版本」。P4 的 CAS 校验用它做基准：
+ * 在线以内存权威态为准（那就是最后写入的值），离线回 DB，完全没有存档时为 null。
+ *
+ * 注意：这里不 hydrate 会话——只读校验不该产生副作用，
+ * 否则每次冲突探测都会在内存里凭空建出一个会话来。
+ */
+export async function currentState(userId: string, slot: number): Promise<CurrentState | null> {
+  const live = gameSessions.get(userId, slot);
+  if (live) {
+    return {
+      revision: live.authority.revision,
+      data: live.data,
+      schemaVersion: live.schemaVersion,
+      clientId: live.clientId,
+      updatedAt: live.updatedAt,
+    };
+  }
+  const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
+  if (!rec) return null;
+  return {
+    revision: parseAuthority(rec.authority, rec.data).revision,
+    data: rec.data,
+    schemaVersion: rec.schemaVersion,
+    clientId: rec.clientId,
+    updatedAt: new Date(rec.updatedAt).getTime(),
+  };
+}
+
+
 /**
  * 服务端写入唯一入口：DB upsert → 更新内存态（revision 单调）→ 广播快照。
  * save.ts / actions.ts 都改调这里，保证「在线权威态」与 DB 永不脱节。

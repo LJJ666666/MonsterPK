@@ -11,6 +11,7 @@
  */
 import { api } from "./api";
 import { isLoggedIn } from "./auth";
+import { setRevision } from "./sessionState";
 
 export type MutationOp =
   | "new_game"
@@ -66,10 +67,14 @@ export async function runGameOp(op: MutationOp, body: Record<string, unknown>): 
     if (!res?.ok || typeof res.data !== "string") {
       return { ok: false, reason: "服务端没有返回存档", code: "NO_SAVE_DATA", transient: false };
     }
+    const revision = Number(res.revision ?? 0);
+    // P4：服务端已经写过一版，把基线版本对齐到这一版，
+    // 否则后续自动上传会拿着旧 revision 去撞 409（内容其实没变，属于无谓冲突）。
+    if (typeof body.slot === "number") setRevision(body.slot, revision);
     return {
       ok: true,
       data: res.data,
-      revision: Number(res.revision ?? 0),
+      revision,
       effect: (res.effect ?? {}) as Record<string, unknown>,
     };
   } catch (e) {

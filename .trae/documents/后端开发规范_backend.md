@@ -562,3 +562,66 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
   3. `areaId` 匹配不到服务端地图时退化为信任客户端 theme（仍校验 theme 在真值表内），
      等级区间以服务端地图为准只在匹配成功时生效；
   4. 加速器仍可能影响客户端动画节奏，但**不再影响结算**（回合与 RNG 都在服务端）。
+
+## 18. 测试体系与可重复验收（2026-11-07）
+
+### 18.1 分层与分工
+
+| 层 | 位置 | 命令 | 作用 |
+|---|---|---|---|
+| 纯函数单测 | `backend/tests/*.test.ts` | `npm test` | 规则/校验/权威摘要/会话注册表，注入 RNG，毫秒级 |
+| 数值矩阵 | `backend/tests/numericRules.test.ts` | 同上 | **不变量与边界**，不绑定具体数值，调平衡不失效 |
+| 公式对照 | `backend/tests/battleEngine.test.ts` | 同上 | 直接 import 前端 `rules.ts` 逐项比对，防两套引擎分叉 |
+| 常规 E2E | `backend/tests/e2e_*.mjs` | `npm run e2e[:p12/p21/p22/p31]` | 正常路径与功能完整性，需服务在跑 |
+| 对抗 E2E | `backend/tests/e2e_hardening.mjs` | `npm run e2e:hardening` | **攻击面**：伪造/越权/改档/重放/协议滥用 |
+| 浏览器冒烟 | `scripts/ui_smoke_p21.mjs` | `node scripts/ui_smoke_p21.mjs` | 375px 真实渲染、WS 连接、权威快照 |
+| 统一编排 | `scripts/verify.mjs` | `npm run verify` | 15 阶段串起以上全部 + 文档自检 |
+
+**新增测试必须先想清楚放哪一层**：能用纯函数验证的不要起服务；攻击面用例一律进 `e2e_hardening`，
+不要散落到常规 E2E 里（否则正常路径失败和对抗失败混在一起，定位成本高）。
+
+### 18.2 共享底座 `tests/lib/harness.mjs`
+
+新套件只写用例，不再复制 helper。提供：
+
+- `api(path, {method, token, body, bodyText})`：统一返回 `{status, data, text}`，支持原始大 body（测 413）；
+- `newAccount(prefix)` / `login` / `setRole` / `forgeToken(payload, {expiresInMs})`：
+  账号与 JWT 伪造（负 `expiresInMs` 造过期 token；`fast-jwt` 不接受负 `expiresIn`，内部改写 `exp` 声明）；
+- `validSave(overrides)` / `save.put|get|session` / `battle.start|action|current|abandon`；
+- `openWs` / `waitMsg` / `waitClose` / `closeWs` / `sendRaw`：`openWs` 会通过 `unexpected-response`
+  读回 401/403/429 的 JSON body，`waitClose` 读取记录的 `closeInfo`（连接可能已先关闭）；
+- `Suite`：`[PASS]` / `[FAIL]` / `[SKIP]` + `<NAME>_RESULT` + `<NAME>_OK`，失败自动 `exit 1`；
+- `cleanupAccounts(names)` / `cleanupByPrefix(prefixes, {dryRun})`：只删测试账号，**永不删 admin**。
+
+### 18.3 对抗套件七分区（112 项）
+
+| 分区 | 数量 | 关键断言 |
+|---|---|---|
+| A 认证与会话 | 16 | 无/乱码/篡改/过期/幽灵账号 token 全 401；跨账号隔离；注册长度约束；JWT 伪造 role 不生效 |
+| B 存档结构 | 11 | 8 类结构非法 400 **不封号**、版本过高 `VERSION_TOO_NEW`、空 data 400、2MB 413、连打后仍可写 |
+| C 风控封号 | 19 | 6 类改档特征 403 `ACCOUNT_BANNED`；封号后 GET/PUT/login/WS/意图全拒 |
+| D 权威增量 | 14 | 加钱/加道具/撤销消耗 400 `AUTHORITY_MISMATCH`；伪造 nonce 400；重放 409；管理员授权链路 |
+| E WS 攻防 | 12 | 无 token 401 / 非法 Origin 403 / 伪造上行 1008 / 超 4KB 1009 / 第 4 连接 429 / 限流 1008 |
+| F 战斗接口 | 20 | 伪造与越权 battleId 404、未掌握技能/越界换人/不存在道具 400、伪造 HP 被忽略、放弃后 404 |
+| G 数值边界 | 20 | 七组「合法线放行 / 超一线封号」成对断言；未来时间戳被钳制且不封号 |
+
+**写法约定**：每项必须断言 `status` **和**机器码（`code`），只断 200/400 会漏掉错误码回归；
+涉及 RNG 的只断区间与不变量，绝不写死等值（bug_log §20）。
+
+### 18.4 统一编排 `npm run verify`
+
+- 15 阶段约 35s；`--only=check,unit`（不需要服务）/ `--only=e2e:hardening` / `--skip=e2e,smoke`；
+  `--strict` 让「服务没起」变成失败（CI 用）；`--no-clean` 保留测试账号排查。
+- 编排器先探活 3001/5173，缺服务的阶段标 `SKIP` 而非失败，避免本地没起服务时一片红。
+- 跑完自动执行 `clean:e2e`，防止 dev.db 被临时账号撑大；报告写 `.verify-report.json`（已 gitignore）。
+
+### 18.5 已知偏差与待决策项
+
+- **38 只幻兽 `initMin > initMax`（144 项）**：`getMonsterStatBounds` 的 `initMin` 用
+  `baseHp+3.2 / baseAtk+2.3 / …` 推算，而 `data.ts` 的 `initStatsMax` 多数直接等于 `base`，
+  导致区间反向、`randInt` 区间塌陷、个体值上限失效。
+  修它会让 1 级属性整体下移 2~3 点（数值平衡决策）→ `numericRules.test.ts` 只做
+  `t.diagnostic` 诊断并设「反向项 ≤ 200」的上界保护，不判失败。**待产品决策后再改。**
+- **`money` 格式错误会封号**：负数 / 小数 / null 目前归入 `CHEAT_CODES` 的 `MONEY` → 403 封号。
+  测试按现状断言并在用例名标注「当前契约」；若后续把「格式非法」与「数值超限」拆开
+  （如 `MONEY_INVALID` 只 400），需同步改这 3 条用例与 `antiCheat.test.ts`、`e2e_save_validation.mjs`。

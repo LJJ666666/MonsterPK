@@ -32,12 +32,14 @@ task_text = text(DOCS / "开发任务优先级_2026-11-04.md")
 log_text = "\n".join(text(p) for p in sorted(MEM.glob("2026-*.md")))
 spec_text = text(DOCS / "后端开发规范_backend.md")
 pkg_text = text(ROOT / "backend" / "package.json")
+root_pkg_text = text(ROOT / "package.json")
+handoff_text = text(ROOT / "HANDOFF.md")
 
 checks = [
     ("记忆镜像 sha256 一致", sha(a) == sha(b), sha(a)[:12]),
     ("MEMORY.md 已无旧数字 75/75 / **75**", "75/75" not in memory_text and "**75**" not in memory_text),
-    ("MEMORY.md 写入最终数字（130 / 47 / 34 / 24 / 39 / 15）",
-     all(x in memory_text for x in ["**130**", "**47**", "**34**", "**24**", "**39**", "**15/15**"])),
+    ("MEMORY.md 写入最终数字（160 / 47 / 34 / 24 / 39 / 112 / 15）",
+     all(x in memory_text for x in ["**160**", "**47**", "**34**", "**24**", "**39**", "112", "**15/15**"])),
     ("MEMORY.md 下一步为 P3-1c", "下一步 P3-1c" in memory_text),
     ("MEMORY.md 已登记 commit", "`fe159eb`" in memory_text and "`2f2c8b7`" in memory_text),
     ("MEMORY.md 体积已收敛", a.stat().st_size < 15_000, f"{a.stat().st_size} bytes"),
@@ -67,6 +69,16 @@ checks = [
     ("UI 冒烟脚本已固化到 scripts/ 且 ROOT 动态推导",
      (ROOT / "scripts" / "ui_smoke_p21.mjs").exists()
      and "fileURLToPath(import.meta.url)" in text(ROOT / "scripts" / "ui_smoke_p21.mjs")),
+    ("测试基础设施齐全（harness / 对抗套件 / 数值矩阵）",
+     (ROOT / "backend" / "tests" / "lib" / "harness.mjs").exists()
+     and (ROOT / "backend" / "tests" / "e2e_hardening.mjs").exists()
+     and (ROOT / "backend" / "tests" / "numericRules.test.ts").exists()),
+    ("e2e:hardening 与 clean:e2e 已注册",
+     '"e2e:hardening"' in pkg_text and '"clean:e2e"' in pkg_text),
+    ("统一编排器 verify 已注册且脚本存在",
+     (ROOT / "scripts" / "verify.mjs").exists() and '"verify"' in root_pkg_text),
+    ("后端规范含 §18 测试体系", "## 18. 测试体系" in spec_text),
+    ("HANDOFF 验收以 npm run verify 为首选", "npm run verify" in handoff_text),
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
 ]

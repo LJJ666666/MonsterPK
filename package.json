@@ -9,7 +9,13 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc -b --noEmit",
-    "test": "vitest run --no-file-parallelism"
+    "test": "vitest run --no-file-parallelism",
+    "verify": "node scripts/verify.mjs",
+    "verify:quick": "node scripts/verify.mjs --only=check,unit",
+    "verify:unit": "node scripts/verify.mjs --only=unit",
+    "verify:e2e": "node scripts/verify.mjs --only=e2e",
+    "verify:hardening": "node scripts/verify.mjs --only=e2e:hardening",
+    "verify:smoke": "node scripts/verify.mjs --only=smoke"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

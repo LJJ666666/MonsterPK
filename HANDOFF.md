@@ -149,25 +149,47 @@ C:\Users\Six\.workbuddy\user-2f146fb9-76c5-420d-95cd-5fad8c99318f-personal\MEMOR
 
 ## 6. 验收清单
 
+**首选：一条命令跑完全部（约 35s，跑完自动清理测试账号）**
+
 ```bash
-python scripts/check_home_env.py          # 期望 ENV_CHECK_OK（[WARN] 按提示处理）
-python scripts/doc_check.py               # 期望 DOC_CHECK_OK
-python scripts/sync_memory.py --check     # 期望 [一致] 且两侧 sha256 相同
+npm run verify                    # 期望 VERIFY_OK（15 阶段）
+```
+
+它等价于下面这些，且会先探活 5173 / 3001、缺服务的阶段自动 SKIP：
+
+```bash
+# A. 不需要服务
+python scripts/check_home_env.py          # ENV_CHECK_OK（[WARN] 按提示处理）
+python scripts/doc_check.py               # DOC_CHECK_OK
+python scripts/sync_memory.py --check     # [一致] 且两侧 sha256 相同
 npm run check && npm test                 # 前端 0 错误 / 47 passed
-cd backend && npm run check && npm test   # 后端 0 错误 / 130 passed
+cd backend && npm run check && npm test   # 后端 0 错误 / 160 passed
 cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
+
+# B. 需要服务已起（后端 3001 + 前端 5173）
+cd backend && npm run e2e               # 57/57 E2E_OK
+cd backend && npm run e2e:p12           # 38/38 E2E_P12_OK
+cd backend && npm run e2e:p21           # 34/34 E2E_P21_OK
+cd backend && npm run e2e:p22           # 24/24 E2E_P22_OK（在线权威态）
+cd backend && npm run e2e:p31           # 39/39 E2E_P31_OK（服务端战斗）
+cd backend && npm run e2e:hardening     # 112/112 E2E_HARDENING_OK（对抗攻防）
+node scripts/ui_smoke_p21.mjs           # 15/15 UI_SMOKE_OK（EDGE_PATH 可覆盖）
 ```
 
-服务已起时再跑（五组 E2E + 浏览器冒烟）：
+**子集与小技巧**
 
 ```bash
-cd backend && npm run e2e        # 57/57 E2E_OK
-cd backend && npm run e2e:p12    # 38/38 E2E_P12_OK
-cd backend && npm run e2e:p21    # 34/34 E2E_P21_OK
-cd backend && npm run e2e:p22    # 24/24 E2E_P22_OK（P2-2 在线权威态）
-cd backend && npm run e2e:p31    # 39/39 E2E_P31_OK（P3-1 服务端战斗，含等级浮动区间）
-node scripts/ui_smoke_p21.mjs    # 15/15 UI_SMOKE_OK（Edge 路径可用 EDGE_PATH 覆盖）
+npm run verify:quick              # 只跑 check + unit，不需要服务（改完代码先跑这个）
+npm run verify:e2e                # 只跑六组 E2E
+npm run verify:hardening          # 只跑对抗套件
+npm run verify -- --skip=smoke    # 跳过浏览器冒烟
+npm run verify -- --strict        # CI：服务没起视为失败
+npm run verify -- --no-clean      # 保留测试账号便于排查
+cd backend && npm run clean:e2e -- --dry   # 看有多少历史测试账号待清
 ```
+
+> 测试账号会累积吗？不会。`e2e:hardening` 自清理，`verify` 结束统一清一次，
+> 且只删 `e2e_/ui_/harden_/hd_/edge_/bt_/p12_/ws_/b3a_/b3b_/ss_` 前缀，**永不删 admin**。
 
 浏览器打开 5173：能注册登录、Start 页显示「实时通道已连接」（证明 WS 握手与 hello 成功）。
 

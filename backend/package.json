@@ -19,7 +19,9 @@
     "e2e:p12": "node tests/e2e_p12.mjs",
     "e2e:p21": "node tests/e2e_p21_ws.mjs",
     "e2e:p22": "node tests/e2e_p22_session.mjs",
-    "e2e:p31": "node tests/e2e_p31_battle.mjs"
+    "e2e:p31": "node tests/e2e_p31_battle.mjs",
+    "e2e:hardening": "node tests/e2e_hardening.mjs",
+    "clean:e2e": "node scripts/clean-test-data.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

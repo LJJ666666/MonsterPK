@@ -1,8 +1,55 @@
-# 回家开发交接手册（2026-11-06 周五）
+# 跨机器交接手册（公司 ⇄ 家里）
 
-> **这份文件随 git 入库。回家后打开 WorkBuddy 的第一段话，先让它读本文件。**
-> 原因：家里是全新会话，看不到今天这段对话；只有写进仓库的东西才能被带过去。
+> **这份文件随 git 入库。换机器后打开 WorkBuddy 的第一段话，先让它读本文件。**
+> 原因：新机器是全新会话，看不到上一次对话；只有写进仓库的东西才能被带过去。
 > 配套脚本：`scripts/check_home_env.py`（环境自检，只读）、`scripts/doc_check.py`（文档/记忆验收，只读）。
+> **下方「AI 接手必读」是 2026-11-09 最新增量，优先级高于本文其余内容；第 1 节的提交号与第 8 节的进度快照写于 11-06，仅作历史，勿当现状。**
+
+## AI 接手必读（2026-11-09 家→公司，优先于下文）
+
+> 读者：公司机器上第一次打开本仓库的 AI 编码助手（WorkBuddy 或其他）。
+> 目的：动手改代码前，先读懂**为什么这么设计**、**哪些坑不能踩**。本文其余章节是 11-06 写的「公司→家」流程，方向与数据偏旧，只作操作参考。
+
+### A. 先读懂意图（Why，比命令重要）
+
+- 项目是浏览器 + Capacitor/Android 的抓怪回合制 RPG（`com.monster.game`）。北极星是**服务端权威 + 实时多人同玩**：客户端只发意图、收全量状态、负责渲染。别为了「省事」把判定搬回前端、加离线降级，或让客户端上报数值当真值。
+- 三条不变式：① 每块可变状态只有一个 owner key（个人档 `userId:slot`、战斗态 `battleId`、共享野怪 `areaId`、房间 `roomId`）；② 每处写入只有一个串行化键（`slotLock` / `withRoomLock`）；③ **WS 上行与客户端上报绝不写状态**，个人档唯一写入口是 `commitState()`。P4-2d/e 都把战斗态挂在 `RoomState` 上，没有新增第五个权威源。
+- 文档权威源分工（刚做过解耦，别再往一处堆）：`.workbuddy/memory/MEMORY.md` 只放**硬约束 + 索引 + 进度快照**，不复述技术细节；`.trae/documents/` 下的后端规范 / 排期 / 任务表 / bug_log / 未来规划台账才是**权威事实**；`scripts/doc_check.py` 只做结构断言。查数字、查代码符号去权威文档，别靠记忆或推断。
+- **产品语义变更（规则、数值、风控策略、离线策略、奖励发放）必须先给评估与方案让杰哥拍板**，不要自行改；工程实现层面的取舍可自行决定。开发阶段没有真实老用户，**不要为兼容留后门、旧链路、开关**，该删直接删干净。
+- 以下是**刻意设计，不是 bug，别「顺手修」**：Boss 讨伐 / 共斗 / 1v1 目前都**不发奖励**（奖励、掉落、剧情门槛登记在台账 F09/F14/F15/F16 待设计）；共斗伤害不写 `BossDamageEvent`、没有共斗榜（F16）；`s.rewards=null`；`pvpSettled` / `coopSettled` 结算幂等；共斗非法意图服务端降级跳过而不是抛异常打崩整间房；`flee` 在入口层 400 `COOP_INTENT_INVALID`；「战力」只是六维之和，不参与任何判定。
+- 当前状态：**P4-2 a/b/c/d/e 五阶段全部 ✅**，`master` 为 `70ca1ee`（以 `git ls-remote origin refs/heads/master` 为准），工作树干净。下一步候选：P4-3 交易 / 赠送，或偿还台账 F01/F02/F04/F09/F14/F15/F16。开新阶段前先读排期与任务表，别自己发明阶段号。
+
+### B. 最容易踩的坑（含后果与正确做法）
+
+| 坑 | 为什么 / 后果 | 正确做法 |
+|---|---|---|
+| clone 完直接 `npm run dev` | `backend/.env`、`backend/prisma/dev.db`、`node_modules` 都被 gitignore，公司 clone 后**根本不存在** | 按第 3 节：`cp backend/.env.example backend/.env` → 换 `JWT_SECRET` → `npx prisma migrate deploy` + `npx prisma generate` → 前后端各 `npm install` |
+| 沿用模板 `JWT_SECRET`，或把 `.env` / `*.db` 加进 git | 模板值是 `change-me-in-prod-...`，鉴权形同虚设；入库会泄密钥、污染别人的库 | 随机长字符串；保持忽略规则。改配置相关代码后**必须实测 `process.env.XXX` 有值**——`lib/env.ts` 的 `.env` 路径曾算错，`JWT_SECRET` 长期回落硬编码默认密钥 |
+| 全新空库直接点测试菜单 | 管理员只在服务端判定，未授权使用会被反作弊**封号** | 重新注册账号并 `cd backend && npm run admin -- grant <名>`，绝不写死用户名 |
+| 用 pnpm 装依赖，或把两套测试混跑 | 锁文件是 npm；前端 vitest 只收 `src/**/*.test.{ts,tsx}`，后端 `node:test` 在 `backend/tests/`，混跑必挂 | 分别跑；整体验收首选 `npm run verify`（29 阶段、约 90~120s、`VERIFY_OK`） |
+| 改 Prisma schema 前没停 3001 | 迁移链会被打断 | 先停后端再改 schema；改完 `migrate deploy` + `generate` |
+| 把项目放 exFAT U 盘 / 中文 / 空格 / 盘根目录 | 出现过「大小一致但内容不同」的静默单比特损坏，检索工具也会失效 | NTFS 盘、非根目录、无空格、尽量纯英文 |
+| 后台任务报 `exit 4` / `0xC0000142` / `1073807364` 就去查代码 | 这是**宿主回收进程**，不是程序 bug | 先 `curl` 探活 5173 / 3001，无 LISTEN 再重启双服务；交接后服务**不会自动恢复** |
+| 改 `src/game/data.ts` 漏了 `};` | 后续 `export` 会落进对象字面量内部，报 `Unexpected keyword 'export'` | 改完立刻 `npm run check` |
+| 新增持久化字段不升版本 | 老档 migrate 会丢字段 | 递增 `SCHEMA_VERSION`（同时是 persist `version`）并补 migrate 分支，后端 `EXPECTED_SAVE_VERSION` 同步改 |
+| 用 `crypto.randomUUID()` / 靠类型收窄判别联合 | 旧 WebView 没有该 API；项目 `strict:false`、`noUnusedLocals:false`，tsc 不收窄 | 统一用 `rules.ts` 的 `uuid()`；判别用 `'code' in result`；所有 Hook 必须在组件顶层 |
+| 不看风格就改前端、引 CDN | 视觉规范在 `.impeccable.md`（复古像素 / 野外手记，内联 SVG、零 CDN） | 移动端优先：375px 实测 `scrollWidth`，弹窗小 `max-w` + `overflow-auto` + `max-h` |
+| 提交跳过流程 | 出问题没有回滚点，或误把密钥推上远端 | 验收 → 建 `rollback-YYYYMMDD-<阶段>` tag 并推远端 → `git add -A` 确认无 `.env` / `*.db` → 中文分条 commit（末尾写验收数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净 |
+
+> 下文第 7 节是 11-06 版坑清单，保留作历史；**新增坑以本节与 `.trae/documents/bug_log.md` 为准**。
+
+### C. 落地自检（照抄，输出不符就别开工）
+
+```bash
+git status --short                      # 必须为空
+git log -3 --oneline                    # 应能看到 70ca1ee / cc4fe2b
+python scripts/check_home_env.py        # ENV_CHECK_OK（[WARN] 按提示处理）
+python scripts/doc_check.py             # DOC_CHECK_OK
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health   # 200
+npm run verify                          # VERIFY_OK
+```
+
+起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。用户级记忆 `C:\Users\<用户名>\.workbuddy\`（称呼与沟通口径）不随 git 走；项目级 `.workbuddy/memory/`、`.trae/documents/`、`HANDOFF.md` 都随 git 走。
 
 ## 0. 结论与两种场景
 

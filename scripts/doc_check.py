@@ -208,6 +208,14 @@ checks = [
     ("任务表记 P3-1c ✅", "P3-1c" in task_text and "P3-1c 前端切换到服务端战斗" in task_text),
     ("HANDOFF 验收以 npm run verify 为首选", "npm run verify" in handoff_text),
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
+    # ——— 跨机器交接：给接手 AI 的意图与避坑入口（11-09） ———
+    ("HANDOFF 含 AI 接手必读（意图 / 避坑 / 自检三段）",
+     all(x in handoff_text for x in [
+         "## AI 接手必读", "### A. 先读懂意图", "### B. 最容易踩的坑",
+         "### C. 落地自检", "服务端权威", "commitState()", "产品语义",
+         "JWT_SECRET", "DOC_CHECK_OK", "git ls-remote"])),
+    ("HANDOFF 标注 11-06 旧快照为历史，避免接手 AI 误读",
+     "仅作历史" in handoff_text and "优先于下文" in handoff_text),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
     # ——— P4-2 未来规划台账与口径修正 ———
     ("未来规划台账存在且 F01~F16 齐全",

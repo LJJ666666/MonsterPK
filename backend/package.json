@@ -27,6 +27,7 @@
     "e2e:p42b": "node tests/e2e_p42b_room.mjs",
     "e2e:p42c": "node tests/e2e_p42c_boss.mjs",
     "e2e:p42d": "node tests/e2e_p42d_pvp.mjs",
+    "e2e:p42e": "node tests/e2e_p42e_coop.mjs",
     "e2e:hardening": "node tests/e2e_hardening.mjs",
     "clean:e2e": "node scripts/clean-test-data.mjs"
   },

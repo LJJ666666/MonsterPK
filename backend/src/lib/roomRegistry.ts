@@ -18,6 +18,9 @@ import {
 import {
   applyPvpTurn, encodePvpIntent, parsePvpIntent, pickPvpIntent, pvpViewFor, type PvpState,
 } from '../game/pvp';
+import {
+  applyCoopTurn, encodeCoopIntent, parseCoopIntent, pickCoopIntent, coopViewFor, type CoopState,
+} from '../game/coop';
 
 /** 可替换存储：换 Redis / Postgres 时实现这 7 个同步语义的适配即可。 */
 export interface RoomStorage {
@@ -115,6 +118,22 @@ export class RoomRegistry {
     return ok(room);
   }
 
+  /**
+   * P4-2e：把共斗态挂到房间上（全员 join 完成后由路由层调用）。
+   * 只接受「房间已 active、mode=coop 且尚无 coop 态」；挂上后 bump 一次让客户端拿到新快照。
+   */
+  attachCoop(roomId: string, coop: CoopState, now: number): RoomResult<RoomState> {
+    const room = this.storage.get(roomId);
+    if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
+    if (room.coop) return fail('COOP_ALREADY_STARTED', '共斗已经开始');
+    if (room.mode !== 'coop') return fail('COOP_BAD_MODE', '该房间不是共斗房间');
+    if (room.status !== 'active') return fail('ROOM_CLOSED', '房间尚未开局');
+    room.coop = coop;
+    room.deadlineAt = now + this.configFor(room.mode).roundTimeoutMs;
+    this.bump(room, now);
+    return ok(room);
+  }
+
   /** 找该用户所在的所有房间（resync / 广播用）。 */
   listForUser(userId: string): RoomState[] {
     return this.storage.all().filter((r) => r.seats.some((s) => s.userId === userId));
@@ -160,6 +179,8 @@ export class RoomRegistry {
       updatedAt: room.updatedAt,
       // P4-2d：按接收者裁剪 1v1 战斗视图（仅 pvp 房间有值）。
       pvp: room.pvp ? pvpViewFor(room.pvp, viewerUserId) : null,
+      // P4-2e：按接收者裁剪共斗视图（仅 coop 房间有值）。
+      coop: room.coop ? coopViewFor(room.coop, viewerUserId) : null,
     };
   }
 
@@ -199,6 +220,8 @@ export class RoomRegistry {
     roomId?: string;
     /** P4-2d：1v1 战斗态（仅 pvp 模式由路由层生成后传入）。 */
     pvp?: PvpState;
+    /** P4-2e：建房时选定的 Boss id（服务端内容表校验过），join 满员时据此构造共斗态。 */
+    coopBossId?: string;
   }): RoomResult<RoomState> {
     if (!params.owner?.userId || !params.owner.tokenDigest) {
       return fail('ROOM_BAD_MEMBER', '成员身份不完整');
@@ -243,6 +266,9 @@ export class RoomRegistry {
       seenNonces: [],
       endReason: null,
       pvp: params.pvp ?? null,
+      coop: null,
+      coopSettled: false,
+      coopBossId: params.coopBossId ?? null,
     };
     // 满 1 人即开局的场景（单人 Boss 预留）：b 阶段固定 2 人，故 forming。
     if (cfg.maxSeats <= 1) this.start(room, params.now, cfg);
@@ -437,6 +463,24 @@ export class RoomRegistry {
         }
       }
     }
+    // P4-2e：共斗按 N 人意图排序结算一回合（Boss HP 是房间真值，一次推进只减一次）。
+    if (room.coop && !room.coop.finished) {
+      const rng = Math.random;
+      const actions = room.turnIntents
+        .map((t) => ({ seat: t.seat, intent: parseCoopIntent(t.intent) }))
+        .filter((a): a is { seat: number; intent: NonNullable<ReturnType<typeof parseCoopIntent>> } => a.intent !== null);
+      // 缺失 / 非法意图由 applyCoopTurn 内部用 pickCoopIntent 代放补齐，不炸房间推进。
+      const res = applyCoopTurn(room.coop, actions, rng);
+      if ('value' in res) {
+        room.coop = res.value;
+        if (res.value.finished) {
+          room.status = 'settled';
+          room.endReason = 'coop_finished';
+          room.deadlineAt = 0;
+          this.finishQuota(room, true);
+        }
+      }
+    }
     room.turn += 1;
     room.submitted = [];
     room.turnIntents = [];
@@ -481,8 +525,12 @@ export class RoomRegistry {
     report: TickReport,
   ): void {
     let intent: string | null;
-    // P4-2d：pvp 房间代放要生成合法战斗意图（从有 PP 的技能里随机挑 / 逃跑）。
-    if (room.pvp && !room.pvp.finished) {
+    // P4-2e：共斗代放生成合法战斗意图；出局座位用 'skip' 占位（解析时被过滤，回合仍可推进）。
+    if (room.coop && !room.coop.finished) {
+      const picked = pickCoopIntent(room.coop, seat.seat, rng);
+      intent = picked === null ? 'skip' : encodeCoopIntent(picked);
+    } else if (room.pvp && !room.pvp.finished) {
+      // P4-2d：pvp 房间代放要生成合法战斗意图（从有 PP 的技能里随机挑 / 逃跑）。
       const picked = pickPvpIntent(room.pvp, seat.seat, rng);
       intent = picked === null ? null : encodePvpIntent(picked);
     } else {

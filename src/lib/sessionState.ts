@@ -65,6 +65,8 @@ export type RoomView = {
   updatedAt: number;
   /** P4-2d：1v1 战斗视图（仅 pvp 模式有值，按接收者裁剪）。 */
   pvp: PvpView | null;
+  /** P4-2e：共斗视图（仅 coop 模式有值，按接收者裁剪）。 */
+  coop: CoopView | null;
 };
 
 /** P4-2d：1v1 战斗的只读视图（服务端按接收者裁剪）。 */
@@ -108,6 +110,46 @@ export type PvpFoeMonster = {
   isShiny: boolean;
   alive: boolean;
   inField: boolean;
+};
+
+/** P4-2e：共斗里对外公开的幻兽信息（Boss / 队友 active 都只有这些）。 */
+export type CoopPublicMonster = {
+  specId: string;
+  name: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  status: string;
+  isShiny: boolean;
+  alive: boolean;
+};
+
+/** P4-2e：共斗只读视图（服务端按接收者裁剪，Boss HP 是房间真值）。 */
+export type CoopView = {
+  bossId: string;
+  bossName: string;
+  boss: CoopPublicMonster;
+  turn: number;
+  finished: boolean;
+  result: "win" | "lose" | null;
+  log: string[];
+  self: {
+    userId: string;
+    seat: number;
+    activeIndex: number;
+    party: PvpMonster[];
+    ppByMonster: Record<string, Record<string, number>>;
+    damage: number;
+    out: boolean;
+  };
+  members: {
+    seat: number;
+    userId: string;
+    self: boolean;
+    damage: number;
+    out: boolean;
+    active: CoopPublicMonster;
+  }[];
 };
 
 /** 与 wild.state 一样是下行全量快照；上行没有 room.state 类型。 */

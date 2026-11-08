@@ -49,7 +49,8 @@ checks = [
          "UI_SMOKE_P42A_OK", "UI_SMOKE_P42C_OK", "UI_SMOKE_P42D_OK"])),
     ("MEMORY.md 记录降级与旧意图下线（决策，非技术细节）",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 下一步为 P4-2e", "下一步 P4-2e" in memory_text),
+    ("MEMORY.md 标 P4-2 收官并给出下一步候选",
+     "P4-2 五阶段全部完成" in memory_text and "下一步待定" in memory_text),
     ("MEMORY.md 记 P3-2 写操作上移（细节在规范 §20）",
      "P3-2" in memory_text and "## 20." in spec_text),
     ("MEMORY.md 记 P4-0 写入并发控制（细节在规范 §21）",
@@ -63,14 +64,15 @@ checks = [
      and all(x in plan_text for x in [
          "全员掉线", "不扣次数", "可选", "ROUND_TIMEOUT_MS", "AUTOPILOT_OFFER_MS",
          "ALL_OFFLINE_GRACE_MS", "hold", "commit", "release", "pickUsableMove",
-         "roomId", "P4-2a", "P4-2e", "e 仍为排期", "同一 token 同一设备",
+         "roomId", "P4-2a", "P4-2e", "本排期已走完", "同一 token 同一设备",
          "playerLevel", "SCHEMA_VERSION", "共享存储"])),
     ("任务表已拆 P4-2 五阶段并写明排期状态",
-     all(f"| P4-2{c} |" in task_text for c in "abcde")
-     and "排期已定" in task_text and "不扣次数" in task_text),
-    ("MEMORY.md 进度快照含 P4-2a/b/c/d ✅ 与下一步 P4-2e（指向排期文档）",
+     all(f"| P4-2{c}" in task_text for c in "abcde")
+     and "P4-2 五阶段全部" in task_text and "不扣次数" in task_text),
+    ("MEMORY.md 进度快照含 P4-2a~e ✅ 与 P4-2 收官（指向排期文档）",
      "P4-2a ✅" in memory_text and "P4-2b ✅" in memory_text and "P4-2c ✅" in memory_text
-     and "P4-2d ✅" in memory_text and "下一步 P4-2e" in memory_text
+     and "P4-2d ✅" in memory_text and "P4-2e ✅" in memory_text
+     and "P4-2 五阶段全部" in memory_text
      and "P4-2_多人玩法排期_2026-11-07.md" in memory_text),
     ("规范/排期固化 P4-2 技术细节（rank/pvp/boss/room/bossQuota）",
      all(x in spec_text for x in ["GET /api/rank", "effectiveStats", "RoomRegistry", "quota",
@@ -118,7 +120,8 @@ checks = [
     ("任务表记 P4-2a ✅ 与 39/17 验收",
      "**✅ 已实现（2026-11-07）**" in task_text
      and "E2E_P42A_OK" in task_text and "UI_SMOKE_P42A_OK" in task_text),
-    ("任务表下一步为 P4-2e", "下一步建议" in task_text and "下一步 P4-2e" in task_text),
+    ("任务表标 P4-2 收官并有下一步建议",
+     "下一步建议" in task_text and "P4-2 五阶段全部完成" in task_text),
     ("P4-1 关键文件齐全",
      all((ROOT / p).exists() for p in [
          "backend/src/lib/wildRegistry.ts",
@@ -207,7 +210,7 @@ checks = [
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
     # ——— P4-2 未来规划台账与口径修正 ———
-    ("未来规划台账存在且 F01~F15 齐全",
+    ("未来规划台账存在且 F01~F16 齐全",
      future_path.exists()
      and all(f"F{n:02d}" in future_text for n in range(1, 16))
      and "最终是要设计偿还的" in future_text and "不阻塞" in future_text),
@@ -235,7 +238,7 @@ checks = [
      and all(x in spec_text for x in [
          "roomLockKey", "hold", "commit", "release", "tokenDigest",
          "ROOM_WS_REQUIRED", "250ms", "RoomStorage", "room.action"])),
-    ("bug_log 含 §17 ~ §29", all(f"## {n}." in bug_text for n in range(17, 30))),
+    ("bug_log 含 §17 ~ §32", all(f"## {n}." in bug_text for n in range(17, 33))),
     ("任务表记 P4-2b ✅ 与 43/43 验收",
      "P4-2b" in task_text and "E2E_P42B_OK" in task_text and "已实现" in task_text),
     ("排期文档记 P4-2b 实现记录与自选决策",
@@ -346,6 +349,44 @@ checks = [
     ("测试账号清理前缀含 p42d_",
      "p42d_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
     ("每日日志记 P4-2d 实现", "P4-2d" in log_text and "E2E_P42D_OK" in log_text),
+
+    # ——— P4-2e 共斗 Boss / 副本 ———
+    ("规范含 §27 共斗（房间真值 / N 人排序 / 降级 / 结算不发奖）",
+     "## 27. P4-2e 共斗 Boss / 副本" in spec_text
+     and all(x in spec_text for x in [
+         "RoomState.coop.boss.hp", "CoopState", "applyCoopTurn", "encodeCoopIntent",
+         "coopViewFor", "COOP_INPUT_FORBIDDEN", "settleCoopRoom", "coopSettled",
+         "COOP_INTENT_INVALID", "withRoomLock"])),
+    ("bug_log 含 §17 ~ §32", all(f"## {n}." in bug_text for n in range(17, 33))),
+    ("任务表记 P4-2e ✅ 与 22/16 验收",
+     "| P4-2e ✅ |" in task_text
+     and "E2E_P42E_OK" in task_text and "UI_SMOKE_P42E_OK" in task_text
+     and "RoomState.coop" in task_text),
+    ("排期文档记 P4-2e 已实现与实现记录",
+     "P4-2e 共斗 Boss / 副本 — ✅" in plan_text
+     and "E2E_P42E" in plan_text and "CoopState" in plan_text
+     and "coopViewFor" in plan_text and "不发奖励" in plan_text),
+    ("台账记 F16 共斗榜 / 奖励分配",
+     "F16" in future_text and "共斗榜" in future_text and "settleCoopRoom" in future_text),
+    ("verify 已注册 e2e:p42e 与 smoke:p42e",
+     "e2e:p42e" in verify_text and "smoke:p42e" in verify_text
+     and '"e2e:p42e"' in pkg_text and "ui_smoke_p42e.mjs" in verify_text),
+    ("P4-2e 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/coop.ts",
+         "backend/src/modules/coop.ts",
+         "backend/tests/coop.test.ts",
+         "backend/tests/e2e_p42e_coop.mjs",
+         "scripts/ui_smoke_p42e.mjs",
+         "src/lib/coop.ts",
+         "src/components/CoopModal.tsx"])),
+    ("共斗拒绝 flee 且视图按接收者裁剪",
+     "COOP_INTENT_INVALID" in text(ROOT / "backend" / "src" / "modules" / "room.ts")
+     and "coopViewFor" in text(ROOT / "backend" / "src" / "game" / "coop.ts")
+     and "viewerUserId" in text(ROOT / "backend" / "src" / "game" / "coop.ts")),
+    ("测试账号清理前缀含 p42e_",
+     "p42e_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
+    ("每日日志记 P4-2e 实现", "P4-2e" in log_text and "E2E_P42E_OK" in log_text),
 ]
 
 for name, ok, *detail in checks:

@@ -18,6 +18,7 @@ import { encodeServerMessage } from '../lib/wsProtocol';
 import { withRoomLock } from '../lib/slotLock';
 import { tokenDigest } from '../lib/roomAuth';
 import type { TickReport } from '../lib/roomRegistry';
+import { parseCoopIntent } from '../game/coop';
 import type {
   RoomMode, RoomResult, RoomState, RoomView,
 } from '../lib/roomTypes';
@@ -98,6 +99,7 @@ export function tickRoom(roomId: string, now = Date.now()): void {
   rooms.tick(roomId, now, Math.random, report);
   if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
     maybeSettlePvp(roomId);
+    maybeSettleCoop(roomId);
     publishRoom(roomId);
   }
 }
@@ -107,6 +109,7 @@ export function sweepRooms(now = Date.now()): TickReport {
   const report = rooms.sweep(now, Math.random);
   for (const id of new Set([...report.changedRoomIds, ...report.abandoned])) {
     maybeSettlePvp(id);
+    maybeSettleCoop(id);
     publishRoom(id);
   }
   return report;
@@ -124,6 +127,20 @@ function maybeSettlePvp(roomId: string): void {
     // 结算失败不阻断广播；下次心跳 / 意图提交会重试（pvpSettled 已置位，这里回滚以允许重试）。
     const r = rooms.get(roomId);
     if (r) r.pvpSettled = false;
+  });
+}
+
+/**
+ * P4-2e：共斗分出胜负（coop 结束 → settled）时，触发写各成员档。
+ * 与 pvp 同款动态 import 规避 room ↔ coop 循环依赖；幂等靠 room.coopSettled。
+ */
+function maybeSettleCoop(roomId: string): void {
+  const room = rooms.get(roomId);
+  if (!room || !room.coop || !room.coop.finished || room.coopSettled) return;
+  room.coopSettled = true;
+  void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(() => {
+    const r = rooms.get(roomId);
+    if (r) r.coopSettled = false;
   });
 }
 
@@ -209,6 +226,12 @@ export async function applyRoomIntent(params: {
   now?: number;
 }): Promise<ViewResult> {
   return withRoomLock(params.roomId, async () => {
+    // P4-2e：共斗只接受 move:/switch:；flee 等语义非法意图在入口明确 400，
+    // 不靠「代放补齐」静默吞掉（房间内核 autoSubmit 的 'skip' 占位不走这里）。
+    const cur = rooms.get(params.roomId);
+    if (cur?.mode === 'coop' && !parseCoopIntent(params.intent)) {
+      return { ok: false, code: 'COOP_INTENT_INVALID', reason: '共斗意图不合法（只支持 move: / switch:）' };
+    }
     const res = rooms.submitIntent({
       roomId: params.roomId,
       actorUserId: params.userId,
@@ -218,6 +241,7 @@ export async function applyRoomIntent(params: {
     });
     if ('code' in res) return fail(res.code, res.reason);
     maybeSettlePvp(params.roomId);
+    maybeSettleCoop(params.roomId);
     publishRoom(res.value.room);
     return { ok: true, value: rooms.view(res.value.room, params.userId) };
   });

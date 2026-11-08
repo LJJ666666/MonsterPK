@@ -8,7 +8,7 @@
 - **北极星（11-04）**：服务端权威 + 实时多人同玩（服务端结算，客户端只发意图、收状态、渲染）。本地存档过渡态，P5 去除；P0-3 自动同步为桥接。
 - **反作弊（11-05）**：测试菜单数据只放行管理员；改档/GG/加速器拦截+封号+登出；改系统时间不封号、只要求不生效（§13）。
 - **P4-1 口径（11-07）**：同账号多端不合并本地改动、不静默切档；后来者顶号，前者直接下线（旧 token 所有 REST 403）。共享真值全在服务端。
-- 总表 `开发任务优先级_2026-11-04.md`：P0~P4-2d 全 ✅；**P4-2 e 📋 排期已定，下一步 P4-2e 共斗 Boss/副本**。
+- 总表 `开发任务优先级_2026-11-04.md`：**P0~P4-2e 全 ✅，P4-2 五阶段全部完成**；下一步待定（P4-3 交易/赠送，或先偿还台账 F01/F02/F04/F09/F14/F15/F16）。
 - **未来规划台账** `未来规划与技术债_2026-11-07.md` **F01~F15**（📋/🔨/✅）；**F12 已偿还**。F04 召唤师等级=账号等级+宠物等级帽（占位偏差，偿还前不得声称已实现）；**F15** 1v1 奖励/排位分待设计。
 
 ## 2. 技术栈与代码入口
@@ -33,7 +33,7 @@
 
 ## 4. 运行命令与环境
 - 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**交接后不自动恢复**，先 curl 探活。
-- **校验首选 `npm run verify`** —— 27 阶段（90~120s，**27/27 `VERIFY_OK`**），自动清测试账号；`--only=`/`--skip=` 跑子集。分项数字见任务表时间线，本文件不复述。
+- **校验首选 `npm run verify`** —— 29 阶段（95~125s，**29/29 `VERIFY_OK`**），自动清测试账号；`--only=`/`--skip=` 跑子集。⚠️ 新增阶段要改**两处**（`STAGES` + `GROUPS`），漏 `GROUPS` 会静默少跑（§32）。分项数字见任务表时间线，本文件不复述。
 - 清理/账号：`cd backend && npm run clean:e2e`（`--dry` 预览；只删测试前缀、永不删 admin）；`npm run admin -- grant|revoke|ban|unban|list|audit <名>`。⚠️ 不授权用测试菜单会被封号，绝不写死用户名。
 - 本机 `D:\MyJob\MonsterPK`；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ `prisma migrate deploy` → `generate` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。
 - **Git 流程（11-07 杰哥定）**：验收通过 → 建 `rollback-YYYYMMDD-<阶段>` tag 推远端 → `git add -A` 确认无 `.env`/`*.db` → commit（中文分条、末尾写数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净。
@@ -53,7 +53,8 @@
 - **房间内核（P4-2b）**：第四个状态域 owner `roomId`。`forming→active→paused→abandoned|settled`；quota **hold→commit→release**（全掉 `release` 不扣次数）；座位存 token sha256，只同 token 同设备重连；阈值按 mode 分档（kernel 供 CI，生产 20/30/60s）；`room.state` 全量快照、`room.action` 上行意图、伪造上行→`UNKNOWN_TYPE`+1008；REST 与 WS 共用 `applyRoom*`、全经 `withRoomLock()`（§24/§29）。
 - **Boss 讨伐（P4-2c）**：不新增状态域（owner 仍 `battleId`）。伤害真值=敌方 HP 差；次数=`BossDamageEvent` 行数+`bossQuota` 在途（账号级、按自然日、重启不重置、`battleId @unique` 防重复、三路释放）；`periodKey` 手算 UTC+8。**不发奖励**（`s.rewards=null`）、禁止捕获、逃跑=放弃不上榜；伪上报 400 `BOSS_INPUT_FORBIDDEN`；`BOSS_DAILY_LIMIT` 只能下调（§25/§30）。
 - **玩家对战 1v1（P4-2d）**：不新增状态域，战斗态挂 `RoomState.pvp`（`sides` 双方镜像），复用 `rules.ts` 公式 + 房间内核 `submitIntent`/`advanceTurn`/`tick`/`autoSubmit`；意图 `move:<id>`/`switch:<n>`/`flee`，intent 正则放宽冒号；`pvpViewFor` 按接收者裁剪。结算写双方档各一次 `commitState()`、各自 CAS/revision 不覆盖、`pvpSettled` 幂等；**只回写 HP/异常不发奖励**（F15）；`maybeSettlePvp` 三处触发，`room.ts`↔`pvp.ts` 动态 `import` 规避循环；伪上报 400 `PVP_INPUT_FORBIDDEN`（§26/§31）。
-- **能力边界**：已挡 改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/测试菜单越权/WS 或房间上行伪造/伪造战斗动作与越权 battleId/GG 改内存/旧意图刷奖励/CAS 旧覆盖/顶号后续写/抢野怪/上报榜单数值/伪造 Boss 伤害与次数/伪造 1v1 字段与越权 roomId；未挡 加速器改节奏、改本地展示态。管理员只在服务端判定。
+- **共斗 Boss / 副本（P4-2e）**：**Boss HP 是 `RoomState.coop.boss.hp` 的房间真值**，`withRoomLock(roomId)` 串行，不新增状态域也不写 `BossDamageEvent`（不污染单人伤害榜，共斗榜归 F16）。`game/coop.ts` 按「优先度→速度→座位」排序结算、**Boss 回合末统一反击一次**、**非法意图服务端降级跳过**（不抛异常，否则一间房能被一个伪造意图打崩）；`coopViewFor` 按接收者裁剪（队友仅 damage/out）；结算**每人各一次 `commitState()`** + `coopSettled` 幂等、不发奖励（F09/F14）；`flee` 入口层 400 `COOP_INTENT_INVALID`；伪上报 400 `COOP_INPUT_FORBIDDEN`（§27/§32）。
+- **能力边界**：已挡 改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/测试菜单越权/WS 或房间上行伪造/伪造战斗动作与越权 battleId/GG 改内存/旧意图刷奖励/CAS 旧覆盖/顶号后续写/抢野怪/上报榜单数值/伪造 Boss 伤害与次数/伪造 1v1 字段与越权 roomId/伪造共斗伤害与 Boss HP/伪造共斗意图；未挡 加速器改节奏、改本地展示态。管理员只在服务端判定。
 
 ## 6. 已修的坑（详见 `.trae/documents/bug_log.md`）
 - 后台任务 `exit 4` / `0xC0000142` 是宿主回收进程。**`lib/env.ts` `.env` 路径曾算错**（`JWT_SECRET` 回落硬编码，严重安全缺陷）；11-05 改 `../../.env` 实测生效。改配置代码必须实测 `process.env.XXX` 有值。
@@ -61,12 +62,14 @@
 - §28 P4-2a（Tab 竞态真缺陷 `cancelled` 修/0 分被 limit 截断）；§29 P4-2b（quota key 冒号被 intent 正则拒/`sweep()` 多 bump 跳号/迟到 close 误标掉线/扫描不能挂心跳/nonce 别在 no-op 前消费）。
 - §30 P4-2c（Boss 走普通分支白送 money/`sweep()` 拿不到态→`sweepExpired()`/`finalText` 不是 `finalTxt`/手写 `vi.mock` 缺 `bossStart`/`held` 不落库是正确方向）。
 - §31 P4-2d（pvp 意图冒号被 intent 正则拒→放宽 `^[A-Za-z0-9_:\-]+$`/`sides.indexOf(side)` 因 side 复制引用失效写空→用 `seatOf` 按 userId 定位/revision 断言忘 await/满员 join 返回 `ROOM_CLOSED` 非 `ROOM_FULL`（合理）/别拿 `innerText` 找 placeholder/1v1 结算不发奖励是刻意、`pvpSettled` 幂等关键）。
+- §32 P4-2e（**冒烟 `probeHtml()` 是模板字符串，`\d` 反斜杠被吃掉**→生成到浏览器变成 `/Lv.d/`，改用字面量/`\\d`／**冒烟在数据加载完成前点「创建」**→`bossId` 还空、连锁超时，等待条件要等「元素可用」不是「元素存在」／**非法意图必须服务端降级跳过不能抛异常**→否则一个伪造意图能打崩整间房／`flee` 入口层显式 400／**verify 漏 `GROUPS` 静默少跑**／共斗伤害不写 `BossDamageEvent`、Boss 每回合只反击一次）。
 
 ## 7. 进度与遗留
 - **P4-1 ✅**：顶号 + 共享野怪（§22/§27）。
 - **P4-2a ✅ / P4-2b ✅**：四榜只读派生；房间内核。均未动 schema（§23/§24/§28/§29）。
 - **P4-2c ✅（11-07）**：单人 Boss 讨伐 + 只读伤害榜 + 每日次数；先还 **F12**（`game/settlement.ts::applySettlementToSave()`）。`SCHEMA_VERSION` 未动，仅加一条迁移（§25/§30）。
 - **P4-2d ✅（11-07）**：1v1 玩家对战（见 §5）。`SCHEMA_VERSION` 未动、未加迁移（§26/§31）。
-- **P4-2 e 📋**：共斗 Boss/副本（Boss HP 是房间真值，`withRoomLock` 串行；N 人意图排序；奖励分配；副本进入条件与掉落）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`。**下一步 P4-2e**。
+- **P4-2e ✅（2026-11-08）**：共斗 Boss/副本（见 §5）。**P4-2 五阶段全部完成**。证据：`verify` **29/29**、后端 **336**/前端 **122**、`e2e:p42e` **22/22**、`ui_smoke_p42e` **16/16**；`SCHEMA_VERSION` 未动、未加迁移（§27/§32）。
+- **下一步待定**：P4-3 交易/赠送，或先偿还台账 **F01/F02**（周期结算+榜单奖励）、**F04**（账号等级）、**F09/F14**（Boss/共斗产出规则）、**F15**（1v1 奖励排位）、**F16**（共斗榜）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`（已走完）。
 - **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py`/`doc_check.py`；11-07 已重建并 `ENV_CHECK_OK`。

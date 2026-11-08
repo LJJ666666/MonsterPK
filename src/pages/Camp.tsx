@@ -14,6 +14,7 @@ import TypeChartModal from "@/components/TypeChartModal";
 import RankBoardModal from "@/components/RankBoardModal";
 import BossBoardModal from "@/components/BossBoardModal";
 import PvpModal from "@/components/PvpModal";
+import CoopModal from "@/components/CoopModal";
 
 import { MonsterName } from "@/components/MonsterName";
 
@@ -151,6 +152,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [showRank, setShowRank] = useState(false);
   const [showBoss, setShowBoss] = useState(false);
   const [showPvp, setShowPvp] = useState(false);
+  const [showCoop, setShowCoop] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
   const [dexSelectedSpecId, setDexSelectedSpecId] = useState<string | null>(null);
   const [dexSearchQuery, setDexSearchQuery] = useState("");
@@ -1086,6 +1088,9 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             <button className="text-[color:var(--accent)] underline" onClick={() => setShowPvp(true)}>
               对战
             </button>
+            <button className="text-[color:var(--accent)] underline" onClick={() => setShowCoop(true)}>
+              共斗
+            </button>
             <button className="text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
               榜单
             </button>
@@ -1097,6 +1102,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
       {showRank && <RankBoardModal onClose={() => setShowRank(false)} />}
       {showPvp && <PvpModal onClose={() => setShowPvp(false)} />}
+      {showCoop && <CoopModal onClose={() => setShowCoop(false)} />}
       {showBoss && (
         <BossBoardModal
           onClose={() => setShowBoss(false)}

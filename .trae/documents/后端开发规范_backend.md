@@ -1395,3 +1395,82 @@ pvp 分出胜负既可能发生在 `submitIntent`（双方手动交齐），也�
 - 无排位分、无观战、无 2v2、无跨服匹配（F15）。
 
 
+
+## 27. P4-2e 共斗 Boss / 副本（2026-11-08）
+
+### 27.1 归属：共斗不新增状态域
+
+**Boss HP 是 `RoomState.coop.boss.hp` 的房间真值**，不新增第五个状态域，也不写 `BossDamageEvent`
+（共斗伤害**不进单人伤害榜**，避免污染「单人打伤害排名」的口径；共斗榜归台账 F16）。
+
+- 写路径唯一：`withRoomLock(roomId)` 串行 → `applyCoopTurn()` → `advanceTurn` → `publishRoom` 广播全量快照。
+- 每次操作只有一个串行化键（`roomId`），与 P4-2b / P4-2d 完全一致。
+- 单人 Boss（§25）仍按 `battleId` 走，两条链路互不影响。
+
+### 27.2 双方 / N 方战斗态（`game/coop.ts`）
+
+`CoopState` 结构要点：
+
+| 字段 | 说明 |
+|---|---|
+| `boss` | 房间真值：`hp` / `maxHp` / `level` / `name` / `specId` |
+| `sides` | 每个座位一份 `CoopSide`（队伍 / activeIndex / PP / 本场 `damage` / `out`） |
+| `turn` | 回合号，服务端推进 |
+| `log` | 截断到 `MAX_LOG`(200) 的服务端日志 |
+| `finished` / `result` | `win`（Boss 倒下）/ `lose`（全员出局） |
+
+- 战斗公式**全部复用 `rules.ts`**（`executeMoveAction` / `computeDamage` / `getSpeed` / `canMove` /
+  `alive` / `findFirstAliveIndex` / `pickUsableMove` / `processEndOfTurn`），不重写数值。
+- 回合结算顺序：**按「优先度 → 速度 → 座位号」排序**，逐个 seat 结算我方行动（`seat` 升序保证同速可复现），
+  **Boss 在回合末统一反击一次**（不按人数加次数，否则人越多越吃亏）。
+- `damage` 记账：只累加**敌方 HP 实际减少量**（溢出钳掉），客户端无法写入。
+
+### 27.3 意图编码与降级
+
+- 编码 `move:<moveId>` / `switch:<idx>`，`parseCoopIntent` / `encodeCoopIntent` 互为逆运算。
+- **共斗不支持 `flee`**：入口层显式拒绝 → 400 `COOP_INTENT_INVALID`（不是靠代放静默吞掉）。
+- **非法意图不抛异常、服务端降级跳过**：伪造技能 / PP 耗尽 / 已倒下换人一律记日志跳过该成员行动，
+  **不推进 Boss HP、不记账**。理由：一个客户端发 `move:不存在` 就能把整间房打崩是 DoS 面。
+- 超时代放：`autoSubmit` → `pickCoopIntent`（随机挑有 PP 的技能），与 P4-2d 同机制。
+
+### 27.4 按接收者裁剪的 coop 视图
+
+`coopViewFor(state, viewerUserId)`：
+
+- 己方（`self`）：完整队伍（moveIds / 六维 / PP / 状态）+ `out`。
+- 队友：**仅公开信息**（`seat` / 本场伤害 `damage` / 是否出局 `out`），不下发其未上场成员与技能 PP。
+- `boss` / `turn` / `log` / 成员伤害公开（共斗本身是协作玩法，伤害公开是产品口径）。
+
+### 27.5 结算：每人各写一次档，不发奖励
+
+- 触发点与 P4-2d 同构：`maybeSettleCoop` 在 `applyRoomIntent` / `tickRoom` / `sweepRooms` 三处调用，
+  `room.coopSettled` 标记保证**只结算一次**。
+- 结算 `settleCoopRoom(roomId)`：**每个成员档各一次 `commitState(source='battle')`**，各自 CAS / revision 单调 +1、互不覆盖。
+- **不发奖励**（`s.rewards = null` 口径延续 P4-2c / P4-2d）：只回写队伍 HP / 异常 / PP 消耗。
+  奖励、掉落、首通归台账 **F09 / F14**，规则定下来前不得在结算里顺手发。
+- 全员掉线 → `release` quota，不扣次数（复用 P4-2b）。
+
+### 27.6 接口与伪上报
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/coop/create` | `{ slot, bossId }`，房主建房（quota hold） |
+| POST | `/api/coop/:roomId/join` | `{ slot }`，队友加入（满员 active 时读双方存档生成 `CoopState` 并 `attachCoop`） |
+| POST | `/api/room/:roomId/action` | 复用房间内核上行意图（`move:` / `switch:`） |
+
+- 请求体出现 `bossHp` / `damage` / `winner` / `turn` / `log` / `quota` / `rewards` 等真值字段
+  → **400 `COOP_INPUT_FORBIDDEN`**。
+- 进房必须有在线 WS（409 `ROOM_WS_REQUIRED`）；无队伍 404 `COOP_NO_PARTY`；
+  未知共斗目标 400 `COOP_BOSS_UNKNOWN`。
+- 越权 `roomId` 一律 404；非成员发意图 403 `ROOM_FORBIDDEN`；满员 join 409（`ROOM_FULL` / `ROOM_CLOSED`）。
+- 每日次数沿用 §25.3：`bossQuota` 在途 hold + `BossDamageEvent` 存量，
+  quotaKey 为「账号 + 自然日 + Boss」；`held` 不落库是正确方向（重启不会让次数变多）。
+
+### 27.7 边界
+
+- **不改 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**，不加 Prisma 迁移（共斗不写个人档新字段）。
+- **人数**：MVP `maxSeats = 2`，但意图收集 / 结算 / 视图全部**按 N 人循环写**（不写死两个座位），
+  以后放开人数只改配置。
+- **限时**：不新增全局倒计时，复用内核的回合超时 20s / TTL 30min / 全员掉线 60s（F08 口径：阈值只由服务端定）。
+- 动态难度、跨服组队、观战、语音 / 表情不在本阶段（F11）。
+- 共斗榜、共斗奖励分配归台账 F16 / F09 / F14。

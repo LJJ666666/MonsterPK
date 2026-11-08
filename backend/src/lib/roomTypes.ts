@@ -7,6 +7,7 @@
  */
 
 import type { PvpState } from '../game/pvp.js';
+import type { CoopState } from '../game/coop.js';
 
 export type RoomMode = 'kernel' | 'pvp' | 'coop';
 export const ROOM_MODES: readonly RoomMode[] = ['kernel', 'pvp', 'coop'];
@@ -117,6 +118,12 @@ export type RoomState = {
   pvp?: PvpState | null;
   /** P4-2d：pvp 分出胜负后是否已写回双方档（防重复结算）。 */
   pvpSettled?: boolean;
+  /** P4-2e：共斗战斗态（仅 coop 模式有值）。Boss HP 是全房唯一真值。 */
+  coop?: CoopState | null;
+  /** P4-2e：共斗结束后是否已写回各成员档（防重复结算）。 */
+  coopSettled?: boolean;
+  /** P4-2e：建房时选定的 Boss（服务端内容表 id），join 满员时据此构造共斗态。 */
+  coopBossId?: string | null;
 };
 
 /** 下发视图：不含 tokenDigest / connectionId / 他人 userId / 次数余量。 */
@@ -143,10 +150,14 @@ export type RoomView = {
   updatedAt: number;
   /** P4-2d：按接收者裁剪的 1v1 战斗视图（仅 pvp 模式有值）。 */
   pvp: PvpView | null;
+  /** P4-2e：按接收者裁剪的共斗视图（仅 coop 模式有值）。 */
+  coop: CoopView | null;
 };
 
 /** P4-2d：1v1 战斗的只读视图（按接收者裁剪，由 game/pvp.ts::pvpViewFor 生成）。 */
 export type PvpView = ReturnType<typeof import('../game/pvp.js')['pvpViewFor']>;
+/** P4-2e：共斗的只读视图（按接收者裁剪，由 game/coop.ts::coopViewFor 生成）。 */
+export type CoopView = ReturnType<typeof import('../game/coop.js')['coopViewFor']>;
 
 export type QuotaUsage = { held: number; committed: number };
 

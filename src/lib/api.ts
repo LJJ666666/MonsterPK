@@ -192,6 +192,14 @@ export const api = {
       body: JSON.stringify({ intent, nonce }),
     }),
 
+  // ───────────────────── P4-2e 共斗 Boss / 副本（Boss HP 是房间真值）─────────────────────
+  /** 房主创建共斗房间：只传 slot + bossId，Boss 数值 / 次数 / 队伍全在服务端。 */
+  coopCreate: (body: { slot: number; bossId: string }) =>
+    request("/api/coop/create", { method: "POST", body: JSON.stringify(body) }),
+  /** 队友加入共斗房间：只传 roomId + slot，全员队伍与 Boss 由服务端构造。 */
+  coopJoin: (roomId: string, body: { slot: number }) =>
+    request(`/api/coop/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify(body) }),
+
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**
    * 治疗 / 战斗外道具 / 进化 / 学招 / 队伍整理 / 移动。

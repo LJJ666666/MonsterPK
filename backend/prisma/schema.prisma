@@ -103,3 +103,37 @@ model BossDamageEvent {
   @@index([bossId, periodKey, damage])
   @@index([userId, bossId, periodKey])
 }
+
+// F01 榜单周期快照：一行 = 一张榜在某个**已结束**周期的最终名次。
+// 唯一键保证结算幂等可重跑；entries 存完整榜单 JSON 文本，历史榜只读回放。
+// 不建 User 关联：快照是匿名化后的只读视图，封号清理不影响历史归档。
+model RankPeriodSnapshot {
+  id        Int      @id @default(autoincrement())
+  periodKey String
+  boardKey  String
+  entries   String
+  eligible  Int      @default(0)
+  skipped   Int      @default(0)
+  settledAt DateTime @default(now())
+
+  @@unique([periodKey, boardKey])
+  @@index([periodKey])
+}
+
+// F02 榜单奖励发放记录：唯一键防重复领取（P2002 兜底 + 槽位锁串行）。
+// 发奖由结算任务在服务端写档（commitState），客户端没有任何领取入口。
+// 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
+model RankReward {
+  id        Int      @id @default(autoincrement())
+  periodKey String
+  boardKey  String
+  userId    String
+  slot      Int
+  rank      Int
+  reward    String
+  revision  Int      @default(0)
+  grantedAt DateTime @default(now())
+
+  @@unique([periodKey, boardKey, userId, slot])
+  @@index([userId, grantedAt])
+}

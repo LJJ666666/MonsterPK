@@ -167,6 +167,11 @@ export const api = {
   /** 读一张榜；limit 由服务端钳制 1~50，不允许上报任何分数 / 战力 / 进度。 */
   rankBoard: (type: string, limit = 20) =>
     request(`/api/rank/${encodeURIComponent(type)}?limit=${limit}`),
+  // F01/F02：周期榜与奖励全部只读，唯一写接口在服务端结算脚本 / 管理员，不暴露给客户端。
+  rankPeriods: () => request("/api/rank/periods"),
+  rankPeriodBoard: (periodKey: string) =>
+    request(`/api/rank/periods/${encodeURIComponent(periodKey)}`),
+  rankRewards: () => request("/api/rank/rewards"),
 
   // ───────────────────── P4-2c 单人 Boss 讨伐（伤害只认服务端结算）─────────────────────
   /** 讨伐列表 + 我的次数与今日伤害（只读）。 */

@@ -320,10 +320,25 @@ async function main() {
   check('普通账号传测试标记不报错（静默忽略）', flagged.status === 200, `${flagged.status} ${asText(flagged.data)}`);
   const fb = flagged.data?.battle ?? {};
   check('普通账号 testOHKO 未生效（敌方 HP 不是 1）', fb.enemy?.hp !== 1, String(fb.enemy?.hp));
-  check('普通账号 testShiny 未生效（敌方不是异色）', fb.enemy?.isShiny !== true, String(fb.enemy?.isShiny));
   check('普通账号没有测试标记日志', !(fb.log ?? []).some((l) => l.includes('管理员测试标记')),
     JSON.stringify(fb.log));
+  // 野生怪本身有 1% 天然异色（rules.ts 的 rng() < 0.01），单次「敌方绝不异色」
+  // 会偶发误报。真正要防的是「普通账号的 testShiny 被服务端强制采纳」：
+  // 若被采纳，下面每次开局必然都是异色；否则 8 次里至少出现一次非异色。
+  // 用「多次开局不恒为异色」替代绝对断言，既不误报也不放过漏洞。
+  const shinyTrials = [fb.enemy?.isShiny === true];
   await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: fb.battleId } });
+  for (let i = 1; i < 8; i++) {
+    const trial = await startBattle(tokenA, {
+      levelMin: 3, levelMax: 3,
+      testFlags: { testOHKO: true, testShiny: true, testMaxStats: true },
+    });
+    const tb = trial.data?.battle ?? {};
+    shinyTrials.push(tb.enemy?.isShiny === true);
+    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: tb.battleId } });
+  }
+  check('普通账号 testShiny 未强制生效（8 次开局不恒为异色）',
+    shinyTrials.some((s) => s === false), JSON.stringify(shinyTrials));
 
   // 管理员：先提权再开局。身份必须由服务端查库判定，客户端自称不算数。
   if (prisma) {

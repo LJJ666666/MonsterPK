@@ -63,6 +63,8 @@ const STAGES = [
   // P4-2d：1v1 玩家对战 E2E（双方意图服务端裁决、结算写双方档各一次）。
   { id: 'e2e:p42d', name: 'E2E 1v1 玩家对战（P4-2d）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42d'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p42e', name: 'E2E 共斗 Boss / 副本（P4-2e）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42e'], need: 'backend', timeout: 300_000 },
+  // F01/F02：周期结算幂等 + 服务端发奖 + 历史榜只读（远古周期键，重复运行安全）。
+  { id: 'e2e:f01f02', name: 'E2E 周期结算与榜单奖励（F01/F02）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f01f02'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -71,6 +73,7 @@ const STAGES = [
   { id: 'smoke:p42c', name: '375px 讨伐 UI（P4-2c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42c.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p42d', name: '375px 1v1 对战 UI（P4-2d）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42d.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p42e', name: '375px 共斗 UI（P4-2e）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p42e.mjs'], need: 'both', timeout: 300_000 },
+  { id: 'smoke:f01f02', name: '375px 周期榜与奖励 UI（F01/F02）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f01f02.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -79,8 +82,8 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02'],
   docs: ['docs:doc', 'docs:memory'],
 };
 
@@ -226,6 +229,20 @@ if (needService) {
   if (!quiet) {
     console.log(`  后端 :3001 ${backendUp ? '在线' : '离线'} / 前端 :5173 ${frontUp ? '在线' : '离线'}`);
   }
+}
+
+// —————————————————————————— 前置清理 ——————————————————————————
+// 上一轮 verify 若中途失败，收尾清理可能没跑到，残留测试账号的存档会进入全服榜 /
+// 派生统计并挤占 limit，让下一轮 E2E 假红（2026-11-09 实测：256 个残留账号导致
+// e2e:p42a 三条派生断言失败，单独重跑却 39/39 全绿）。因此开跑前先清一次，
+// 保证每轮都从干净基线开始；--no-clean 仍可保留排查能力。
+let preCleaned = null;
+if (!noClean && backendUp && stages.some((s) => s.id.startsWith('e2e:'))) {
+  process.stdout.write('▶ 前置清理残留测试账号 … ');
+  const c = runStage({ cwd: BACKEND, cmd: NPM, args: ['run', 'clean:e2e'], timeout: 120_000 });
+  const m = c.out.match(/删除测试账号 (\d+) 个/);
+  preCleaned = m ? Number(m[1]) : null;
+  console.log(c.code === 0 ? `✓ 删除 ${preCleaned ?? '?'} 个` : '⚠ 清理失败（继续验收）');
 }
 
 const results = [];

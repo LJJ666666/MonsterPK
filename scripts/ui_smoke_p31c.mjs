@@ -95,12 +95,18 @@ var turn = function () { var m = txt().match(/回合 (\\d+)/); return m ? Number
 
 f.addEventListener('load', function () {
   waitFor('arena-ready', function () { return txt().indexOf('训练场') >= 0 || buttons().length > 0; }, function () {
+    // 虚拟时间会快进定时器，多个 observer 可能同时满足并重复调用 next；
+    // 不幂等就会在战斗结束后二次执行，把 moveClicked / turnAtStart 覆盖掉。
+    if (out.arenaSeen) return;
+    out.arenaSeen = true;
     out.step = 'arena';
     out.arenaReady = true;
     out.startClicked = clickOne(function (b) { return b.textContent.indexOf('快速开始') >= 0; });
   });
 
   waitFor('battle-started', function () { return txt().indexOf('服务端裁决') >= 0; }, function () {
+    if (out.battleSeen) return;
+    out.battleSeen = true;
     out.step = 'battle';
     out.serverBadge = txt().indexOf('服务端裁决') >= 0;
     out.localBadge = txt().indexOf('本地模式') >= 0;

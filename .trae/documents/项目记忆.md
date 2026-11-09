@@ -8,8 +8,9 @@
 - **北极星（11-04）**：服务端权威 + 实时多人同玩（服务端结算，客户端只发意图、收状态、渲染）。本地存档过渡态，P5 去除；P0-3 自动同步为桥接。
 - **反作弊（11-05）**：测试菜单数据只放行管理员；改档/GG/加速器拦截+封号+登出；改系统时间不封号、只要求不生效（§13）。
 - **P4-1 口径（11-07）**：同账号多端不合并本地改动、不静默切档；后来者顶号，前者直接下线（旧 token 所有 REST 403）。共享真值全在服务端。
-- 总表 `开发任务优先级_2026-11-04.md`：**P0~P4-2e 全 ✅，P4-2 五阶段全部完成**；下一步待定（P4-3 交易/赠送，或先偿还台账 F01/F02/F04/F09/F14/F15/F16）。
-- **未来规划台账** `未来规划与技术债_2026-11-07.md` **F01~F15**（📋/🔨/✅）；**F12 已偿还**。F04 召唤师等级=账号等级+宠物等级帽（占位偏差，偿还前不得声称已实现）；**F15** 1v1 奖励/排位分待设计。
+- **F01/F02（11-09）**：`game/period.ts` UTC+8 周期单一真源（`dayKeyOf` 委托它）；`RankPeriodSnapshot` 幂等快照 + `RankReward` 唯一键防重复；奖励表纯函数 `game/rankReward.ts`；`modules/rankSettlement.ts` 结算+发奖（占位→`readSave`→`applyRankReward`→**同步 `authority.expected`**→`commitState`，顺序不可颠倒）；`npm run rank:settle` 供 cron。四派生榜按结算时刻落库真值定格（Save 无历史版本），Boss 榜按 `periodKey` 精确归档（§28）。
+- 总表 `开发任务优先级_2026-11-04.md`：**P0~P4-2e 全 ✅，P4-2 五阶段全部完成**；**台账 F01/F02 已偿还**（11-09，周期结算+榜单奖励，规范 §28）。下一步待定（P4-3 交易/赠送，或 F04/F09/F14/F15/F16）。**P4-3 只指交易/赠送，别再当周期结算**（编号冲突已修）；**收官 `verify --strict` 31/31 `VERIFY_OK`**，三处测试侧红灯见 bug_log §35。
+- **未来规划台账** `未来规划与技术债_2026-11-07.md` **F01~F15**（📋/🔨/✅）；**F12、F01/F02 已偿还**。F04 召唤师等级=账号等级+宠物等级帽（占位偏差，偿还前不得声称已实现）；**F15** 1v1 奖励/排位分待设计。
 
 ## 2. 技术栈与代码入口
 - React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7；路由 `/`、`/camp`、`/arena`、`/auth`。
@@ -33,15 +34,15 @@
 
 ## 4. 运行命令与环境
 - 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**交接后不自动恢复**，先 curl 探活。
-- **校验首选 `npm run verify`** —— 29 阶段（95~125s，**29/29 `VERIFY_OK`**），自动清测试账号；`--only=`/`--skip=` 跑子集。⚠️ 新增阶段要改**两处**（`STAGES` + `GROUPS`），漏 `GROUPS` 会静默少跑（§32）。分项数字见任务表时间线，本文件不复述。
+- **校验首选 `npm run verify`** —— 31 阶段（含 `e2e:f01f02` / `smoke:f01f02`，**全绿 `VERIFY_OK`**）；开跑前**前置清理**残留测试账号，避免污染全服榜断言（§34），自动清测试账号；`--only=`/`--skip=` 跑子集。⚠️ 新增阶段要改**两处**（`STAGES` + `GROUPS`），漏 `GROUPS` 会静默少跑（§32）。分项数字见任务表时间线，本文件不复述。
 - 清理/账号：`cd backend && npm run clean:e2e`（`--dry` 预览；只删测试前缀、永不删 admin）；`npm run admin -- grant|revoke|ban|unban|list|audit <名>`。⚠️ 不授权用测试菜单会被封号，绝不写死用户名。
-- **项目路径随机器而异**：文档与脚本一律用相对路径 / 动态 ROOT（`git rev-parse --show-toplevel`），不写死盘符或用户名；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ `prisma migrate deploy` → `generate` → 前后端各 `npm install` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。**git 走代理报 502 → `git config --local http.version HTTP/1.1`**（§33）；探活加 `curl --noproxy '*'` 防假 502。
+- **项目路径随机器而异**：文档与脚本一律用相对路径 / 动态 ROOT（`git rev-parse --show-toplevel`），不写死盘符或用户名；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ 前后端各 `npm install` → **`prisma migrate deploy`**（给已有库加列/加表，漏了必 `P2022`，§34）→ `generate` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。**git 走代理报 502 → `git config --local http.version HTTP/1.1`**（§33）；探活加 `curl --noproxy '*'` 防假 502。
 - **Git 流程（11-07 杰哥定）**：验收通过 → 建 `rollback-YYYYMMDD-<阶段>` tag 推远端 → `git add -A` 确认无 `.env`/`*.db` → commit（中文分条、末尾写数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净。
 
 ## 5. 后端架构与风控现状（独立 `backend/`）
 - 栈：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + SQLite + bcryptjs + zod + tsx。
-- 模型 `User`(username 唯一/bcrypt/`role`/`bannedAt`/`banReason`/`sessionVersion`) + `Save`(userId+slot 唯一/`schemaVersion`/`clientId`/`authority`/3 槽) + `BanRecord` + `IntentLog`(nonce 唯一) + `BossDamageEvent`(`battleId @unique`)。迁移链 **6 条**；改 schema 前停 :3001。
-- API：`auth/{register,login,me}`、`GET|PUT /api/save?slot=`、`POST /api/actions/:type`、`GET /api/session`、`POST /api/game/:op`、`/api/battle/{start,action,abandon}`+`current`、`GET /api/wild`、`GET /api/rank[/:type]`、`/api/room[...]`、`GET /api/boss`+`POST /api/boss/start`+`GET /api/boss/:id/rank`、`POST /api/pvp/create`+`POST /api/pvp/:roomId/join`、`GET /api/health`、`GET /ws`。查封号→`403 ACCOUNT_BANNED`；旧代次→`403 SESSION_REPLACED`。
+- 模型 `User`(username 唯一/bcrypt/`role`/`bannedAt`/`banReason`/`sessionVersion`) + `Save`(userId+slot 唯一/`schemaVersion`/`clientId`/`authority`/3 槽) + `BanRecord` + `IntentLog`(nonce 唯一) + `BossDamageEvent`(`battleId @unique`) + `RankPeriodSnapshot`(`periodKey+boardKey` 唯一) + `RankReward`(`periodKey+boardKey+userId+slot` 唯一)。迁移链 **7 条**；改 schema 前停 :3001。
+- API：`auth/{register,login,me}`、`GET|PUT /api/save?slot=`、`POST /api/actions/:type`、`GET /api/session`、`POST /api/game/:op`、`/api/battle/{start,action,abandon}`+`current`、`GET /api/wild`、`GET /api/rank[/:type]` + `/api/rank/periods[/:key]` + `/api/rank/rewards`（只读）+ `POST /api/rank/admin/settle`（仅管理员）、`/api/room[...]`、`GET /api/boss`+`POST /api/boss/start`+`GET /api/boss/:id/rank`、`POST /api/pvp/create`+`POST /api/pvp/:roomId/join`、`GET /api/health`、`GET /ws`。查封号→`403 ACCOUNT_BANNED`；旧代次→`403 SESSION_REPLACED`。
 - **存档三层（P1-1/1b）**：`saveValidator.ts`（hard/soft/stats）→ `antiCheat.ts`（allow/reject/ban，`CHEAT_CODES` 白名单）→ `serverClock.ts`（钳未来时间戳）。
 - **权威裁决（P1-2）**：意图 nonce → 服务端基线 + 掷骰/时钟/价格 → `authority.pending` → 客户端带 `intentNonce` PUT 核对增量（不符 400 不封号）；`PUT` 三分支 rebase/intentNonce/单调比对（§14）。
 - **实时通道（P2-1）**：`upgrade` 五道闸（路径/Origin/JWT/查封号/`sv` 代次）、心跳、上行 4KB·20 条每秒；封号 `bye` 复用 `<BanGate/>`（§15）。
@@ -70,6 +71,7 @@
 - **P4-2c ✅（11-07）**：单人 Boss 讨伐 + 只读伤害榜 + 每日次数；先还 **F12**（`game/settlement.ts::applySettlementToSave()`）。`SCHEMA_VERSION` 未动，仅加一条迁移（§25/§30）。
 - **P4-2d ✅（11-07）**：1v1 玩家对战（见 §5）。`SCHEMA_VERSION` 未动、未加迁移（§26/§31）。
 - **P4-2e ✅（2026-11-08）**：共斗 Boss/副本（见 §5）。**P4-2 五阶段全部完成**。证据：`verify` **29/29**、后端 **336**/前端 **122**、`e2e:p42e` **22/22**、`ui_smoke_p42e` **16/16**；`SCHEMA_VERSION` 未动、未加迁移（§27/§32）。
-- **下一步待定**：P4-3 交易/赠送，或先偿还台账 **F01/F02**（周期结算+榜单奖励）、**F04**（账号等级）、**F09/F14**（Boss/共斗产出规则）、**F15**（1v1 奖励排位）、**F16**（共斗榜）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`（已走完）。
+- **F01/F02 ✅（11-09）**：`e2e:f01f02` **31/31**、`ui_smoke_f01f02` **17/17**、后端 **350**/前端 **129** 单测；`SCHEMA_VERSION` 未动、新增一条迁移（§28/§34）。
+- **下一步待定**：P4-3 交易/赠送，或偿还台账 **F04**（账号等级）、**F09/F14**（Boss/共斗产出规则）、**F15**（1v1 奖励排位）、**F16**（共斗榜）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`（已走完）。
 - **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py`/`doc_check.py`；11-07 已重建并 `ENV_CHECK_OK`。

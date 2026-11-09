@@ -11,6 +11,7 @@
  */
 import { MONSTER_SPECS, type ServerMonster } from './content.js';
 import { clamp, createInstance, type Rng } from './rules.js';
+import { periodKeyOf } from './period.js';
 
 export type BossSpec = {
   bossId: string;
@@ -91,17 +92,12 @@ export function bossDailyLimit(spec: BossSpec, env: NodeJS.ProcessEnv = process.
 }
 
 /**
- * 周期键：固定 UTC+8（`Asia/Shanghai`）自然日，`YYYY-MM-DD`。
- * 用固定偏移而不是 `toLocaleDateString`：后者依赖运行环境时区与 ICU，换机器会变。
- * 周期结算规则本身待设计（台账 F01），这里只保证「同一天同一键」可复现。
+ * 周期键（历史导出名，保持所有既有调用不变）：固定 UTC+8 自然日 `YYYY-MM-DD`。
+ * F01 偿还后统一委托给 `game/period.ts::periodKeyOf()`，保证 Boss 每日次数、
+ * 伤害事件 `periodKey`、榜单周期结算三个口径完全一致；换周期粒度只改那一处。
  */
 export function dayKeyOf(nowMs: number, offsetMinutes = 480): string {
-  const t = Number.isFinite(nowMs) ? nowMs : Date.now();
-  const shifted = new Date(t + offsetMinutes * 60_000);
-  const y = shifted.getUTCFullYear();
-  const m = `${shifted.getUTCMonth() + 1}`.padStart(2, '0');
-  const d = `${shifted.getUTCDate()}`.padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return periodKeyOf(nowMs, offsetMinutes);
 }
 
 /** 次数键：账号 + 日 + Boss。只作服务端内部键，不下发。 */

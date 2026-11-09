@@ -1474,3 +1474,44 @@ pvp 分出胜负既可能发生在 `submitIntent`（双方手动交齐），也�
 - **限时**：不新增全局倒计时，复用内核的回合超时 20s / TTL 30min / 全员掉线 60s（F08 口径：阈值只由服务端定）。
 - 动态难度、跨服组队、观战、语音 / 表情不在本阶段（F11）。
 - 共斗榜、共斗奖励分配归台账 F16 / F09 / F14。
+
+## 28. F01 榜单周期结算 + F02 榜单奖励（2026-11-09）
+
+### 28.1 编号口径
+`P4-3` 在任务表里是**交易 / 赠送**，与 F01/F02 无关；排期文档 §7 旧文曾把 P4-3 写成「周期结算 / 榜单奖励」，
+造成编号冲突，11-09 已修正。F01/F02 是**台账偿还**，不自造阶段号。
+
+### 28.2 周期真值（单一真源）
+`game/period.ts`：`periodKeyOf()` / `periodBounds()` / `isPeriodClosed()` / `previousPeriodKey()`，
+固定 **UTC+8 自然日 `YYYY-MM-DD`**（固定偏移，不用 `toLocaleDateString`，避免宿主机时区 / ICU 漂移）。
+`game/boss.ts::dayKeyOf()` 委托它，保证 Boss 每日次数、`BossDamageEvent.periodKey`、榜单周期三者同口径。
+周期粒度收敛为常量，将来换周 / 赛季只改切分函数，接口与前端零改动。
+
+### 28.3 幂等结算
+`RankPeriodSnapshot(periodKey, boardKey)` 唯一键，7 张榜 = 四张派生榜 + 三张 Boss 伤害榜（`SETTLE_BOARDS`）。
+**只结算已结束周期**（`RANK_PERIOD_OPEN`）；重跑不覆盖首次快照、只补发缺失奖励。
+整体加 `rank:settle:<periodKey>` 结算锁，逐笔奖励再加槽位锁。
+四张派生榜按**结算时刻**的落库真值定格（Save 无历史版本）；Boss 榜按 `periodKey` 归档，补跑不失真。
+
+### 28.4 奖励表与发放
+`game/rankReward.ts`（纯函数）：`rewardFor()` 前 10 名有效成绩、Boss 榜金钱 ×2；
+`applyRankReward()` 只增 `money` / `inventory`，绝不碰队伍、等级、首通等其它真值（避免被判「凭空变强」）。
+`RankReward(periodKey, boardKey, userId, slot)` 唯一键防重复领取；同一玩家同周期可在多张榜分别获奖。
+
+### 28.5 发奖写档顺序（不可颠倒）
+`modules/rankSettlement.ts::grantOne()`：
+槽位锁 → 唯一键**占位** → `readSave()` → `applyRankReward()` →
+**同步 `authority.expected = digestOf(新档)`** → `commitState(source='action')` → 回填 `revision`；
+任一步失败删除占位以便重跑补发。
+不能「先写档再插记录」：插入撞唯一键时奖励已进档，会凭空多给一份。
+
+### 28.6 接口与契约
+`GET /api/rank/periods`、`/api/rank/periods/:periodKey`、`/api/rank/rewards` **全部只读**；
+`POST /api/rank/admin/settle` 仅管理员（普通账号 403 `RANK_SETTLE_FORBIDDEN`，不封号）；
+**不存在领取接口**（404）。伪上报名次 / 分数 / 奖励 / 已领取字段一律 400 `RANK_INPUT_FORBIDDEN`。
+结算脚本 `npm run rank:settle [-- <periodKey>|--recent=N]` 供 cron 调用，不新增全局定时器。
+历史榜快照不含 `userId`；`isMe` 由服务端按请求者用户名重标。
+
+### 28.7 边界
+不新增权威源、**不改 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**、不加存档字段（只加两张 DB 表）；
+封号 / 管理员排除沿用 P4-2a / P4-2c 口径；奖励数值与名次档位待杰哥拍板，改数值不改协议。

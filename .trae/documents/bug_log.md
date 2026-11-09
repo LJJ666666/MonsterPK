@@ -884,3 +884,50 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   LF 通过 / CRLF 通过 / 改一个字符 → exit 1 被拦。
 - **教训**：**`npm install` ≠ 环境就绪**；换机器或拉到 schema / 迁移变更后，
   `npx prisma generate` 与 `npm install` 都要跑。生成物比对别按原始字节，先规范化换行。
+
+## 34. 旧 dev.db 缺迁移 + 残留测试账号污染：strict 验收连环假红（2026-11-09）
+
+- **现象 1**：`npm run verify -- --strict` 首次 21 个阶段失败，全部是
+  `P2022: The column main.User.sessionVersion does not exist in the current database`，注册接口 500。
+  **根因**：本机 `dev.db` 是 11-06 的旧库，拉代码后只跑了 `npm install` + `npx prisma generate`，
+  **漏了 `npx prisma migrate deploy`**；`generate` 只重生成 Client，不会给库加列。
+  `migrate status` 明确列出两条未应用迁移（`add_session_version` / `add_boss_damage_event`）。
+  **修法**：先停 :3001 释放 Prisma DLL（§12），`npx prisma migrate deploy` 后注册恢复 200，
+  验收从「21 失败」变「28 通过 / 1 失败」。**换机器 / 拉到 schema 变更后，
+  `npm install`、`prisma generate`、`prisma migrate deploy` 三件都要做**（HANDOFF §3.1 已补）。
+- **现象 2**：剩下的 1 个失败是 `e2e:p42a` 三条派生断言，单独重跑却 39/39 全绿。
+  **根因**：上一轮 verify 失败时收尾「清理测试账号」也失败，库里残留 **256 个测试账号**，
+  它们的存档挤占了榜单 `limit=20`，把 `high/mid/low` 挤出前 20 —— 不是代码缺陷。
+  **修法**：`scripts/verify.mjs` 增加**前置清理**（开跑前清一次残留测试账号，`--no-clean` 仍可保留排查），
+  并补齐 `clean-test-data.mjs` 遗漏的 `p42c_/p42d_/p42e_/f01_/f02_` 前缀。
+- **教训**：**E2E 假红先看「是不是脏数据」**——全量套件的残留账号会污染任何「全服派生 / 榜单」类断言。
+  修代码前先单独复跑该套件；治理要落在编排器（每轮干净基线），不是放宽断言。
+
+## 35. F01/F02 收官 strict 三个红灯：概率断言 / 探针重入 / 文案漂移（2026-11-09）
+
+- **背景**：F01/F02 全部改动落地后首跑 `npm run verify -- --strict` 得
+  `28 通过 / 3 失败 / 0 跳过 VERIFY_FAILED`；三个红灯都不在 F01/F02 自身阶段，
+  但必须逐个给可复现证据，不能靠「重跑看看」蒙混过去。
+- **① P3-1 E2E 47/48：`普通账号 testShiny 未生效（敌方不是异色） true`**
+  **根因**：`backend/src/game/rules.ts:496` 生成野生个体时 `rng() < 0.01` 会让敌方
+  **天然异色**，用例却断言「普通账号开局敌方绝对不异色」，于是 1% 概率误报。
+  单独复跑 `e2e:p31` 48/48 全绿（即 §17「服务端 RNG 用例须覆盖两条分支」的镜像）。
+  **修法**：`backend/tests/e2e_p31_battle.mjs` 改为「普通账号带 `testShiny` 连开 8 局，
+  断言至少一局不是异色」——若服务端错误采纳普通账号的测试标记，8 局必然恒为异色，
+  漏洞照样被检出；天然异色不再误报。连跑 2 轮均 48/48。
+- **② P3-1c UI 14/15：`技能按钮可点` false、`turnAtStart:6`、`ended:true`**
+  **根因**：`--virtual-time-budget` 快进定时器时，多个 `MutationObserver` 可能同时满足
+  并重复调用 `waitFor` 的 `next`；后一次在战斗已结束后执行，把 `moveClicked` 覆盖成
+  `false`、`turnAtStart` 覆盖成 6。单独复跑 15/15，属探针竞态而非产品缺陷。
+  **修法**：`scripts/ui_smoke_p31c.mjs` 给 `arena-ready` / `battle-started` 两个回调加
+  `arenaSeen` / `battleSeen` 幂等闸（与 `ui_smoke_p42a.mjs` 的 `once()` 同思路）。
+- **③ P4-2a UI 16/17：`切换到推图榜后说明文案更新`（稳定复现）**
+  **根因**：本轮重写 `RankBoardModal.tsx` 后免责行统一成
+  「榜单与奖励均由服务端结算，客户端只读」，旧断言钉死 `客户端上报无效` 这句，
+  是**真实回归（测试契约未随 UI 更新）**，不是假红。
+  **修法**：`scripts/ui_smoke_p42a.mjs` 改为要求「服务端结算」+「客户端只读 / 上报无效」
+  同时可见，强度不降低；不改产品文案。
+- **结论**：三处均只改测试侧，**产品逻辑零改动**；修复后单套件连跑 2 轮全绿，
+  最终 `npm run verify -- --strict` **31/31 `VERIFY_OK`（0 失败 / 0 跳过，118.8s）**。
+- **教训**：全量红灯先分类「概率假红 / 探针竞态 / 真实回归」并各自给证据；
+  **不要放宽断言到永真**，也不要把 UI 文案漂移当偶发抖动略过。

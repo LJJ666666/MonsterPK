@@ -122,7 +122,10 @@ f.addEventListener('load', function () {
         var t2 = txt();
         out.step = 'done';
         out.progressDesc = t2.indexOf('已首通区域数量') >= 0;
-        out.progressDisclaimer = t2.indexOf('客户端上报无效') >= 0;
+        // F01/F02 重写弹窗后，免责行统一为「榜单与奖励均由服务端结算，客户端只读」。
+        // 这里验证「切 Tab 后只读与服务端结算提示仍在」，不钉死某一句旧措辞。
+        out.progressDisclaimer = t2.indexOf('服务端结算') >= 0
+          && (t2.indexOf('客户端只读') >= 0 || t2.indexOf('客户端上报无效') >= 0);
         out.progressUnit = t2.indexOf(' 区') >= 0;
         out.scrollWidth2 = overflow();
         finish();

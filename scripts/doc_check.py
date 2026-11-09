@@ -405,6 +405,42 @@ checks = [
     ("测试账号清理前缀含 p42e_",
      "p42e_" in text(ROOT / "backend" / "tests" / "lib" / "harness.mjs")),
     ("每日日志记 P4-2e 实现", "P4-2e" in log_text and "E2E_P42E_OK" in log_text),
+
+    # ——— F01/F02 台账偿还（11-09） ———
+    ("F01/F02 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/game/period.ts",
+         "backend/src/game/rankReward.ts",
+         "backend/src/modules/rankSettlement.ts",
+         "backend/src/modules/rankPeriod.ts",
+         "backend/scripts/settle-ranks.ts",
+         "backend/tests/period.test.ts",
+         "backend/tests/rankReward.test.ts",
+         "backend/tests/e2e_f01f02.mjs",
+         "scripts/ui_smoke_f01f02.mjs",
+         "src/lib/rankPeriod.test.ts",
+         "backend/prisma/migrations/20261109040021_add_rank_period_and_reward/migration.sql",
+     ])),
+    ("P4-3 编号冲突已定死（交易/赠送，不再是周期结算）",
+     "P4-3（交易 / 赠送）" in task_text and "P4-3（周期结算" not in plan_text
+     and "F01 / F02（周期结算" in plan_text),
+    ("任务表与台账记 F01/F02 已偿还",
+     "F01/F02 已偿还" in task_text and "✅ 已偿还 2026-11-09" in future_text
+     and "E2E_F01F02_OK" in task_text),
+    ("规范含 §28 F01/F02 与发奖顺序",
+     "## 28." in spec_text and "authority.expected" in spec_text
+     and "commitState(source='action')" in spec_text and "唯一键" in spec_text),
+    ("bug_log 含 §34 旧库迁移与残留账号",
+     "## 34." in bug_text and "migrate deploy" in bug_text and "256 个测试账号" in bug_text),
+    ("verify 已注册 e2e:f01f02 与 smoke:f01f02（STAGES + GROUPS）",
+     "e2e:f01f02" in verify_text and "smoke:f01f02" in verify_text
+     and '"e2e:f01f02"' in pkg_text and "ui_smoke_f01f02.mjs" in verify_text
+     and "前置清理" in verify_text),
+    ("HANDOFF / MEMORY 记 F01/F02 已偿还",
+     "F01/F02" in handoff_text and "已偿还" in handoff_text
+     and "F01/F02 已偿还" in memory_text),
+    ("每日日志记 F01/F02 偿还",
+     "F01/F02" in log_text and "E2E_F01F02_OK" in log_text),
 ]
 
 for name, ok, *detail in checks:

@@ -269,3 +269,7 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 > **都不会给已有 `dev.db` 加列/加表**。换机器或拉到 schema 变更后必须再跑
 > `cd backend && npx prisma migrate deploy`；否则注册接口直接 `P2022`，
 > `verify --strict` 会出现 20+ 个连锁假红（bug_log §34）。改 schema 前记得先停 :3001 释放 Prisma DLL。
+
+> **接手第一件事（跨机器通用）**：`git fetch && git log --oneline -5`，
+> 对照本机 `git log --oneline -5` 与 `git status -sb`。若本机存在**未推送的本地提交**（ahead > 0），
+> 先确认远端是否需要它再开工；本机提交即使未推送也不会丢，但新机器拉取不到，别误以为功能没做。

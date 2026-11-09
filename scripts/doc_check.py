@@ -169,6 +169,9 @@ checks = [
     ("任务表下一步指向收官候选且无过期待开工",
      "下一步建议" in task_text and "P4-3" in task_text and "下一步待杰哥排期" in task_text
      and "下一步 P4-2c" not in task_text and "d/e 待开工" not in task_text),
+    ("P4-3 C2C 冻结口径已固化（当前所有资产不可交易）",
+     "当前所有资产一律不可交易" in task_text and "阶段冻结" in memory_text
+     and "当前冻结" in handoff_text),
     ("后端规范含 §15 实时通道", "## 15. P2-1 实时通道" in spec_text),
     ("后端规范含 §16 GameSession", "## 16. P2-2 GameSession" in spec_text),
     ("后端规范含 §17 服务端战斗", "## 17. P3-1 服务端战斗" in spec_text),

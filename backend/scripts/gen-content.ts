@@ -42,9 +42,14 @@ const next = `/* eslint-disable */\n/**\n * 自动生成，请勿手改。\n * �
 const checkOnly = process.argv.includes('--check');
 const prev = existsSync(outPath) ? readFileSync(outPath, 'utf8') : null;
 
+// 跨机器：Windows 检出时 core.autocrlf 可能把生成物转成 CRLF，而 next 恒为 LF。
+// 统一按 LF 规范化后再比对，避免「内容完全一致却报已过期」的假失败；
+// 真实漂移（data.ts 改了没重新生成）规范化后仍不相等，照样拦下。
+const normalizeEol = (s: string): string => s.replace(/\r\n/g, '\n');
+
 if (checkOnly) {
-  if (prev === next) {
-    console.log(`[一致] content.generated.ts 与 src/game/data.ts 同步（${next.length} 字节）`);
+  if (prev !== null && normalizeEol(prev) === normalizeEol(next)) {
+    console.log(`[一致] content.generated.ts 与 src/game/data.ts 同步（${next.length} 字节，换行已规范化）`);
     process.exit(0);
   }
   const before = prev?.length ?? 0;

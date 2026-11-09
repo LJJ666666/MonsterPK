@@ -35,7 +35,7 @@
 - 起服务：前端 `npm run dev -- --host 0.0.0.0 --port 5173 --strictPort`；后端 `cd backend && npm run dev`（3001）。**交接后不自动恢复**，先 curl 探活。
 - **校验首选 `npm run verify`** —— 29 阶段（95~125s，**29/29 `VERIFY_OK`**），自动清测试账号；`--only=`/`--skip=` 跑子集。⚠️ 新增阶段要改**两处**（`STAGES` + `GROUPS`），漏 `GROUPS` 会静默少跑（§32）。分项数字见任务表时间线，本文件不复述。
 - 清理/账号：`cd backend && npm run clean:e2e`（`--dry` 预览；只删测试前缀、永不删 admin）；`npm run admin -- grant|revoke|ban|unban|list|audit <名>`。⚠️ 不授权用测试菜单会被封号，绝不写死用户名。
-- 本机 `D:\MyJob\MonsterPK`；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ `prisma migrate deploy` → `generate` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。
+- **项目路径随机器而异**：文档与脚本一律用相对路径 / 动态 ROOT（`git rev-parse --show-toplevel`），不写死盘符或用户名；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ `prisma migrate deploy` → `generate` → 前后端各 `npm install` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。**git 走代理报 502 → `git config --local http.version HTTP/1.1`**（§33）；探活加 `curl --noproxy '*'` 防假 502。
 - **Git 流程（11-07 杰哥定）**：验收通过 → 建 `rollback-YYYYMMDD-<阶段>` tag 推远端 → `git add -A` 确认无 `.env`/`*.db` → commit（中文分条、末尾写数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净。
 
 ## 5. 后端架构与风控现状（独立 `backend/`）

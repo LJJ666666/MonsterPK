@@ -166,7 +166,9 @@ checks = [
     ("任务表 P2-2 ✅ 与 24/24 已回填", "P2-2 ✅" in task_text and "24/24" in task_text),
     ("任务表 P3-1a / P3-1b ✅ 与 39/39 已回填",
      "P3-1a" in task_text and "P3-1b" in task_text and "39/39" in task_text),
-    ("任务表下一步为 P4-2", "下一步建议" in task_text and "下一步 P4-2" in task_text),
+    ("任务表下一步指向收官候选且无过期待开工",
+     "下一步建议" in task_text and "P4-3" in task_text and "下一步待杰哥排期" in task_text
+     and "下一步 P4-2c" not in task_text and "d/e 待开工" not in task_text),
     ("后端规范含 §15 实时通道", "## 15. P2-1 实时通道" in spec_text),
     ("后端规范含 §16 GameSession", "## 16. P2-2 GameSession" in spec_text),
     ("后端规范含 §17 服务端战斗", "## 17. P3-1 服务端战斗" in spec_text),
@@ -209,13 +211,21 @@ checks = [
     ("HANDOFF 验收以 npm run verify 为首选", "npm run verify" in handoff_text),
     ("交接手册 HANDOFF.md 存在", (ROOT / "HANDOFF.md").exists()),
     # ——— 跨机器交接：给接手 AI 的意图与避坑入口（11-09） ———
+    ("内容表比对已规范化换行（跨机器 CRLF 不误报）",
+     "normalizeEol" in text(ROOT / "backend" / "scripts" / "gen-content.ts")
+     and "统一按 LF" in text(ROOT / "backend" / "scripts" / "gen-content.ts")),
     ("HANDOFF 含 AI 接手必读（意图 / 避坑 / 自检三段）",
      all(x in handoff_text for x in [
          "## AI 接手必读", "### A. 先读懂意图", "### B. 最容易踩的坑",
          "### C. 落地自检", "服务端权威", "commitState()", "产品语义",
          "JWT_SECRET", "DOC_CHECK_OK", "git ls-remote"])),
-    ("HANDOFF 标注 11-06 旧快照为历史，避免接手 AI 误读",
-     "仅作历史" in handoff_text and "优先于下文" in handoff_text),
+    ("HANDOFF 机器无关、无过期进度与待办",
+     "机器无关" in handoff_text and "P4-2 五阶段全部" in handoff_text
+     and "P4-3" in handoff_text and "以命令输出为准" in handoff_text
+     and "下一步 P4-2c" not in handoff_text and "d/e 待开工" not in task_text),
+    ("MEMORY / HANDOFF 不写死本机盘符或用户名",
+     "D:\\MyJob" not in memory_text and "D:\\MyJob" not in handoff_text
+     and "盘符" in handoff_text and "user-*-personal" in handoff_text),
     ("环境自检脚本存在", (ROOT / "scripts" / "check_home_env.py").exists()),
     # ——— P4-2 未来规划台账与口径修正 ———
     ("未来规划台账存在且 F01~F16 齐全",

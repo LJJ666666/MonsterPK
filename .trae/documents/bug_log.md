@@ -834,3 +834,53 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
    共斗变成「人越多越难」，与产品直觉相反。
 3. **`held` 不落库 + 全员掉线不扣次数**：与 P4-2c 一致。重启会让在途名额清零，
    但 `committed` 由 DB 行数保证，只会变少不会变多——这是唯一安全的方向。
+
+## 33. 跨机器拉取：git HTTP/2 与代理不兼容 + 代理污染 localhost 探活（2026-11-09）
+
+### 33.1 `git fetch` 报 502 / `schannel: server closed abruptly`，但网络是通的
+
+- **现象**：`git fetch --all --prune` 报 `schannel: server closed abruptly`；换 `http.sslBackend=openssl`
+  后变成 `CONNECT tunnel failed, response 502`；可 `curl https://github.com` 首页 200、GitHub API
+  `/repos/.../commits` 能读到远端真实提交。
+- **根因**：不是代理挂了也不是断网，是 **git 默认 HTTP/2 与本机代理（`127.0.0.1:4694`）不兼容**，
+  smart-HTTP 的 `/info/refs?service=git-upload-pack` 被回 502。
+  `git -c http.version=HTTP/1.1 ls-remote origin refs/heads/master` 一次即通。
+- **修法**：`git config --local http.version HTTP/1.1` —— 只写本机 `.git/config`，**不入库、不影响远端**；
+  偶发一次 502 属代理抖动，重试即过。
+- **教训**：① 诊断别一次改两个变量——上一轮把 `sslBackend=openssl` 和 HTTP/1.1 一起改，
+  被 openssl 那条带偏，误判成「网络故障、拉不到新提交」，白读了一轮旧进度；
+  ② 先用 GitHub API / `git ls-remote` 拿到远端真实 HEAD，再定位协议层；
+  ③ 本地 `origin/master` 只是上次 fetch 的缓存，`0/0` 不等于远端没新提交。
+
+### 33.2 全局代理让 localhost 探活变成「假 502」
+
+- **现象**：`curl http://127.0.0.1:5173/` 返回 502，容易误判成「服务起挂了」；
+  实际上服务根本没起，或请求被代理拦下。
+- **根因**：机器设了全局 `HTTP_PROXY` / `HTTPS_PROXY`，curl 连 `127.0.0.1` 也走代理隧道。
+- **修法**：探活统一 `curl --noproxy '*' ...`；或用 Python `socket.create_connection`
+  直连（`scripts/check_home_env.py` 即如此，不受代理影响）；再不行看 `netstat -ano | grep :5173`。
+- **关联**：HANDOFF 第 3.3 节探活命令与 §7 坑清单已同步。
+
+### 33.3 文档口径统一（同轮顺手收口）
+
+任务表第 6 批仍写「d/e 待开工」、131 行「下一步建议」段落中夹着「下一步 P4-2c」而段尾又写
+「P4-2 五阶段全部完成」；`scripts/doc_check.py` 还钉了一条「任务表下一步为 P4-2」的旧断言。
+**这些都是历史残留，不是待办**：已按「机器无关 + 单一事实来源」收敛，验收断言同步改为
+「下一步指向 P4-3 / 台账偿还，且不含过期待开工」。
+
+### 33.4 拉代码后没重新生成 Prisma Client / 生成物换行导致 `check:content` 假失败
+
+- **现象**：拉回 30 个提交后 `npm run verify` 红两项：后端 `tsc` 报 `sessionVersion` /
+  `bossDamageEvent` 不存在（12 处，另有 `unknown[]` 不能赋 `string[]` 一条连带错误）；
+  `check:content` 报「content.generated.ts 已过期（现有 88993 字节 / 应为 88987 字节）」。
+- **根因 1**：`node_modules/.prisma/client` 还是旧 schema 生成的。`npm install` 输出
+  `up to date` **不会**自动 `prisma generate`；schema 新增字段 / 模型后必须显式
+  `npx prisma generate`。生成后 12 处类型错误与那条连带错误全部消失，`npm run check` 0 错误。
+- **根因 2**：`content.generated.ts` 有 6 行，本机 `core.autocrlf=true` 检出成 CRLF，
+  比 LF 多 6 字节；`gen-content.ts --check` 原来用 `prev === next` 按字节精确比对，
+  于是「内容完全一致」也报过期。入库 blob 是 LF，`git diff` 为空，属纯机器差异。
+- **修法**：`backend/scripts/gen-content.ts` 增加 `normalizeEol()`，比对前把两侧统一成 LF；
+  真实漂移（改了 `data.ts` 没重新生成）规范化后仍不相等，照样拦下。三分支实测：
+  LF 通过 / CRLF 通过 / 改一个字符 → exit 1 被拦。
+- **教训**：**`npm install` ≠ 环境就绪**；换机器或拉到 schema / 迁移变更后，
+  `npx prisma generate` 与 `npm install` 都要跑。生成物比对别按原始字节，先规范化换行。

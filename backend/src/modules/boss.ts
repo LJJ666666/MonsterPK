@@ -48,6 +48,8 @@ const FORBIDDEN_BOSS_FIELDS = [
   'damage', 'damageDealt', 'score', 'total', 'rank', 'rankScore',
   'hp', 'enemyHp', 'maxHp', 'level', 'hpMultiplier',
   'quota', 'quotaLimit', 'dailyLimit', 'used', 'remaining', 'periodKey', 'entries',
+  // F14：奖励由服务端发放，客户端显式带任何奖励 / 领取 / 档位字段一律 400。
+  'reward', 'rewards', 'money', 'items', 'grant', 'grantKey', 'claim', 'claimed', 'tier',
 ] as const;
 
 function forgedField(obj: unknown): string | undefined {

@@ -137,3 +137,26 @@ model RankReward {
   @@unique([periodKey, boardKey, userId, slot])
   @@index([userId, grantedAt])
 }
+
+
+// F14 Boss 双档奖励发放记录：唯一键防重复发放（P2002 兜底 + 槽位锁串行）。
+// 每场小包 grantKey = boss:run:<battleId>；每日首讨大包 = boss:first:<periodKey>:<bossId>:<userId>:<slot>。
+// 发奖由服务端在 Boss 结算时写档（commitState），客户端没有任何领取入口。
+// 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
+model BossRewardGrant {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  slot      Int
+  bossId    String
+  periodKey String
+  // 档位：per_run（每场小包）/ first（每日首讨大包）
+  tier      String
+  grantKey  String   @unique
+  battleId  String
+  reward    String
+  revision  Int      @default(0)
+  grantedAt DateTime @default(now())
+
+  @@index([userId, periodKey])
+  @@index([bossId, periodKey])
+}

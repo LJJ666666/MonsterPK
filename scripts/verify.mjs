@@ -65,6 +65,7 @@ const STAGES = [
   { id: 'e2e:p42e', name: 'E2E 共斗 Boss / 副本（P4-2e）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42e'], need: 'backend', timeout: 300_000 },
   // F01/F02：周期结算幂等 + 服务端发奖 + 历史榜只读（远古周期键，重复运行安全）。
   { id: 'e2e:f01f02', name: 'E2E 周期结算与榜单奖励（F01/F02）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f01f02'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:f14', name: 'E2E Boss 双档奖励（F14）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f14'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -82,7 +83,7 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02'],
   docs: ['docs:doc', 'docs:memory'],
 };

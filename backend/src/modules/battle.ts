@@ -27,6 +27,8 @@ import { commitState } from './session';
 import { readSave } from './saveRead';
 // F12：结算写档已抽成 `game/settlement.ts` 的纯函数，普通战斗与单人 Boss 共用。
 import { applySettlementToSave } from '../game/settlement';
+// F14：Boss 双档奖励发放（服务端唯一写入口，客户端无领取入口）。
+import { grantBossRewards, type BossRewardResult } from './bossReward';
 import { broadcastToUser, battles, wilds, bossQuota } from './sessionBus';
 import { publishWild, resolveAreaSpec } from './wild';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
@@ -135,6 +137,8 @@ async function settleBossRun(
       best: 0,
       attempts: 0,
       quota: { limit, used: 0, remaining: limit },
+      // F14：逃跑不发奖励；字段恒定存在，客户端不需要判 undefined。
+      reward: null,
     };
   }
 
@@ -170,6 +174,24 @@ async function settleBossRun(
   const spec = getBoss(bossId);
   const limit = spec ? bossDailyLimit(spec) : 0;
   const attempts = agg._count?._all ?? 0;
+
+  // F14：双档奖励（每场小包 + 每日首讨大包）。只打赢才发；
+  // 幂等由 BossRewardGrant.grantKey 唯一键保证，重复结算同一场必然跳过。
+  // 发放异常不阻断战斗结束响应（与 BossDamageEvent 写入失败同口径），
+  // 内核已删除占位记录，可重跑补发。
+  let reward: BossRewardResult | null = null;
+  try {
+    reward = await grantBossRewards({
+      userId, slot, bossId, periodKey: dayKey,
+      battleId: state.id, result: String(state.result ?? 'unknown'), now,
+      // `/api/battle/action` 路由层已持有 userId:slot 槽位锁；不可重入。
+      alreadyLocked: true,
+    });
+  } catch (err) {
+    req.log.error({ event: 'boss_reward_grant_failed', userId, bossId, battleId: state.id, err },
+      'boss reward grant failed');
+  }
+
   return {
     bossId,
     periodKey: dayKey,
@@ -179,6 +201,7 @@ async function settleBossRun(
     best: agg._max?.damage ?? 0,
     attempts,
     quota: { limit, used: attempts, remaining: Math.max(0, limit - attempts) },
+    reward,
   };
 }
 

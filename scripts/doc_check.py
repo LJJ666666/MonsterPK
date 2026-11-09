@@ -49,8 +49,9 @@ checks = [
          "UI_SMOKE_P42A_OK", "UI_SMOKE_P42C_OK", "UI_SMOKE_P42D_OK"])),
     ("MEMORY.md 记录降级与旧意图下线（决策，非技术细节）",
      "不做离线降级" in memory_text and "下线 `battle_reward`" in memory_text),
-    ("MEMORY.md 标 P4-2 收官并给出下一步候选",
-     "P4-2 五阶段全部完成" in memory_text and "下一步待定" in memory_text),
+    ("MEMORY.md 标 P4-2 收官并给出下一步（F16 → F04）",
+     "P4-2 五阶段全部完成" in memory_text and "下一步" in memory_text
+     and "F16" in memory_text and "F04" in memory_text),
     ("MEMORY.md 记 P3-2 写操作上移（细节在规范 §20）",
      "P3-2" in memory_text and "## 20." in spec_text),
     ("MEMORY.md 记 P4-0 写入并发控制（细节在规范 §21）",
@@ -166,9 +167,10 @@ checks = [
     ("任务表 P2-2 ✅ 与 24/24 已回填", "P2-2 ✅" in task_text and "24/24" in task_text),
     ("任务表 P3-1a / P3-1b ✅ 与 39/39 已回填",
      "P3-1a" in task_text and "P3-1b" in task_text and "39/39" in task_text),
-    ("任务表下一步指向收官候选且无过期待开工",
-     "下一步建议" in task_text and "P4-3" in task_text and "下一步待杰哥排期" in task_text
-     and "下一步 P4-2c" not in task_text and "d/e 待开工" not in task_text),
+    ("任务表下一步指向 F16 → F04 且无过期待开工",
+     "下一步建议" in task_text and "P4-3" in task_text and "F16" in task_text
+     and "F04" in task_text and "下一步 P4-2c" not in task_text
+     and "d/e 待开工" not in task_text and "下一步待杰哥排期" not in task_text),
     ("P4-3 C2C 冻结口径已固化（当前所有资产不可交易）",
      "当前所有资产一律不可交易" in task_text and "阶段冻结" in memory_text
      and "当前冻结" in handoff_text),
@@ -444,6 +446,26 @@ checks = [
      and "F01/F02 已偿还" in memory_text),
     ("每日日志记 F01/F02 偿还",
      "F01/F02" in log_text and "E2E_F01F02_OK" in log_text),
+    ("F14 Boss 双档奖励已偿还（规范 §29 + 台账 + 任务表）",
+     "## 29." in spec_text and "BOSS_FIRST_REWARD" in spec_text
+     and "F14" in future_text and "F14" in task_text and "E2E_F14_OK" in task_text),
+    ("F15 零产出冻结 / P4-3 C2C 不开放口径固化",
+     "仅供娱乐" in future_text and "阶段冻结" in future_text
+     and "不打算开放交易系统" in memory_text and "C2C" in handoff_text),
+    ("F16 共斗 6 房副本设计定稿（规范 §30）",
+     "## 30." in spec_text and "6 个房间" in spec_text
+     and "最低贡献门槛" in spec_text and "pending" in spec_text
+     and "本轮未写实现代码" in future_text),
+    ("verify 已注册 e2e:f14（STAGES + GROUPS）",
+     "e2e:f14" in verify_text and '"e2e:f14"' in pkg_text
+     and "前置清理" in verify_text),
+    ("HANDOFF / MEMORY 记 F14 已偿还与 F16 待实现",
+     "F14" in handoff_text and "F16" in handoff_text
+     and "F14" in memory_text and "F16" in memory_text),
+    ("bug_log 含 §36 同锁重入死锁",
+     "## 36." in bug_text and "alreadyLocked" in bug_text),
+    ("每日日志记 F14 偿还与共斗 6 房设计",
+     "F14" in log_text and "E2E_F14_OK" in log_text and "6 房" in log_text),
 ]
 
 for name, ok, *detail in checks:

@@ -230,14 +230,18 @@ async function main() {
     repeat.status === 404, `status=${repeat.status}`);
 
   const afterFight = JSON.parse((await save.get(hero.token)).data.data);
-  suite.check('Boss 结算写回道具消耗与队伍 HP，但不给经验 / 金钱 / 首通',
-    afterFight.inventory.potion_small === heroBefore.inventory.potion_small - 1
-    && afterFight.money === heroBefore.money
+  // F14 后契约变更：Boss 首胜由服务端发放「每日首讨大包 + 每场小包」，
+  // 不再断言「不发金钱 / 道具」；仍然不给经验、不写首通（战斗公式与榜单口径不变）。
+  // 小包药水与战斗消耗相抵，故 potion_small 净额为 0；棱彩胶囊 +1 是发奖硬证据。
+  suite.check('Boss 结算写回队伍状态；不给经验 / 首通，按 F14 发双档奖励（+120 金钱 / +棱彩胶囊）',
+    afterFight.money === heroBefore.money + 120
+    && afterFight.inventory.capsule_prism === (heroBefore.inventory.capsule_prism ?? 0) + 1
     && Object.keys(afterFight.clearedAreas ?? {}).length === 0
     && afterFight.party[0].exp === heroBefore.party[0].exp,
     JSON.stringify({
       potion: [heroBefore.inventory.potion_small, afterFight.inventory.potion_small],
       money: [heroBefore.money, afterFight.money],
+      prism: [heroBefore.inventory.capsule_prism ?? 0, afterFight.inventory.capsule_prism ?? 0],
       cleared: Object.keys(afterFight.clearedAreas ?? {}).length,
       exp: [heroBefore.party[0].exp, afterFight.party[0].exp],
     }));

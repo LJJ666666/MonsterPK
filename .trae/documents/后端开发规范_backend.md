@@ -1515,3 +1515,192 @@ pvp 分出胜负既可能发生在 `submitIntent`（双方手动交齐），也�
 ### 28.7 边界
 不新增权威源、**不改 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**、不加存档字段（只加两张 DB 表）；
 封号 / 管理员排除沿用 P4-2a / P4-2c 口径；奖励数值与名次档位待杰哥拍板，改数值不改协议。
+## 29. F14 Boss 双档奖励（2026-11-09 偿还）
+
+### 29.1 产品口径（杰哥 11-09 拍板）
+「Boss 用**每日首讨一份**发大的，**每场都发**小的，但是每日有最大挑战次数」；
+「奖励以后再调整，先实现」。数值集中在 `game/playReward.ts` 常量，**调数值不改协议 /
+存档 schema / 前端**：
+
+| 档 | 内容 | 触发 | 幂等键（`BossRewardGrant.grantKey @unique`） |
+|---|---|---|---|
+| 每日首讨**大包** | 金钱 100 + `capsule_prism` ×1 | 每账号每只 Boss 每日**首次胜利** | `boss:first:<periodKey>:<bossId>:<userId>:<slot>` |
+| 每场**小包** | 金钱 20 + `potion_small` ×1 | 每场 `enemy_fainted`（含首讨那场） | `boss:run:<battleId>` |
+
+- 数值单一真源在 `game/playReward.ts` 的三个常量：`BOSS_FIRST_REWARD` /
+  `BOSS_PER_RUN_REWARD` / `COOP_CLEAR_REWARD`（F16 预留）。调数值只改这三行，
+  不动协议 / 存档 schema / 客户端。
+- **只打赢才发**：逃跑（`fled`）与全灭（`player_fainted`）一律不发；逃跑分支在
+  `settleBossRun` 提前返回且回包恒定带 `reward: null`。
+- 每日次数沿用 `boss.ts` 的 3/2/1（不改）。以每日 3 次的 Boss 计全天上限
+  `100 + 20×3 = 160`，刻意低于 F02 榜一 300，避免「打日常比冲榜划算」。
+- 周期键复用 `game/period.ts::periodKeyOf()` 的 UTC+8 自然日，与每日次数 / 伤害事件 /
+  榜单结算三处同源。
+
+### 29.2 发放范式（与 §28.5 同构，不可颠倒）
+槽位锁串行 → **唯一键占位** → `readSave()` → `applyPlayReward()`（只增 `money` /
+`inventory`）→ **同步 `authority.expected = digestOf(新档)`** →
+`commitState(source='action')` → 回填 `revision`。
+先写档再插记录会导致插入冲突时奖励已进档，凭空多发一份。
+
+`game/playReward.ts` 是零 IO 纯函数层（奖励表 / 写档 / 展示 / 幂等键 / 合并），
+`modules/bossReward.ts` 是唯一写入口。`applyPlayReward()` 与 §28 的
+`applyRankReward()` 同口径；刻意不改动已验收的 F02 代码以降低回归面，将来出现第三处
+发奖写档再抽公共层，两处口径必须同步核对。
+
+### 29.3 ⚠️ 槽位锁不可重入（实现必读）
+`/api/battle/action` 路由层**已持有** `slotLockKey(userId, slot)`；`settleBossRun()` 在
+这条临界区内调用 `grantBossRewards()`。若内核再取同一把锁 → **自我死锁**（`withSlotLock`
+是单 key 链式队列，见 `lib/slotLock.ts` 头注释），表现为结算请求永久挂起、E2E 超时。
+`grantBossRewards({ alreadyLocked: true })` 声明调用方已持锁；独立调用（脚本 / 补发）
+默认自己加锁，保证 read→commit 原子。**与 F02 `rankSettlement::grantOne` 不同**：
+后者由 `settlePeriod` 在 `rank:settle:<periodKey>` 锁内调用，键不同，无重入问题。
+
+### 29.4 接口与防伪
+- 无领取接口：`POST /api/boss/rewards` / `claim` → 404；客户端不能上报奖励数值。
+- `FORBIDDEN_BOSS_FIELDS` 补 `reward/rewards/money/items/grant/grantKey/claim/claimed/tier`，
+  显式带任一字段 → 400 `BOSS_INPUT_FORBIDDEN` 并回显字段名，不静默忽略。
+- 结算回包 `boss.reward` 是 `BossRewardResult`（含 `eligible/reason/perRun/first`），
+  实发明细在 `.reward`；逃跑为 `null`。
+
+### 29.5 边界
+- **不动** `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 存档结构 / 战斗公式 /
+  `BossDamageEvent` / 四张派生榜 / Boss 伤害榜；只新增一张 DB 表
+  `BossRewardGrant`（迁移 `20261109092042_add_boss_reward_grant`）。
+- 客户端只读、无领取入口；本轮不做奖励 UI，回包带明细，界面留待数值调整时一并做。
+- **契约变更**：P4-2c 时代「Boss 刻意不发任何奖励」已失效，`e2e_p42c_boss.mjs`
+  对应断言改钉「不给经验 / 不写首通 + 按 F14 发双档奖励」，历史进度记录里的旧句
+  描述的是当时状态，别再当活口径。
+
+---
+
+## 30. F16 共斗 6 房副本（2026-11-09 设计定稿，待实现）
+
+> **状态：设计完成，尚未写实现代码。** 本节是杰哥 11-09 拍板玩法的工程契约，
+> 实现前先逐条核对 §30.8 的默认取值；不要凭旧版 P4-2e「一只共享 Boss」的印象动手。
+
+### 30.1 产品口径（杰哥原话要点）
+「副本玩法设计为**清理所有房间**，暂定有 **6 个房间**，每个房间都有 **2 只幻兽**，
+能力强的一人全杀光都行，**没规定谁要杀多少个**，队友失败了会看到**已战败**的效果，
+只要最终**全清了就是通关**，队友在打某个房间也会看到房间状态为**战斗中**」；
+「要**最低贡献门槛**」；「先不设计世界 Boss」。
+另：1v1 **仅供娱乐、零产出**（F15 冻结）；P4-3 是玩家↔玩家 C2C，**不打算开放交易系统**。
+
+### 30.2 形态结论：副本，不是世界 Boss
+| | 当前 P4-2e / 本轮目标 | 世界 Boss（**不排期**） |
+|---|---|---|
+| HP 真值 | 每房一份，挂 `RoomState.coop` | 全服一只，跨房间共享 |
+| 参与 | 房主建房 → 队友 join，全员同进同退 | 任意玩家随时进出 |
+| 伤害 | 房间内存态，结束即消失 | 需全服 append-only 事件流 |
+| 发奖 | 结算时遍历成员，**天然知道谁参与** | 得先记「谁打过、打多少」防蹭奖 |
+
+世界 Boss 等于新增第五个状态域（全服锁 / 贡献榜 / 跨房间归档），单独排期，
+不与「发不发奖」混在一个阶段。
+
+### 30.3 状态模型（重构 `game/coop.ts::CoopState`）
+```ts
+type CoopRoomState = 'pending' | 'fighting' | 'cleared' | 'defeated';
+type CoopRoom = {
+  index: number;                       // 0..5
+  state: CoopRoomState;
+  enemies: ServerMonster[];            // 固定 2 只
+  enemyPP: Record<string, number>[];
+  enemyMods: StatModifiers[];
+  occupantSeat: number | null;         // 正在打这间的座位；null = 无人占用
+  contributions: Record<number, number>; // seat → 累计有效伤害（最低贡献门槛真值）
+  turn: number;                        // 房间自己的回合数
+  log: string[];
+};
+type CoopState = {
+  rooms: CoopRoom[];                   // 固定 6
+  sides: CoopSide[];                   // 每人一份队伍 / PP / out
+  seatRoom: number[];                  // 每人当前所在房间；-1 = 大厅
+  finished: boolean;
+  result: 'win' | 'lose' | null;       // win = 6 房全 cleared
+  log: string[];
+};
+```
+`CoopSide.damage` 改为按房间累计到 `rooms[].contributions`，**不采信客户端任何数值**，
+只认「行动前后敌人 HP 差」（沿用 P4-2c 口径，溢出被钳不虚高）。
+
+### 30.4 房间状态机（杰哥要的「战斗中 / 已战败」可见性）
+```
+pending --enter(认领成功)--> fighting
+fighting --2 只敌人全倒----> cleared      （释放占用，记清理者）
+fighting --挑战者队伍全灭--> defeated     （释放占用，记 defeatedBySeat）
+defeated --任一成员 enter--> fighting     （敌人 HP 重置满，contributions 保留）
+6 房全 cleared ----------------------> result='win' / finished
+全员队伍全灭且无可打房间 ------------> result='lose'
+```
+- **一房同时只允许 1 人战斗**：`enter` 成功即 `occupantSeat=seat`，其余成员在视图里
+  看到 `state='fighting'` 且不能再进 —— 这正是「队友在打某房间会看到战斗中」。
+- **战败可重打**（默认）：否则一次失手整个副本卡死，也与「一人全杀光」冲突。
+  重打时敌人满血重置，但贡献历史**不清零**，避免用反复战败刷贡献。
+- 冲突 `enter`（两人同回合抢同一间）→ 座位号小者优先，其余降级为 `idle`，记日志，
+  不抛异常炸房间推进（沿用 P4-2e「非法意图降级跳过」口径）。
+
+### 30.5 意图协议与回合推进（**房间内核零大改**）
+`room.action` 的 intent 仍是 `^[A-Za-z0-9_:\-]+$` 字符串：
+| 意图 | 含义 |
+|---|---|
+| `enter:<0..5>` | 认领 `pending` / `defeated` 房间 |
+| `move:<moveId>` / `switch:<idx>` | 对**自己当前所在房间**的敌人行动 |
+| `idle` | 本回合不操作（大厅 / 已出局 / 等待） |
+| `flee` | **仍不支持**，400（全员同进同退） |
+
+**关键**：保留现有「全员交齐意图 / 超时 → `advanceTurn` 一次」模型不变，
+`applyCoopTurn()` 改为在**一次推进内遍历所有 `fighting` 房间**，各用该房间占用者的
+意图结算一回合：占用者行动 → 存活敌人各行动一次 → 回合末持续伤害 → 自动换人 →
+房间胜负判定。`room.turn` 仍是全局 tick，`submitted` 仍是全员提交判定，
+`submitIntent` / `tick` / 掉线重连 / 托管 / quota 三段式**零改动**；
+`autoSubmit` 只需把 `pickCoopIntent()` 改成「按座位当前房间生成合法意图，在大厅则 `idle`」。
+
+### 30.6 视图与按接收者裁剪
+`coopViewFor(state, viewerUserId)` 下发：
+`rooms[]`（`index / state / occupantSeat / enemyPreviews(名字·等级·HP·状态·存活)`）、
+`cleared / total=6` / `finished / result` / `self`（完整队伍含 PP）/ `members[]`
+（`seat / roomIndex / out / contribution`）/ `log`。
+**房间状态对全体可见**（协作玩法口径），但队友仍**不下发未上场成员与技能 PP**
+（沿用 P4-2e 裁剪原则）。客户端零计算，只渲染「未挑战 / 战斗中 / 已清理 / 已战败」。
+
+### 30.7 发奖（F16）与防刷
+- 奖励：`COOP_CLEAR_REWARD = 金钱 40 + capsule_basic ×1`（已在 `game/playReward.ts`）。
+- **触发**：`result='win'`，服务端遍历成员，**只给满足最低贡献门槛者**发。
+- **最低贡献门槛（默认）**：`contributions[seat] > 0`，即至少造成过有效伤害；
+  纯进房挂机 / 全程 `idle` 不发。这与杰哥「参与就有奖励」+「要最低贡献门槛」一致：
+  **参与 = 有实际战斗贡献，不是进房就算**。刻意**不要求每人清 1 房**，否则与
+  「没规定谁要杀多少个、一人全杀光都行」冲突。
+- **防刷**：每日通关上限（默认 3，复用 `periodKeyOf()` UTC+8 周期键）+
+  `CoopRewardGrant` 唯一键 `(roomId, userId, slot)` + `room.coopSettled` 幂等。
+- **写档范式完全复用 §29.2**（槽位锁 → 唯一键占位 → `readSave()` →
+  `applyPlayReward()` → 同步 `authority.expected` → `commitState(source='action')` →
+  回填 `revision`）。⚠️ 但 `settleCoopRoom` 由 `maybeSettleCoop` 在**房间锁**
+  `room:<roomId>` 内调用，**不在** `userId:slot` 锁内 → 这里要自己取槽位锁，
+  **不要照抄 §29.3 的 `alreadyLocked: true`**（否则并发写档无保护）。
+- 共斗伤害**仍不写 `BossDamageEvent`、不进单人伤害榜**（防拉朋友刷榜）；
+  F16 的独立共斗榜单独排期，不与发奖混在一个阶段。
+
+### 30.8 待杰哥确认的默认取值（不改状态机，只改常量表）
+| # | 项 | 默认 | 备选 / 说明 |
+|---|---|---|---|
+| 1 | 房间数 | 6 | `COOP_ROOM_COUNT` 常量，改数不改状态机 |
+| 2 | 每房敌人数 | 2 | `COOP_ENEMIES_PER_ROOM` 常量 |
+| 3 | 一房同时几人打 | 1 | 多人同房要处理 HP 真值与伤害归属分叉，不建议 MVP |
+| 4 | 战败房间 | 可重打 / 敌人满血重置 / 贡献保留 | 永久战败（副本直接失败） |
+| 5 | 副本失败 | 全员队伍全灭 → `lose` | 永不失败，只靠房间 TTL 解散 |
+| 6 | 最低贡献门槛 | 累计有效伤害 > 0 | ≥1 次有效意图 / ≥N 伤害；**不建议**「至少清 1 房」 |
+| 7 | 每日通关上限 | 3 次 | 1 / 5 |
+| 8 | 敌人内容 | 复用 `THEME_TABLE` 野怪，等级按房号 1→6 递增（约 Lv.5→15） | 新建副本内容表（要同步 `content.generated.ts`） |
+| 9 | 奖励数值 | 金钱 40 + `capsule_basic` ×1 | 与 F14/F02 一样以后再调，只改常量 |
+
+### 30.9 边界与实施拆分（每步测通再下一步）
+**不动**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`、存档结构、`deriveMetrics()` /
+四张派生榜 / Boss 伤害榜、`rules.ts` 战斗公式、1v1（F15 冻结）、P4-3（不开放交易）。
+只新增 DB 表 `CoopRewardGrant`。客户端只读、无领取接口、伪上报 400。
+`maxSeats` 仍 2（MVP）但状态机按 N 人写；P5-1 前房间仍是单进程内存态。
+
+1. `game/coop.ts` 状态机 + `coop.test.ts` 纯函数单测（房间四态 / 认领冲突 / 重打 / 全清）
+2. `roomRegistry.ts` 意图路由与代放 + `roomRegistry.test.ts`
+3. `modules/coop.ts` create/join/settle + 迁移 + `modules/coopReward.ts`
+4. `e2e:f16` + `CoopModal.tsx` 六房地图三态重写 + `ui_smoke_f16` 375px
+5. 规范 §30 补实现记录 / 台账 / 进度 / 记忆 + `verify --strict` 全绿

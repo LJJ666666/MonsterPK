@@ -9,8 +9,8 @@
 - **反作弊（11-05）**：测试菜单数据只放行管理员；改档/GG/加速器拦截+封号+登出；改系统时间不封号、只要求不生效（§13）。
 - **P4-1 口径（11-07）**：同账号多端不合并本地改动、不静默切档；后来者顶号，前者直接下线（旧 token 所有 REST 403）。共享真值全在服务端。
 - **F01/F02（11-09）**：`game/period.ts` UTC+8 周期单一真源（`dayKeyOf` 委托它）；`RankPeriodSnapshot` 幂等快照 + `RankReward` 唯一键防重复；奖励表纯函数 `game/rankReward.ts`；`modules/rankSettlement.ts` 结算+发奖（占位→`readSave`→`applyRankReward`→**同步 `authority.expected`**→`commitState`，顺序不可颠倒）；`npm run rank:settle` 供 cron。四派生榜按结算时刻落库真值定格（Save 无历史版本），Boss 榜按 `periodKey` 精确归档（§28）。
-- 总表 `开发任务优先级_2026-11-04.md`：**P0~P4-2e 全 ✅，P4-2 五阶段全部完成**；**台账 F01/F02 已偿还**（11-09，周期结算+榜单奖励，规范 §28）。下一步待定（F04/F09/F14/F15/F16 台账偿还）。**P4-3 只指交易/赠送，别再当周期结算**；**P4-3 = 玩家↔玩家 C2C，11-09 口径「当前所有资产不可交易」→ 阶段冻结，别当下一步**（编号冲突已修）；**收官 `verify --strict` 31/31 `VERIFY_OK`**，三处测试侧红灯见 bug_log §35。
-- **未来规划台账** `未来规划与技术债_2026-11-07.md` **F01~F15**（📋/🔨/✅）；**F12、F01/F02 已偿还**。F04 召唤师等级=账号等级+宠物等级帽（占位偏差，偿还前不得声称已实现）；**F15** 1v1 奖励/排位分待设计。
+- 总表 `开发任务优先级_2026-11-04.md`：**P0~P4-2e 全 ✅，P4-2 五阶段全部完成**；**台账 F01/F02 已偿还**（11-09，周期结算+榜单奖励，规范 §28）。**F14 Boss 双档奖励已偿还**（11-09，规范 §29）、**F15 1v1 阶段冻结**（仅供娱乐、零产出，未来排位赛再设计榜单/奖励）、**F16 共斗改 6 房副本清理，设计定稿待实现**（规范 §30）。下一步 **F16 → F04**。**P4-3 只指交易/赠送，别再当周期结算**；**P4-3 = 玩家↔玩家 C2C，11-09 杰哥口径「不打算开放交易系统，至少目前没有这个计划」→ 阶段冻结，别当下一步**（编号冲突已修）；F01/F02 三处测试侧红灯见 bug_log §35，F14 三个坑见 §36；**收官 `verify --strict` 32/32 `VERIFY_OK`**（11-09，含 F14 阶段，147.7s）。
+- **未来规划台账** `未来规划与技术债_2026-11-07.md` **F01~F15**（📋/🔨/✅）；**F12、F01/F02、F14 已偿还**；**F15 1v1 零产出冻结**（开放排位赛前不设计），**F16 共斗 6 房副本设计定稿、待实现**（规范 §30）。F04 召唤师等级=账号等级+宠物等级帽（占位偏差，偿还前不得声称已实现）。
 
 ## 2. 技术栈与代码入口
 - React 18 + TS + Vite 6 + Tailwind 3 + zustand 5 + react-router 7；路由 `/`、`/camp`、`/arena`、`/auth`。
@@ -53,7 +53,7 @@
 - **写入并发控制（P4-0）**：PUT 与意图必须带 `revision`（缺 400 `REVISION_REQUIRED`），过期 409 `REVISION_CONFLICT` 回带快照（server-wins），校验在风控/nonce 前；`slotLock.ts` 按 `userId:slot` 串行（`commitState()` 不取锁）；前端 409 → `healFromConflict()` 不重试（§21/§26）。
 - **只读派生榜（P4-2a）**：落库真值 → `validateSaveData()` 滤脏档 → `game/rank.ts` 派生 → `GET /api/rank/:type`；实时派生（TTL=0）、排除封号/管理员、伪上报 400、只有 GET。战力 = 有效六维之和用 `maxHp`、**不代表实战强弱**、不参与判定、公式待定、装备走 `effectiveStats`；「召唤师等级」占位派生（F04）（§23/§28）。
 - **房间内核（P4-2b）**：第四个状态域 owner `roomId`。`forming→active→paused→abandoned|settled`；quota **hold→commit→release**（全掉 `release` 不扣次数）；座位存 token sha256，只同 token 同设备重连；阈值按 mode 分档（kernel 供 CI，生产 20/30/60s）；`room.state` 全量快照、`room.action` 上行意图、伪造上行→`UNKNOWN_TYPE`+1008；REST 与 WS 共用 `applyRoom*`、全经 `withRoomLock()`（§24/§29）。
-- **Boss 讨伐（P4-2c）**：不新增状态域（owner 仍 `battleId`）。伤害真值=敌方 HP 差；次数=`BossDamageEvent` 行数+`bossQuota` 在途（账号级、按自然日、重启不重置、`battleId @unique` 防重复、三路释放）；`periodKey` 手算 UTC+8。**不发奖励**（`s.rewards=null`）、禁止捕获、逃跑=放弃不上榜；伪上报 400 `BOSS_INPUT_FORBIDDEN`；`BOSS_DAILY_LIMIT` 只能下调（§25/§30）。
+- **Boss 讨伐（P4-2c）**：不新增状态域（owner 仍 `battleId`）。伤害真值=敌方 HP 差；次数=`BossDamageEvent` 行数+`bossQuota` 在途（账号级、按自然日、重启不重置、`battleId @unique` 防重复、三路释放）；`periodKey` 手算 UTC+8。**P4-2c 初版不发奖励**（`s.rewards=null`），**F14 起按双档发奖**（每日首讨大包 + 每场小包，规范 §29，现行口径）；禁止捕获、逃跑=放弃不上榜且不发奖；伪上报 400 `BOSS_INPUT_FORBIDDEN`；`BOSS_DAILY_LIMIT` 只能下调（§25/§30）。
 - **玩家对战 1v1（P4-2d）**：不新增状态域，战斗态挂 `RoomState.pvp`（`sides` 双方镜像），复用 `rules.ts` 公式 + 房间内核 `submitIntent`/`advanceTurn`/`tick`/`autoSubmit`；意图 `move:<id>`/`switch:<n>`/`flee`，intent 正则放宽冒号；`pvpViewFor` 按接收者裁剪。结算写双方档各一次 `commitState()`、各自 CAS/revision 不覆盖、`pvpSettled` 幂等；**只回写 HP/异常不发奖励**（F15）；`maybeSettlePvp` 三处触发，`room.ts`↔`pvp.ts` 动态 `import` 规避循环；伪上报 400 `PVP_INPUT_FORBIDDEN`（§26/§31）。
 - **共斗 Boss / 副本（P4-2e）**：**Boss HP 是 `RoomState.coop.boss.hp` 的房间真值**，`withRoomLock(roomId)` 串行，不新增状态域也不写 `BossDamageEvent`（不污染单人伤害榜，共斗榜归 F16）。`game/coop.ts` 按「优先度→速度→座位」排序结算、**Boss 回合末统一反击一次**、**非法意图服务端降级跳过**（不抛异常，否则一间房能被一个伪造意图打崩）；`coopViewFor` 按接收者裁剪（队友仅 damage/out）；结算**每人各一次 `commitState()`** + `coopSettled` 幂等、不发奖励（F09/F14）；`flee` 入口层 400 `COOP_INTENT_INVALID`；伪上报 400 `COOP_INPUT_FORBIDDEN`（§27/§32）。
 - **能力边界**：已挡 改档加资源/伪造捕获/白嫖购买/重复领奖/改时间刷挂机/测试菜单越权/WS 或房间上行伪造/伪造战斗动作与越权 battleId/GG 改内存/旧意图刷奖励/CAS 旧覆盖/顶号后续写/抢野怪/上报榜单数值/伪造 Boss 伤害与次数/伪造 1v1 字段与越权 roomId/伪造共斗伤害与 Boss HP/伪造共斗意图；未挡 加速器改节奏、改本地展示态。管理员只在服务端判定。
@@ -73,6 +73,8 @@
 - **P4-2d ✅（11-07）**：1v1 玩家对战（见 §5）。`SCHEMA_VERSION` 未动、未加迁移（§26/§31）。
 - **P4-2e ✅（2026-11-08）**：共斗 Boss/副本（见 §5）。**P4-2 五阶段全部完成**。证据：`verify` **29/29**、后端 **336**/前端 **122**、`e2e:p42e` **22/22**、`ui_smoke_p42e` **16/16**；`SCHEMA_VERSION` 未动、未加迁移（§27/§32）。
 - **F01/F02 ✅（11-09）**：`e2e:f01f02` **31/31**、`ui_smoke_f01f02` **17/17**、后端 **350**/前端 **129** 单测；`SCHEMA_VERSION` 未动、新增一条迁移（§28/§34）。
-- **下一步待定**：**P4-3 交易/赠送阶段冻结**（玩家↔玩家 C2C；当前所有资产不可交易、无可交付标的，将来开放标的表再排），改为偿还台账 **F04**（账号等级）、**F09/F14**（Boss/共斗产出规则）、**F15**（1v1 奖励排位）、**F16**（共斗榜）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`（已走完）。
-- **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端；**11-09 F01/F02 `5b5cc5e` + `292fba2` + 口径文档 `067cf87` 与 `rollback-20261109-pre/post-f01f02` 均已推送，远端 HEAD `067cf87`**。`dev.db`/`.env` gitignore。
+- **F14 ✅（11-09）**：Boss 双档奖励（规范 §29 / bug_log §36）。`e2e:f14` **46/46 `E2E_F14_OK`**（连跑 3 轮）、后端 **364** 单测、`e2e:p42c` **44/44** 按新契约重写；`SCHEMA_VERSION` 未动、新增一条迁移 `20261109092042_add_boss_reward_grant`。
+- **F15 ⏸ 冻结 / F16 🔨 待实现（11-09）**：1v1 零产出仅供娱乐；共斗改 6 房副本清理、要最低贡献门槛、世界 Boss 不排期，设计见规范 §30，**本轮未写实现代码**。
+- **下一步**：**F16 实现 → F04**；**P4-3 交易/赠送阶段冻结**（玩家↔玩家 C2C，不打算开放交易系统，无可交付标的）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md` §8 与后端规范 §29~§30。
+- **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端；**11-09 F01/F02 `5b5cc5e` + `292fba2` + 口径文档 `067cf87` 与 `rollback-20261109-pre/post-f01f02` 均已推送**；P4-3 C2C 口径冻结 `132daaa`。**当前两端 HEAD 一律以 `git rev-parse HEAD origin/master` 实测为准，本行不追写每次收口的 hash**（防跨机器读到过期值）。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py`/`doc_check.py`；11-07 已重建并 `ENV_CHECK_OK`。

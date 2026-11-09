@@ -104,12 +104,12 @@ f.addEventListener('load', function () {
     //    必须等它渲染完再点创建，否则 bossId 还是空、create() 会报「请先选择共斗目标」）
     waitFor('modal', function () {
       var t = txt();
-      return t.indexOf('共斗讨伐') >= 0 && t.indexOf('创建共斗房间') >= 0 && t.indexOf('Lv.') >= 0;
+      return t.indexOf('共斗副本') >= 0 && t.indexOf('创建共斗房间') >= 0 && t.indexOf('Lv.') >= 0;
     }, once('modal', function () {
       var t = txt();
       out.step = 'modal';
-      out.title = t.indexOf('共斗讨伐') >= 0;
-      out.disclaimer = t.indexOf('服务端裁决') >= 0 && t.indexOf('不发奖励') >= 0;
+      out.title = t.indexOf('共斗副本') >= 0;
+      out.disclaimer = t.indexOf('服务端裁决') >= 0 && t.indexOf('全清即通关') >= 0;
       out.createBtn = t.indexOf('创建共斗房间') >= 0;
       out.joinBtn = buttons().some(function (b) { return b.textContent.trim() === '加入'; });
       // 共斗目标列表（服务端只读下发）渲染出来才算接线成功
@@ -193,8 +193,8 @@ async function main() {
   if (!p) return report();
 
   check('营地页存在「共斗」入口', p.entry === true, JSON.stringify(p.errors));
-  check('弹窗标题为「共斗讨伐」', p.title === true, brief(p));
-  check('免责文案含「服务端裁决」与「不发奖励」', p.disclaimer === true, brief(p));
+  check('弹窗标题为「共斗副本」', p.title === true, brief(p));
+  check('免责文案含「服务端裁决」与「全清即通关」', p.disclaimer === true, brief(p));
   check('共斗目标列表已从服务端下发', p.bossList === true, brief(p));
   check('弹窗存在「创建共斗房间」按钮', p.createBtn === true, brief(p));
   check('弹窗存在「加入」按钮', p.joinBtn === true, brief(p));

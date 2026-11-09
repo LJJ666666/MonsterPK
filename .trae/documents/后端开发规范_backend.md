@@ -1574,10 +1574,11 @@ pvp 分出胜负既可能发生在 `submitIntent`（双方手动交齐），也�
 
 ---
 
-## 30. F16 共斗 6 房副本（2026-11-09 设计定稿，待实现）
+## 30. F16 共斗 6 房副本（2026-11-09 设计定稿 → 当日实现收官）
 
-> **状态：设计完成，尚未写实现代码。** 本节是杰哥 11-09 拍板玩法的工程契约，
-> 实现前先逐条核对 §30.8 的默认取值；不要凭旧版 P4-2e「一只共享 Boss」的印象动手。
+> **状态：✅ 已实现并全量验收通过。** 上半节是杰哥 11-09 拍板玩法的工程契约，
+> 设计口径仍然有效；实现记录与验收证据见 §30.10。不要凭旧版 P4-2e
+> 「一只共享 Boss」的印象动手。§30.8 九项默认值已按原表落地，调整只改常量表。
 
 ### 30.1 产品口径（杰哥原话要点）
 「副本玩法设计为**清理所有房间**，暂定有 **6 个房间**，每个房间都有 **2 只幻兽**，
@@ -1704,3 +1705,36 @@ defeated --任一成员 enter--> fighting     （敌人 HP 重置满，contribut
 3. `modules/coop.ts` create/join/settle + 迁移 + `modules/coopReward.ts`
 4. `e2e:f16` + `CoopModal.tsx` 六房地图三态重写 + `ui_smoke_f16` 375px
 5. 规范 §30 补实现记录 / 台账 / 进度 / 记忆 + `verify --strict` 全绿
+
+### 30.10 实现记录（2026-11-09，五步全部完成）
+
+**F16-1 状态机**：`game/coop.ts` 重写为 `CoopRoom[]`（6 房 × 2 敌）四态
+`pending/fighting/cleared/defeated`；`enter:<0..5>` 认领（同回合抢同一间按座位号小者优先，
+其余降级 `idle`，不抛异常打崩房间推进）、`defeated` 重打敌人满血且 `contributions`
+历史保留（防反复战败刷贡献）、`resetDefeatedRoom()` 抽纯函数便于在回合前断言；
+`coop.test.ts` **19 例**。**F16-2 路由**：`lib/roomTypes.ts` / `lib/roomRegistry.ts`
+加六房意图路由与代放，`modules/room.ts` 拒 `flee`；`coopRoom.test.ts` **6 例**。
+
+**F16-3 副本与发奖**：`modules/coop.ts` 接六房态 + 每日 3 次上限 + 结算写档；
+新增迁移 `20261109181400_add_coop_reward_grant`（`CoopRewardGrant`：
+`grantKey @unique` 幂等、`(roomId,userId,slot)` 唯一、`(userId,slot,periodKey)` 索引）；
+`modules/coopReward.ts` 是唯一写入口 —— 槽位锁 → 唯一键占位 → `readSave()` →
+`applyPlayReward()` → **同步 `authority.expected = digestOf(新档)`** →
+`commitState(source='action')` → 回填 revision；失败删占位记录，下次同场结算可补发。
+⚠️ **不传 `alreadyLocked`**：`settleCoopRoom()` 由 `maybeSettleCoop()` 在**房间锁**内调用，
+并不持有 `userId:slot` 槽位锁（§30.7 已警告），发奖入口必须自己取。
+发放条件：`result === 'win'` 且累计有效伤害 ≥ `COOP_MIN_CONTRIBUTION`（默认 > 0），
+全程 idle / 0 贡献不发；奖励 金钱 40 + `capsule_basic` ×1，按 `(userId,slot,periodKey)`
+落库计数为每日上限真值（进程重启不重置）。客户端无领取 / 上报入口，伪上报 400。
+后端单测 **374/374**。
+
+**F16-4 验收资产**：`e2e:f16` **14/14 `E2E_F16_OK`**（全清发奖 / 最低贡献门槛 /
+幂等 / 每日上限 / 伪上报）、`ui_smoke_f16` **15/15 `UI_SMOKE_F16_OK`**
+（六房四态 + 进房按钮 + 375px 无溢出）；`e2e:p42e` 收敛为「接口边界 + 建房视图 +
+意图路由」**20/20**，结算与发奖交 F16 专属套件；`clean-test-data.mjs` 补 `f16_` 前缀；
+`verify.mjs` / `backend/package.json` 注册 `e2e:f16` + `smoke:f16`。
+
+**边界未动**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 存档结构 / 四张派生榜 /
+Boss 伤害榜 / `rules.ts` 战斗公式 / 1v1（F15 冻结）/ P4-3。
+**收官两个测试侧红灯**（等级上界 `levelMax + 6` 漏算 `elite`+`rare` 叠加、
+视图字段由 `turn` 改为 `occupantSeat`）见 bug_log §37，只改断言，产品逻辑零改动。

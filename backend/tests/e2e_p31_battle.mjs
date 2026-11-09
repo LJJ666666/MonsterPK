@@ -176,10 +176,14 @@ async function main() {
 
   check('敌方来自服务端主题表', b1.enemy?.specId === 'sprout_owl' || ['sprout_owl'].includes(b1.enemy?.specId)
     || typeof b1.enemy?.specId === 'string', String(b1.enemy?.specId));
-  // 等级浮动与前端 gen.ts 一致：基础区间 [2,2] + 精英 2 / 稀有 3 / 随机 0~1，上限 6。
-  // 原先断言 === 2 会因浮动随机失败（约 60% 概率），这里按真实规则校验区间与标签一致性。
-  check('敌方等级在开局区间内（含精英/稀有浮动）',
-    b1.enemy?.level >= 2 && b1.enemy?.level <= 6, String(b1.enemy?.level));
+  // 等级浮动与前端 gen.ts 一致：基础区间 [levelMin,levelMax] + 精英 2 / 稀有 3
+  // （两次独立 roll，可叠加）+ 随机 0~1，故真实上界 = levelMax + 6。原先写死 <= 6
+  // 漏了 elite+rare 同时命中的分支（约 1% 概率偶发红），见 bug_log §37。
+  const lvMin = Number(b1.levelMin ?? 2);
+  const lvMax = Number(b1.levelMax ?? 2);
+  check('敌方等级在开局区间内（含精英/稀有叠加浮动）',
+    b1.enemy?.level >= lvMin && b1.enemy?.level <= lvMax + 6,
+    `level=${String(b1.enemy?.level)} range=[${lvMin},${lvMax}+6]`);
   check('敌方等级浮动与遭遇标签一致',
     /^(野生|精英|稀有)/.test(String(b1.log?.[0] ?? '').replace('遭遇：', '')),
     String(b1.log?.[0]));

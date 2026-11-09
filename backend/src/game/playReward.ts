@@ -40,7 +40,7 @@ export const BOSS_PER_RUN_REWARD: PlayReward = {
   items: { potion_small: 1 },
 };
 
-/** F16 共斗通关全员奖励：本轮只设计不发，常量先集中，下一轮实现时直接接。 */
+/** F16 共斗六房副本通关奖励（§30.8 默认）：只给满足最低贡献门槛的成员发（§30.7）。 */
 export const COOP_CLEAR_REWARD: PlayReward = {
   money: 40,
   items: { capsule_basic: 1 },
@@ -113,4 +113,12 @@ export function perRunGrantKey(battleId: string): string {
 /** 每日首讨大包：账号 + 槽位 + Boss + 周期；同日同 Boss 只有第一场胜利能占位。 */
 export function firstGrantKey(userId: string, slot: number, bossId: string, periodKey: string): string {
   return `boss:first:${periodKey}:${bossId}:${userId}:${slot}`;
+}
+
+/**
+ * F16 共斗通关：一场副本对同一账号同一槽位只发一次。
+ * `roomId` 本身就是房间全局唯一 id，重复结算同一副本必然撞唯一键（P2002 兜底）。
+ */
+export function coopClearGrantKey(roomId: string, userId: string, slot: number): string {
+  return `coop:clear:${roomId}:${userId}:${slot}`;
 }

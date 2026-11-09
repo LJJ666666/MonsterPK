@@ -1,29 +1,31 @@
 /**
- * P4-2e 共斗 Boss / 副本接口。
+ * F16 共斗 6 房副本接口（2026-11-09 杰哥「按默认开工」）。
  *
- * 权威模型（与排期文档 §4 P4-2e 对应，2026-11-08 杰哥拍板口径）：
- *  - **不新增状态域**：共斗态挂房间态（owner key = `roomId`），复用 P4-2b 的
- *    掉线 / 超时 / 托管 / 座位 / quota 三段式；`mode='coop'` 早就在内核里预留。
- *  - **Boss HP 是房间真值**：A/B 并发发意图时 `withRoomLock()` 串行，全员交齐才
- *    `advanceTurn` 一次，Boss HP 只减一次，随后广播 `room.state` 全量快照。
- *  - 战斗过程走 `room.action` / `POST /api/room/:roomId/action` 的既有意图通道，
- *    本模块只负责「建房 / 加入 / 结算写档」，不新开一套回合同步协议。
- *  - 结算：**每个成员档各一次 `commitState()`**，各自 CAS / revision 不互相覆盖；
- *    `coopSettled` 幂等。本阶段**不发奖励**（F09 / F14 待设计），只回写队伍 HP / 异常。
- *  - 客户端只发意图、只收全量快照；伪上报状态字段一律 400。
- *
- * 匹配（MVP）：房主 `POST /api/coop/create` 选 Boss 建房 → 队友 `POST /api/coop/:roomId/join`。
- * 不做随机匹配 / 跨服 / 动态难度（排期「明确不做」）。
+ * 权威模型（后端规范 §30）：
+ *  - **不新增状态域**：六房态挂房间态（owner key = `roomId`），复用 P4-2b 的
+ *    掉线 / 超时 / 托管 / 座位 / quota 三段式；`mode='coop'` 沿用既有内核。
+ *  - **每房敌人 HP 是房间真值**：`withRoomLock()` 串行，全员交齐才 `advanceTurn` 一次，
+ *    一次推进内遍历所有 `fighting` 房间各结算一回合，随后广播 `room.state` 全量快照。
+ *  - 战斗过程走 `room.action` / `POST /api/room/:roomId/action` 既有意图通道
+ *    （`enter:<0..5>` / `move:` / `switch:` / `idle`），本模块只负责「建房 / 加入 / 结算写档」。
+ *  - 结算：**每个成员档各一次 `commitState()`** 回写队伍 HP / 异常，各自 CAS / revision
+ *    不互相覆盖；`result='win'` 时再按 §30.7 给**满足最低贡献门槛**者发通关奖励
+ *    （每日 3 次上限 + `CoopRewardGrant` 唯一键防双花）。幂等由 `coopSettled` + 唯一键双保险。
+ *  - 客户端只发意图、只收全量快照；伪上报房间状态 / 伤害 / 贡献 / 奖励一律 400。
+ *  - 匹配（MVP）：房主 `POST /api/coop/create` 选目标建房 → 队友 `POST /api/coop/:roomId/join`。
+ *    `bossId` 只用于「目标主题 + 只读展示 + 校验」，敌人内容由服务端 `THEME_TABLE` 定。
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { withRoomLock, withSlotLock, slotLockKey } from '../lib/slotLock';
-import { createCoopState } from '../game/coop';
-import { getBoss, bossDailyLimit, dayKeyOf } from '../game/boss';
+import { createCoopState, contributionOf, COOP_DAILY_CLEAR_LIMIT } from '../game/coop';
+import { getBoss } from '../game/boss';
+import { periodKeyOf } from '../game/period';
 import { rooms, wsRegistry } from './sessionBus';
 import { publishRoom } from './room';
 import { readSave } from './saveRead';
 import { commitState } from './session';
+import { grantCoopClearReward } from './coopReward';
 import { digestOf, type AuthorityState } from '../lib/authority';
 import { tokenDigest } from '../lib/roomAuth';
 
@@ -39,13 +41,15 @@ const joinSchema = z.object({ slot: slotSchema }).strip();
 const paramsSchema = z.object({ roomId: z.string().min(1).max(96) });
 
 /**
- * 客户端不得上报的字段：Boss HP / 伤害 / 队伍 / 回合 / 结果 / 次数。
+ * 客户端不得上报的字段：房间状态 / 敌人 HP / 伤害 / 贡献 / 队伍 / 回合 / 结果 / 奖励。
  * 与 Boss / 榜单 / 1v1 同一口径：不是静默忽略，而是明确 400。
  * 注意 `bossId` 与 `slot` 是合法入参，不能列进来。
  */
 const FORBIDDEN_COOP_FIELDS = [
-  'boss', 'hp', 'maxHp', 'damage', 'party', 'coop', 'result', 'winner', 'winnerUserId',
+  'boss', 'bossHp', 'hp', 'maxHp', 'damage', 'party', 'coop', 'result', 'winner', 'winnerUserId',
   'turn', 'log', 'quota', 'quotaLimit', 'revision', 'status', 'rewards', 'endReason',
+  'rooms', 'roomIndex', 'roomState', 'state', 'enemies', 'occupantSeat', 'cleared', 'total',
+  'contribution', 'contributions', 'reward', 'seatRoom',
 ] as const;
 
 function forgedField(obj: unknown): string | undefined {
@@ -87,18 +91,18 @@ async function readParty(userId: string, slot: number) {
 }
 
 /**
- * 房间 quota 的隔离键：账号 + 自然日 + Boss。
+ * 房间 quota 的隔离键：账号 + UTC+8 自然日（§30.7 每日通关上限）。
  * `userId` 是 cuid（25 字符），整键会超过房间内核 `validQuotaKey` 的 64 字符上限，
  * 故只取尾 8 字符作内存 Map 键 —— 它不是权威真值，只用于 quota 三段式的隔离，
- * 真值在房间态与落库存档里（P5-1 迁共享存储时统一改 key，F10）。
+ * 真值在 `CoopRewardGrant` 落库记录里（P5-1 迁共享存储时统一改 key，F10）。
  */
-function coopQuotaKey(userId: string, bossId: string, now: number): string {
-  return `coop:${dayKeyOf(now)}:${bossId}:${userId.slice(-8)}`;
+function coopQuotaKey(userId: string, now: number): string {
+  return `coop:${periodKeyOf(now)}:${userId.slice(-8)}`;
 }
 
 /**
- * 房主创建共斗房间：只校验 Boss 与队伍，此刻只有房主一人，
- * 共斗态留到全员 join 后生成（Boss HP 那时才成为房间真值）。
+ * 房主创建副本房间：只校验目标与队伍，此刻只有房主一人，
+ * 六房态留到全员 join 后生成（每房敌人 HP 那时才成为房间真值）。
  */
 export async function applyCoopCreate(params: {
   userId: string;
@@ -124,8 +128,8 @@ export async function applyCoopCreate(params: {
         roomId,
         mode: 'coop',
         owner: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
-        quotaKey: coopQuotaKey(params.userId, spec.bossId, now),
-        quotaLimit: bossDailyLimit(spec),
+        quotaKey: coopQuotaKey(params.userId, now),
+        quotaLimit: COOP_DAILY_CLEAR_LIMIT,
         coopBossId: spec.bossId,
         now,
       });
@@ -136,7 +140,7 @@ export async function applyCoopCreate(params: {
   });
 }
 
-/** 队友加入：满员后按座位顺序读各自队伍，构造共斗态并挂到房间。 */
+/** 队友加入：满员后按座位顺序读各自队伍，构造六房副本态并挂到房间。 */
 export async function applyCoopJoin(params: {
   roomId: string;
   userId: string;
@@ -168,7 +172,7 @@ export async function applyCoopJoin(params: {
       const ordered = [...room.seats].sort((a, b) => a.seat - b.seat);
       const parties: { userId: string; party: any[] }[] = [];
       for (const seat of ordered) {
-        // MVP 各成员都用槽位 1；共斗态按座位顺序建立，N 人通用。
+        // MVP 各成员都用槽位 1；副本态按座位顺序建立，N 人通用。
         const p = await readParty(seat.userId, 1);
         if (!p) {
           rooms.abandon(room.roomId, now, 'party_unavailable');
@@ -193,43 +197,72 @@ export async function applyCoopJoin(params: {
 }
 
 /**
- * 结算写各成员档：共斗分出胜负后，把战斗内的队伍 HP / 异常回写各自存档，
+ * 结算写各成员档：副本分出胜负后，把战斗内的队伍 HP / 异常回写各自存档，
  * 每人一次 `commitState()`，revision 各自单调 +1、互不覆盖。
  *
- * **刻意不发奖励**（杰哥 2026-11-08 拍板「延续先例」）：不调
- * `game/settlement.ts::applySettlementToSave()`（那是普通战斗/Boss 的金钱经验首通结算），
- * 否则会绕过 F09 / F14 白送资源。幂等由 `room.coopSettled` 标记保证。
+ * `result='win'` 时按 §30.7 追加通关奖励：
+ *  - 只给 `contribution >= COOP_MIN_CONTRIBUTION` 的成员（纯挂机不发）；
+ *  - 每日上限 + 唯一键防刷由 `grantCoopClearReward()` 保证；
+ *  - ⚠️ 该调用链只持有**房间锁**，所以发奖函数自己取 `userId:slot` 槽位锁，
+ *    绝不传 `alreadyLocked`（否则并发写档无保护，见 §30.7）。
+ * 幂等由 `room.coopSettled` 标记 + `CoopRewardGrant` 唯一键双保险。
  */
 export async function settleCoopRoom(roomId: string): Promise<void> {
   const room = rooms.get(roomId);
-  if (!room?.coop || !room.coop.finished) return;
-  for (const side of room.coop.sides) {
-    const rec = await readSave(side.userId, 1);
-    if (!rec) continue;
-    await withSlotLock(slotLockKey(side.userId, 1), async () => {
-      let save: any;
-      try {
-        save = JSON.parse(rec.raw);
-      } catch {
-        return;
-      }
-      save.party = side.party;
-      save.lastSavedAt = new Date().toISOString();
-      const raw = JSON.stringify(save);
-      const authority: AuthorityState = {
-        ...rec.authority,
-        expected: digestOf(raw),
-        revision: rec.authority.revision + 1,
-        pending: null,
-      };
-      await commitState(side.userId, 1, {
-        data: raw,
-        schemaVersion: rec.schemaVersion,
-        clientId: rec.clientId,
-        authority,
-        source: 'battle',
+  const coop = room?.coop;
+  if (!coop || !coop.finished) return;
+  const result = coop.result;
+  const slot = 1; // MVP：房间成员固定使用槽位 1
+
+  for (let seat = 0; seat < coop.sides.length; seat += 1) {
+    const side = coop.sides[seat];
+
+    // ① 回写队伍状态（每人一次槽位锁 + commitState）。
+    try {
+      await withSlotLock(slotLockKey(side.userId, slot), async () => {
+        const rec = await readSave(side.userId, slot);
+        if (!rec) return;
+        let save: any;
+        try {
+          save = JSON.parse(rec.raw);
+        } catch {
+          return;
+        }
+        save.party = side.party;
+        save.lastSavedAt = new Date().toISOString();
+        const raw = JSON.stringify(save);
+        const authority: AuthorityState = {
+          ...rec.authority,
+          expected: digestOf(raw),
+          revision: rec.authority.revision + 1,
+          pending: null,
+        };
+        await commitState(side.userId, slot, {
+          data: raw,
+          schemaVersion: rec.schemaVersion,
+          clientId: rec.clientId,
+          authority,
+          source: 'battle',
+        });
       });
-    });
+    } catch (e) {
+      console.warn(`[F16] 回写队伍状态失败 room=${roomId} seat=${seat}:`, e);
+    }
+
+    // ② 通关奖励（独立槽位锁，失败只记日志、不阻断副本结束响应）。
+    if (result === 'win') {
+      try {
+        await grantCoopClearReward({
+          roomId,
+          userId: side.userId,
+          slot,
+          contribution: contributionOf(coop, seat),
+          result,
+        });
+      } catch (e) {
+        console.warn(`[F16] 通关奖励发放失败 room=${roomId} seat=${seat}:`, e);
+      }
+    }
   }
 }
 

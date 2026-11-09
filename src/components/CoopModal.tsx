@@ -1,15 +1,17 @@
-// P4-2e 共斗 Boss / 副本弹窗：选 Boss → 创建 / 加入房间 → 共斗界面。
+// F16 共斗 6 房副本弹窗：选目标 → 创建 / 加入房间 → 六房地图 + 行动面板。
 //
-// 唯一真值在服务端：Boss HP 与整场共斗由 `room.state` 全量快照下发（按接收者裁剪），
-// 客户端只发意图（move:<moveId> / switch:<idx>）。本组件不计算伤害 / 胜负 / PP，
-// 也不显示任何「领取奖励」入口 —— 本阶段刻意不发奖励（台账 F09 / F14 待设计）。
+// 唯一真值在服务端：每房敌人 HP / 四态 / 贡献 / 回合 / 胜负由 `room.state` 全量快照下发
+//（按接收者裁剪）。客户端只发意图（enter:<0..5> / move:<id> / switch:<idx> / idle），
+// 只渲染「未挑战 / 战斗中 / 已清理 / 已战败」，不计算伤害 / 胜负 / PP，也没有领取奖励入口。
 import { useCallback, useEffect, useRef, useState } from "react";
 import PixelButton from "@/components/PixelButton";
 import StatBar from "@/components/StatBar";
 import { ELEMENT_LABEL, MOVE_SPECS } from "@/game/data";
 import { api } from "@/lib/api";
 import { ROOM_STATE_EVENT, type RoomView, type RoomStateMessage } from "@/lib/sessionState";
-import { COOP_DISCLAIMER, coopResultText, coopStatusText, coopViewOf } from "@/lib/coop";
+import {
+  COOP_DISCLAIMER, coopResultText, coopRoomStateText, coopStatusText, coopViewOf,
+} from "@/lib/coop";
 import { newNonce } from "@/lib/pvp";
 import { fetchBossList, type BossEntry } from "@/lib/boss";
 import { useGameStore } from "@/stores/useGameStore";
@@ -17,6 +19,16 @@ import { getMoveMaxPP } from "@/game/rules";
 import { MonsterName } from "@/components/MonsterName";
 
 type Phase = "idle" | "creating" | "joining" | "waiting" | "fighting" | "finished";
+
+/** 四态对应的边框 / 背景色，全部用项目 CSS 变量，保持复古像素风格。 */
+function roomTone(state: string): string {
+  switch (state) {
+    case "fighting": return "border-[color:var(--accent)] bg-[color:var(--panel2)]";
+    case "cleared": return "border-[color:var(--stroke)] bg-[color:var(--bg2)] opacity-70";
+    case "defeated": return "border-[color:var(--danger)] bg-[color:var(--danger)]/10";
+    default: return "border-[color:var(--stroke)] bg-[color:var(--bg2)]";
+  }
+}
 
 export default function CoopModal({ onClose }: { onClose: () => void }) {
   const { slot } = useGameStore();
@@ -116,12 +128,13 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const coop = coopViewOf(room);
+  const inLobby = !!coop && coop.self.roomIndex < 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
         <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
-          <div className="font-bold text-[color:var(--text)]">共斗讨伐</div>
+          <div className="font-bold text-[color:var(--text)]">共斗副本</div>
           <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
         </div>
 
@@ -183,24 +196,58 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
               <span>{coopStatusText(room)}</span>
             </div>
 
-            {/* Boss：房间真值 HP */}
-            <div className="border-2 border-[color:var(--danger)] bg-[color:var(--bg2)] p-3">
-              <div className="flex items-baseline justify-between gap-2">
-                <div className="text-sm font-semibold text-[color:var(--text)] truncate">{coop.bossName}</div>
-                <div className="text-xs text-[color:var(--muted)] flex-none">Lv.{coop.boss.level}</div>
+            {/* 六房地图：房间状态对全体可见，客户端零计算 */}
+            <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="text-xs font-semibold text-[color:var(--text)]">副本进度</div>
+                <div className="text-[10px] text-[color:var(--muted)]">已清理 {coop.cleared} / {coop.total}</div>
               </div>
-              <div className="mt-2">
-                <StatBar label="BOSS HP" value={coop.boss.hp} max={coop.boss.maxHp} tone="enemy" />
+              <div className="grid grid-cols-2 gap-2">
+                {coop.rooms.map((r) => {
+                  const canEnter = inLobby && !coop.finished && !coop.self.out
+                    && (r.state === "pending" || r.state === "defeated") && r.occupantSeat === null;
+                  return (
+                    <div key={r.index} className={`border-2 p-2 ${roomTone(r.state)}`}>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[11px] font-semibold text-[color:var(--text)] truncate">第 {r.index + 1} 间</span>
+                        <span className="text-[10px] text-[color:var(--muted)] flex-none">{coopRoomStateText(r.state)}</span>
+                      </div>
+                      <div className="mt-1 text-[10px] leading-4 text-[color:var(--muted)]">
+                        {r.enemyPreviews.map((e) => (
+                          <span key={`${r.index}-${e.specId}`} className="mr-1">
+                            {e.alive ? `${e.name} ${e.hp}/${e.maxHp}` : `${e.name} 倒下`}
+                          </span>
+                        ))}
+                      </div>
+                      {r.occupantSeat !== null && (
+                        <div className="text-[10px] text-[color:var(--accent)]">座位 {r.occupantSeat + 1} 战斗中</div>
+                      )}
+                      {canEnter && (
+                        <button
+                          disabled={submitted}
+                          onClick={() => void submit(`enter:${r.index}`)}
+                          className="mt-1 w-full border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] py-1 text-[10px] text-[color:var(--text)] disabled:opacity-50"
+                        >
+                          进入房间
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* 成员伤害（服务端累计，公开） */}
+            {/* 成员贡献（服务端累计，公开） */}
             <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2 text-[10px] text-[color:var(--muted)]">
-              <div className="font-semibold text-[color:var(--text)] text-xs mb-1">本场伤害</div>
+              <div className="font-semibold text-[color:var(--text)] text-xs mb-1">本场贡献</div>
               {coop.members.map((m) => (
                 <div key={m.seat} className="flex justify-between gap-2">
-                  <span className="truncate">{m.self ? "我" : `座位 ${m.seat + 1}`}{m.out ? "（已出局）" : ""}</span>
-                  <span className="flex-none">{m.damage}</span>
+                  <span className="truncate">
+                    {m.self ? "我" : `座位 ${m.seat + 1}`}
+                    {m.roomIndex >= 0 ? `（第 ${m.roomIndex + 1} 间）` : "（大厅）"}
+                    {m.out ? " 已出局" : ""}
+                  </span>
+                  <span className="flex-none">{m.contribution}</span>
                 </div>
               ))}
             </div>
@@ -209,7 +256,6 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
             {(() => {
               const self = coop.self.party[coop.self.activeIndex];
               if (!self) return null;
-              const pp = coop.self.ppByMonster[self.id] ?? {};
               return (
                 <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3">
                   <div className="flex items-baseline justify-between">
@@ -227,52 +273,58 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
             })()}
 
             {/* 日志 */}
-            <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 text-xs leading-relaxed text-[color:var(--muted)] max-h-[20vh] overflow-y-auto">
+            <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 text-xs leading-relaxed text-[color:var(--muted)] max-h-[16vh] overflow-y-auto">
               {coop.log.slice(-6).map((line, idx) => (
                 <div key={idx} className={idx === coop.log.slice(-6).length - 1 ? "text-[color:var(--text)] font-medium" : ""}>
                   {line}
                 </div>
               ))}
-              {coop.log.length === 0 && <div className="italic">共斗开始…</div>}
+              {coop.log.length === 0 && <div className="italic">副本开始…</div>}
             </div>
 
-            {/* 行动面板：共斗刻意不支持逃跑 */}
+            {/* 行动面板：大厅选进房 / 房内出招，共斗刻意不支持逃跑 */}
             {!coop.finished ? (
               <div className="grid grid-cols-2 gap-2">
-                {(() => {
-                  const self = coop.self.party[coop.self.activeIndex];
-                  if (!self) return null;
-                  const pp = coop.self.ppByMonster[self.id] ?? {};
-                  return (
-                    <>
-                      {self.moveIds.map((id) => {
-                        const cur = pp[id] ?? 0;
-                        return (
-                          <PixelButton
-                            key={id}
-                            disabled={submitted || cur <= 0 || coop.self.out}
-                            onClick={() => void submit(`move:${id}`)}
-                          >
-                            <span>{MOVE_SPECS[id]?.name ?? id}</span>
-                            <span className="ml-1 text-[10px] opacity-70">PP {cur}/{getMoveMaxPP(id)}</span>
-                          </PixelButton>
-                        );
-                      })}
-                      {coop.self.party.map((m, idx) =>
-                        m.hp > 0 && idx !== coop.self.activeIndex ? (
-                          <PixelButton
-                            key={m.id}
-                            tone="muted"
-                            disabled={submitted || coop.self.out}
-                            onClick={() => void submit(`switch:${idx}`)}
-                          >
-                            换 <MonsterName m={m as any} />
-                          </PixelButton>
-                        ) : null,
-                      )}
-                    </>
-                  );
-                })()}
+                {inLobby ? (
+                  <PixelButton tone="muted" disabled={submitted || coop.self.out} onClick={() => void submit("idle")}>
+                    等待一回合
+                  </PixelButton>
+                ) : (
+                  (() => {
+                    const self = coop.self.party[coop.self.activeIndex];
+                    if (!self) return null;
+                    const pp = coop.self.ppByMonster[self.id] ?? {};
+                    return (
+                      <>
+                        {self.moveIds.map((id) => {
+                          const cur = pp[id] ?? 0;
+                          return (
+                            <PixelButton
+                              key={id}
+                              disabled={submitted || cur <= 0 || coop.self.out}
+                              onClick={() => void submit(`move:${id}`)}
+                            >
+                              <span>{MOVE_SPECS[id]?.name ?? id}</span>
+                              <span className="ml-1 text-[10px] opacity-70">PP {cur}/{getMoveMaxPP(id)}</span>
+                            </PixelButton>
+                          );
+                        })}
+                        {coop.self.party.map((m, idx) =>
+                          m.hp > 0 && idx !== coop.self.activeIndex ? (
+                            <PixelButton
+                              key={m.id}
+                              tone="muted"
+                              disabled={submitted || coop.self.out}
+                              onClick={() => void submit(`switch:${idx}`)}
+                            >
+                              换 <MonsterName m={m as any} />
+                            </PixelButton>
+                          ) : null,
+                        )}
+                      </>
+                    );
+                  })()
+                )}
               </div>
             ) : (
               <div className="text-center text-sm font-bold text-[color:var(--text)]">{coopResultText(coop)}</div>

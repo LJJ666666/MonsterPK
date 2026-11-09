@@ -1,14 +1,10 @@
 /**
- * P4-2e 共斗 Boss / 副本 端到端验证（需后端 :3001 已运行）。
+ * P4-2e / F16 共斗接口边界与房间意图 端到端验证（需后端 :3001 已运行）。
  * 运行：cd backend && npm run e2e:p42e
  *
- * 分区：
- *  A 接口边界   未登录 401 / 伪上报 400 / 未知 Boss 400 / 无队伍 404 / 无 WS 409
- *  B 建房加入   create → join → coop 态生成 → 双端视图裁剪 → quota hold
- *  C 并发意图   Promise.all 双方同时提交 → 只推进一回合 → Boss HP 与快照一致
- *  D 意图边界   flee 明确 400 / 伪造技能降级不行动
- *  E 结算       打到 win → settled → 双方 revision 各 +1 / 不发奖励（金钱不变）
- *  F 越权放弃   非成员读 404 / 满员 join 409 / 非成员意图 403 / abandon release 不扣次数
+ * F16 起共斗升级为 6 房副本，本套件只管「接口边界 / 建房加入 / 六房视图裁剪 /
+ * 并发意图只推进一回合 / 意图边界 / 越权与放弃」；
+ * 全清通关、发奖、最低贡献门槛、每日上限由 `e2e:f16` 覆盖，避免重复断言。
  *
  * 输出逐例 [PASS]/[FAIL]，末尾 E2E_P42E_OK；任一失败 exit 1。
  */
@@ -35,7 +31,7 @@ const post = (token, path, body = {}) => api(path, { method: 'POST', token, body
 const get = (token, path) => api(path, { token });
 const BOSS = 'boss_ember_behemoth';
 
-/** 强档：Lv.40 高攻高血，几回合内打倒占位 Boss。 */
+/** 强档：Lv.40 高攻高血，几回合内打倒副本低等级敌人。 */
 function strongSave(overrides = {}) {
   const base = validSave();
   return {
@@ -105,7 +101,7 @@ async function main() {
   await open(guest.token);
 
   const created1 = await post(host.token, '/api/coop/create', { slot: 1, bossId: BOSS });
-  suite.check('建房 200 forming / mode=coop / coop 态尚未生成 / quota held',
+  suite.check('建房 200 forming / mode=coop / 六房态尚未生成 / quota held',
     created1.status === 200 && created1.data?.room?.mode === 'coop'
     && created1.data.room.status === 'forming' && created1.data.room.coop === null
     && created1.data.room.quota?.state === 'held',
@@ -113,11 +109,13 @@ async function main() {
   const roomId = created1.data?.room?.roomId;
 
   const joined = await post(guest.token, `/api/coop/${roomId}/join`, { slot: 1 });
-  suite.check('加入后 active / coop 态生成 / turn=1 / Boss HP 为房间真值',
+  suite.check('加入后 active / 六房态生成 / turn=1 / total=6 / 全员在大厅',
     joined.status === 200 && joined.data?.room?.status === 'active'
     && !!joined.data?.room?.coop && joined.data.room.coop.turn === 1
     && joined.data.room.coop.finished === false
-    && joined.data.room.coop.boss.maxHp > 0,
+    && joined.data.room.coop.rooms.length === 6
+    && joined.data.room.coop.total === 6
+    && joined.data.room.coop.self.roomIndex === -1,
     JSON.stringify(joined.data?.room?.coop).slice(0, 260));
 
   const viewHost = await get(host.token, `/api/room/${roomId}`);
@@ -126,20 +124,19 @@ async function main() {
     !!viewHost.data?.room?.coop?.self?.party?.[0]?.moveIds
     && !!viewGuest.data?.room?.coop?.self?.party?.[0]?.moveIds
     && !('moveIds' in (viewHost.data?.room?.coop?.members?.[1]?.active ?? {})),
-    `host self=${!!viewHost.data?.room?.coop?.self?.party?.[0]?.moveIds} ally-leak=${'moveIds' in (viewHost.data?.room?.coop?.members?.[1]?.active ?? {})}`);
+    `host self=${!!viewHost.data?.room?.coop?.self?.party?.[0]?.moveIds}`);
 
-  // ═══ C. 并发意图（Boss HP 只减一次）═══
+  // ═══ C. 并发意图（只推进一回合 / 两间房各认领一次）═══
   console.log('\n—— C. 并发意图 ——');
-  const hpBefore = viewHost.data.room.coop.boss.hp;
-  const one = await post(host.token, `/api/room/${roomId}/action`, { intent: 'move:tackle', nonce: 'e1' });
+  const one = await post(host.token, `/api/room/${roomId}/action`, { intent: 'enter:0', nonce: 'e1' });
   suite.check('一方提交意图 200（未交齐不推进 turn=1）',
     one.status === 200 && one.data?.room?.coop?.turn === 1,
     `turn=${one.data?.room?.coop?.turn}`);
 
   // A/B 同时提交：withRoomLock 串行，全员交齐只 advanceTurn 一次。
   const [ra, rb] = await Promise.all([
-    post(guest.token, `/api/room/${roomId}/action`, { intent: 'move:tackle', nonce: 'e2' }),
-    post(guest.token, `/api/room/${roomId}/action`, { intent: 'move:tackle', nonce: 'e2' }),
+    post(guest.token, `/api/room/${roomId}/action`, { intent: 'enter:1', nonce: 'e2' }),
+    post(guest.token, `/api/room/${roomId}/action`, { intent: 'enter:1', nonce: 'e2' }),
   ]);
   const after = await get(host.token, `/api/room/${roomId}`);
   const coopAfter = after.data?.room?.coop;
@@ -147,13 +144,21 @@ async function main() {
     coopAfter?.turn === 2, `turn=${coopAfter?.turn} ra=${ra.status} rb=${rb.status}`);
   suite.check('重复 nonce 被拒 409 INTENT_REPLAY',
     rb.status === 409 && rb.data?.code === 'INTENT_REPLAY', `${rb.status} ${JSON.stringify(rb.data)}`);
-  suite.check('Boss HP 下降且 damage 记账来自服务端',
-    typeof coopAfter?.boss?.hp === 'number' && coopAfter.boss.hp < hpBefore
-    && coopAfter.members.reduce((n, m) => n + m.damage, 0) > 0,
-    `hp ${hpBefore}→${coopAfter?.boss?.hp}, dmg=${JSON.stringify(coopAfter?.members?.map((m) => m.damage))}`);
-  suite.check('POST 返回的快照与随后 GET 的 Boss HP 一致',
-    ra.data?.room?.coop?.boss?.hp === coopAfter?.boss?.hp || rb.data?.room?.coop?.boss?.hp === coopAfter?.boss?.hp,
-    `ra=${ra.data?.room?.coop?.boss?.hp} rb=${rb.data?.room?.coop?.boss?.hp} get=${coopAfter?.boss?.hp}`);
+  // F16 后 coopViewFor().rooms 只下发 state / occupantSeat / enemyPreviews 等视图字段，
+  // 房间内部 turn 不下发（原断言读 r.turn 恒为 undefined）。结算态由 e2e:f16 覆盖，
+  // 本套件按收敛口径只验「接口边界 + 建房视图 + 意图路由」。
+  suite.check('六房视图按 F16 契约下发（state / 占领者 / 每房 2 只敌人预览）',
+    coopAfter?.rooms?.length === 6
+    && coopAfter.rooms.every((r) => ['pending', 'fighting', 'cleared', 'defeated'].includes(r.state))
+    && coopAfter.rooms.every((r) => 'occupantSeat' in r
+      && Array.isArray(r.enemyPreviews) && r.enemyPreviews.length === 2),
+    `states=${JSON.stringify(coopAfter?.rooms?.map((r) => r.state))}`);
+  suite.check('贡献记账来自服务端 HP 差（不是客户端上报）',
+    coopAfter?.members?.reduce((n, m) => n + (m.contribution ?? 0), 0) > 0,
+    `contributions=${JSON.stringify(coopAfter?.members?.map((m) => m.contribution))}`);
+  suite.check('POST 返回的快照与随后 GET 的回合一致',
+    ra.data?.room?.coop?.turn === coopAfter?.turn || rb.data?.room?.coop?.turn === coopAfter?.turn,
+    `ra=${ra.data?.room?.coop?.turn} rb=${rb.data?.room?.coop?.turn} get=${coopAfter?.turn}`);
 
   // ═══ D. 意图边界 ═══
   console.log('\n—— D. 意图边界 ——');
@@ -161,57 +166,22 @@ async function main() {
   suite.check('共斗不支持 flee → 400 COOP_INTENT_INVALID',
     flee.status === 400 && flee.data?.code === 'COOP_INTENT_INVALID', `${flee.status} ${JSON.stringify(flee.data)}`);
 
-  const beforeFakeHp = coopAfter.boss.hp;
+  const beforeContrib = coopAfter.members.map((m) => m.contribution ?? 0);
   await post(host.token, `/api/room/${roomId}/action`, { intent: 'move:not_a_real_move', nonce: 'e4' });
   await post(guest.token, `/api/room/${roomId}/action`, { intent: 'move:not_a_real_move', nonce: 'e5' });
   const fakeView = await get(host.token, `/api/room/${roomId}`);
-  suite.check('伪造技能被服务端降级：不产生伤害记账、Boss HP 不虚减',
-    fakeView.data?.room?.coop?.members?.every((m) => m.damage === coopAfter.members[m.seat].damage)
-    && fakeView.data.room.coop.boss.hp <= beforeFakeHp,
-    `hp ${beforeFakeHp}→${fakeView.data?.room?.coop?.boss?.hp}`);
+  const afterContrib = fakeView.data?.room?.coop?.members?.map((m) => m.contribution ?? 0) ?? [];
+  suite.check('伪造技能被服务端降级：不产生新的伤害记账',
+    afterContrib.every((n, i) => n === beforeContrib[i]),
+    `before=${JSON.stringify(beforeContrib)} after=${JSON.stringify(afterContrib)}`);
 
-  // ═══ E. 结算（打到 Boss 倒下）═══
-  console.log('\n—— E. 结算 ——');
-  const r2 = await makeRoom('p42e_h2', 'p42e_g2');
-  const revHostBefore = await save.revisionOf(r2.host.token, 1);
-  const revGuestBefore = await save.revisionOf(r2.guest.token, 1);
-
-  let settled = null;
-  for (let i = 0; i < 12; i += 1) {
-    await post(r2.host.token, `/api/room/${r2.roomId}/action`, { intent: 'move:tackle', nonce: `h${i}` });
-    const last = await post(r2.guest.token, `/api/room/${r2.roomId}/action`, { intent: 'move:tackle', nonce: `g${i}` });
-    if (last.data?.room?.status === 'settled' || last.data?.room?.coop?.finished) {
-      settled = last.data.room;
-      break;
-    }
-  }
-  suite.check('Boss 倒下后房间 settled 且 result=win',
-    !!settled && settled.status === 'settled' && settled.coop?.result === 'win',
-    JSON.stringify(settled?.coop).slice(0, 220));
-
-  await new Promise((r) => setTimeout(r, 900));
-  const sHost = await save.session(r2.host.token, 1);
-  const sGuest = await save.session(r2.guest.token, 1);
-  suite.check('结算后双方 revision 各 +1（各写一次、不互相覆盖）',
-    (sHost.data?.revision ?? 0) > (revHostBefore ?? 0)
-    && (sGuest.data?.revision ?? 0) > (revGuestBefore ?? 0),
-    `host ${revHostBefore}→${sHost.data?.revision}, guest ${revGuestBefore}→${sGuest.data?.revision}`);
-
-  const rawHost = await get(r2.host.token, '/api/save?slot=1');
-  let moneyAfter = null;
-  try { moneyAfter = JSON.parse(JSON.parse(rawHost.data.data).raw ?? rawHost.data.data).money; } catch {
-    try { moneyAfter = JSON.parse(rawHost.data.data).money; } catch {}
-  }
-  suite.check('共斗结算不发奖励（金钱仍为建档值 5000）',
-    moneyAfter === 5000, `money=${moneyAfter} status=${rawHost.status}`);
-
-  // ═══ F. 越权与放弃 ═══
-  console.log('\n—— F. 越权与放弃 ——');
+  // ═══ E. 越权与放弃 ═══
+  console.log('\n—— E. 越权与放弃 ——');
   const outsider = await mk('p42e_o');
   const outsiderRead = await get(outsider.token, `/api/room/${roomId}`);
   suite.check('非成员读房间 404', outsiderRead.status === 404, `status=${outsiderRead.status}`);
 
-  const outsiderWs = await open(outsider.token);
+  await open(outsider.token);
   const full = await post(outsider.token, `/api/coop/${roomId}/join`, { slot: 1 });
   suite.check('满员房间 join 被拒（ROOM_CLOSED / ROOM_FULL）',
     full.status === 409 && (full.data?.code === 'ROOM_FULL' || full.data?.code === 'ROOM_CLOSED'),

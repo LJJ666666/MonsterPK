@@ -167,7 +167,7 @@ checks = [
     ("任务表 P2-2 ✅ 与 24/24 已回填", "P2-2 ✅" in task_text and "24/24" in task_text),
     ("任务表 P3-1a / P3-1b ✅ 与 39/39 已回填",
      "P3-1a" in task_text and "P3-1b" in task_text and "39/39" in task_text),
-    ("任务表下一步指向 F16 → F04 且无过期待开工",
+    ("任务表下一步指向 F04 且无过期待开工",
      "下一步建议" in task_text and "P4-3" in task_text and "F16" in task_text
      and "F04" in task_text and "下一步 P4-2c" not in task_text
      and "d/e 待开工" not in task_text and "下一步待杰哥排期" not in task_text),
@@ -452,14 +452,33 @@ checks = [
     ("F15 零产出冻结 / P4-3 C2C 不开放口径固化",
      "仅供娱乐" in future_text and "阶段冻结" in future_text
      and "不打算开放交易系统" in memory_text and "C2C" in handoff_text),
-    ("F16 共斗 6 房副本设计定稿（规范 §30）",
+    ("F16 六房副本已实现（规范 §30 + 台账 + 任务表）",
      "## 30." in spec_text and "6 个房间" in spec_text
      and "最低贡献门槛" in spec_text and "pending" in spec_text
-     and "本轮未写实现代码" in future_text),
+     and "✅ 已实现" in spec_text and "✅ 已偿还 2026-11-09" in future_text
+     and "E2E_F16_OK" in task_text),
+    ("verify 已注册 e2e:f16 与 smoke:f16（STAGES + GROUPS）",
+     "e2e:f16" in verify_text and "smoke:f16" in verify_text
+     and '"e2e:f16"' in pkg_text and "ui_smoke_f16.mjs" in verify_text),
+    ("F16 关键文件齐全",
+     all((ROOT / p).exists() for p in [
+         "backend/src/modules/coopReward.ts",
+         "backend/tests/e2e_f16.mjs",
+         "scripts/ui_smoke_f16.mjs",
+         "backend/prisma/migrations/20261109181400_add_coop_reward_grant/migration.sql",
+     ])),
+    ("F16 发奖表与幂等键已落 schema",
+     "model CoopRewardGrant" in text(ROOT / "backend" / "prisma" / "schema.prisma")
+     and "grantKey" in text(ROOT / "backend" / "prisma" / "schema.prisma")),
+    ("测试账号清理前缀含 f16_",
+     "f16_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")),
+    ("每日日志记 F16 实现", "F16 六房副本" in log_text and "E2E_F16_OK" in log_text),
+    ("bug_log 含 §37 等级上界与视图字段",
+     "## 37." in bug_text and "levelMax + 6" in bug_text and "occupantSeat" in bug_text),
     ("verify 已注册 e2e:f14（STAGES + GROUPS）",
      "e2e:f14" in verify_text and '"e2e:f14"' in pkg_text
      and "前置清理" in verify_text),
-    ("HANDOFF / MEMORY 记 F14 已偿还与 F16 待实现",
+    ("HANDOFF / MEMORY 记 F14 已偿还与 F16 已实现",
      "F14" in handoff_text and "F16" in handoff_text
      and "F14" in memory_text and "F16" in memory_text),
     ("bug_log 含 §36 同锁重入死锁",

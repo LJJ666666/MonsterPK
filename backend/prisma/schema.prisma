@@ -160,3 +160,27 @@ model BossRewardGrant {
   @@index([userId, periodKey])
   @@index([bossId, periodKey])
 }
+
+// F16 共斗六房副本通关奖励发放记录（2026-11-09）。
+// 唯一键 (roomId, userId, slot) 保证「同一场副本重复结算不双花」；
+// grantKey = coop:clear:<roomId>:<userId>:<slot>，与 F02/F14 同一占位范式。
+// 每日通关上限以本表按 (userId, slot, periodKey) 计数为真值（重启不重置），
+// 内存 quota 只记在途 hold。发奖由服务端在副本结算时写档（commitState），
+// 客户端没有任何领取入口；伪上报房间状态 / 贡献 / 奖励一律 400。
+// 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
+model CoopRewardGrant {
+  id           Int      @id @default(autoincrement())
+  roomId       String
+  userId       String
+  slot         Int
+  periodKey    String
+  // 该成员在本场副本的累计有效伤害（最低贡献门槛判定依据，服务端真值）
+  contribution Int      @default(0)
+  grantKey     String   @unique
+  reward       String
+  revision     Int      @default(0)
+  grantedAt    DateTime @default(now())
+
+  @@unique([roomId, userId, slot])
+  @@index([userId, slot, periodKey])
+}

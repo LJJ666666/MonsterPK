@@ -187,11 +187,23 @@ async function main() {
   });
   suite.check('空存档字符串 → 400（zod 拦截）', emptyData.status === 400, `status=${emptyData.status}`);
 
-  const hugeBody = await api('/api/save?slot=1', {
-    method: 'PUT', token: authAcc.token,
-    bodyText: JSON.stringify({ data: 'x'.repeat(2 * 1024 * 1024) }),
-  });
-  suite.check('2MB 请求体 → 413（bodyLimit 兜底）', hugeBody.status === 413, `status=${hugeBody.status}`);
+  // Fastify bodyLimit 会在客户端还没写完 2MB body 时就返回 413 并关闭 socket，
+  // undici 侧偶发抛 ECONNRESET 而不是拿到 413（竞态，见 bug_log §37.3）。
+  // 两种结果的防护语义相同：服务端没有收下超大请求。
+  let hugeStatus = 0;
+  let hugeErr = '';
+  try {
+    const hugeBody = await api('/api/save?slot=1', {
+      method: 'PUT', token: authAcc.token,
+      bodyText: JSON.stringify({ data: 'x'.repeat(2 * 1024 * 1024) }),
+    });
+    hugeStatus = hugeBody.status;
+  } catch (e) {
+    hugeErr = String(e?.cause?.code ?? e?.message ?? e);
+  }
+  suite.check('2MB 请求体 → 413 或连接被提前重置（bodyLimit 兜底）',
+    hugeStatus === 413 || /ECONNRESET|fetch failed/i.test(hugeErr),
+    `status=${hugeStatus} err=${hugeErr}`);
 
   const afterBad = await save.put(authAcc.token, validSave());
   suite.check('连打 11 次非法请求后仍可正常写入（未误封）', afterBad.status === 200, `status=${afterBad.status}`);
@@ -463,8 +475,13 @@ async function main() {
   suite.check('正常开局：敌方由服务端生成 + 返回 battleId',
     started.status === 200 && typeof st?.battleId === 'string' && !!st?.enemy?.specId && Array.isArray(st?.party),
     `status=${started.status} enemy=${st?.enemy?.specId}`);
-  suite.check('敌方等级落在服务端区间 [2,6]（含精英/稀有浮动）',
-    st?.enemy?.level >= 2 && st?.enemy?.level <= 6, `level=${st?.enemy?.level}`);
+  // 上界 = levelMax + 6：elite(+2) 与 rare(+3) 是两次独立 roll，可同时命中，
+  // 再加 0~1 抖动。原先写死 <= 6 漏了叠加分支（约 1% 概率偶发红），见 bug_log §37。
+  const lvMin = Number(st?.levelMin ?? 2);
+  const lvMax = Number(st?.levelMax ?? 2);
+  suite.check('敌方等级落在服务端区间（含精英/稀有叠加与抖动）',
+    Number.isInteger(st?.enemy?.level) && st.enemy.level >= lvMin && st.enemy.level <= lvMax + 6,
+    `level=${st?.enemy?.level} range=[${lvMin},${lvMax}+6]`);
   suite.check('开局返回 PP 表（服务端持有真值）',
     st?.ppByMonster && Object.keys(st.ppByMonster).length > 0, JSON.stringify(st?.ppByMonster));
 

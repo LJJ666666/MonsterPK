@@ -119,7 +119,7 @@ export class RoomRegistry {
   }
 
   /**
-   * P4-2e：把共斗态挂到房间上（全员 join 完成后由路由层调用）。
+   * P4-2e / F16：把共斗（六房副本）态挂到房间上（全员 join 完成后由路由层调用）。
    * 只接受「房间已 active、mode=coop 且尚无 coop 态」；挂上后 bump 一次让客户端拿到新快照。
    */
   attachCoop(roomId: string, coop: CoopState, now: number): RoomResult<RoomState> {
@@ -179,7 +179,7 @@ export class RoomRegistry {
       updatedAt: room.updatedAt,
       // P4-2d：按接收者裁剪 1v1 战斗视图（仅 pvp 房间有值）。
       pvp: room.pvp ? pvpViewFor(room.pvp, viewerUserId) : null,
-      // P4-2e：按接收者裁剪共斗视图（仅 coop 房间有值）。
+      // F16：按接收者裁剪六房副本视图（仅 coop 房间有值）。
       coop: room.coop ? coopViewFor(room.coop, viewerUserId) : null,
     };
   }
@@ -463,7 +463,7 @@ export class RoomRegistry {
         }
       }
     }
-    // P4-2e：共斗按 N 人意图排序结算一回合（Boss HP 是房间真值，一次推进只减一次）。
+    // F16：共斗一次推进内遍历所有 fighting 房间各结算一回合（每房 HP 是房间真值，只减一次）。
     if (room.coop && !room.coop.finished) {
       const rng = Math.random;
       const actions = room.turnIntents
@@ -525,7 +525,7 @@ export class RoomRegistry {
     report: TickReport,
   ): void {
     let intent: string | null;
-    // P4-2e：共斗代放生成合法战斗意图；出局座位用 'skip' 占位（解析时被过滤，回合仍可推进）。
+    // F16：共斗代放按座位所在房间生成合法意图（大厅 → enter:<i>，房内 → move:/switch:，出局 → idle）。
     if (room.coop && !room.coop.finished) {
       const picked = pickCoopIntent(room.coop, seat.seat, rng);
       intent = picked === null ? 'skip' : encodeCoopIntent(picked);

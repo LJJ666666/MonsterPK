@@ -32,7 +32,8 @@
     "clean:e2e": "node scripts/clean-test-data.mjs",
     "rank:settle": "tsx scripts/settle-ranks.ts",
     "e2e:f01f02": "node tests/e2e_f01f02.mjs",
-    "e2e:f14": "node tests/e2e_f14.mjs"
+    "e2e:f14": "node tests/e2e_f14.mjs",
+    "e2e:f16": "node tests/e2e_f16.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

@@ -973,3 +973,54 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 ### 36.4 结论
 三个坑全部只改**测试侧 / 内核锁声明**，**产品逻辑零改动**。修复后 `e2e:p42c` **44/44**、
 `e2e:f14` **46/46** 各连跑 3 轮稳定；后端单测 **364/364**。
+
+---
+
+## 37. F16 收官 strict 的两个红灯：等级上界漏算叠加 / 视图字段已下线（2026-11-09）
+
+### 37.1 `elite` 与 `rare` 是两次独立 roll，可同时命中
+- **现象**：F16 实现后的 `npm run verify -- --strict` 报 `e2e:hardening` **114/115**，
+  唯一红灯「敌方等级落在服务端区间 [2,6]」给出 `level=8`；单独重跑该套件 3 次
+  又全部 **115/115**。这是低概率偶发，不是 F16 引入的功能回归。
+- **根因**：`game/battle.ts::generateEncounter()` 里
+  `elite = roll(0.12, rng)` 与 `rare = roll(0.08, rng)` 是**两次独立 RNG 调用**，
+  可以同时为真；等级 = `基础 level + (elite?2:0) + (rare?3:0) + (rng()<0.5?0:1)`，
+  最后 `clamp(1, 30)`。基础区间由 `battleView.levelMin/levelMax` 下发
+  （harness 默认 2..2），因此**真实上界 = `levelMax + 6 = 8`**。
+  §20 当时把区间钉成 `[2,6]`，只算了「二选一」，漏掉叠加分支
+  （概率 0.12 × 0.08 ≈ 1%，所以长期全绿、偶尔炸一次）。
+- **修法（只改测试侧，产品公式零改动）**：`e2e_hardening.mjs` 与
+  `e2e_p31_battle.mjs` 都改为从响应里的 `levelMin/levelMax` 推导，断言
+  `level >= levelMin && level <= levelMax + 6`，不再写死 6。
+  「稀有 + 精英可叠加」属规则口径，按 `HANDOFF.md` 不自行调整，留杰哥拍板。
+- **教训**：涉及服务端 RNG 的区间断言，上界要按「所有加成能否同时命中」算，
+  并且**必须重复跑**；单次全绿不代表覆盖低概率分支（与 §17 同类）。
+
+### 37.2 F16 重构后 P4-2e E2E 读了已下线的视图字段
+- **现象**：`e2e:p42e` 稳定 **19/20**，红灯「两人各认领一间房…（房间 turn=1）」
+  报 `turns=[null,null,null,null,null,null]`。
+- **根因**：F16 把共斗重构为六房副本后，`coopViewFor().rooms` 视图只下发
+  `index / state / occupantSeat / clearedBy / defeatedBySeat / contributions /
+  enemyPreviews`，**房间内部 `turn` 不下发**；断言读 `r.turn` 恒为 `undefined`
+  （`JSON.stringify` 里变 null）。属断言没跟上契约，不是产品缺陷。
+- **修法**：按「`e2e:p42e` 只验接口边界 + 建房视图 + 意图路由」的收敛口径，
+  改断言为「6 间房 `state` 合法 / 有 `occupantSeat` / 每房 2 只敌人预览」；
+  六房结算与发奖交给 `e2e:f16` 覆盖，不重复断言、不降低覆盖。
+- **验收**：`e2e:p42e` **20/20**、`e2e:p31` 连跑 3 次 `E2E_P31_OK`、
+  `e2e:hardening` 连跑 3 次 **115/115**。
+
+### 37.3 2MB 请求体用例的 `ECONNRESET` 竞态
+- **现象**：再次全量 `verify --strict` 时 `e2e:hardening` **不是断言失败**，而是
+  `E2E_HARDENING_ABORT TypeError: fetch failed` / `read ECONNRESET`
+  （`harness.mjs:135` ← `e2e_hardening.mjs:190`），2.7s 提前退出，
+  汇总指标被解析成 `}`。单独重跑该套件 3 次均 **115/115**，属偶发。
+- **根因**：该用例向 `PUT /api/save` 发 2MB body 验证 Fastify `bodyLimit` 返回 413。
+  服务端在**客户端还没写完 body 时**就判定超限并关闭 socket，undici 会以
+  `ECONNRESET` 抛出而不是拿到 413 响应；全量验收跑到第 17 组时连接池状态与
+  单跑不同，触发概率上升。**不是后端崩溃**（后续 9 组冒烟与文档自检仍全绿）。
+- **修法（只改测试侧）**：把该请求包 try/catch，`413` 与
+  `ECONNRESET / fetch failed` 都算通过 —— 两者防护语义相同：
+  **服务端没有收下超大请求**。紧随其后的「连打 11 次非法请求后仍可正常写入
+  （未误封）」继续钉住账号可用性，断言强度不降低。
+- **教训**：测「服务端提前拒收大 body」这类用例，不能假设一定能读到 HTTP 状态码；
+  断言要覆盖「连接被提前重置」这一合法结果，否则全量验收会偶发假红。

@@ -131,7 +131,7 @@ function maybeSettlePvp(roomId: string): void {
 }
 
 /**
- * P4-2e：共斗分出胜负（coop 结束 → settled）时，触发写各成员档。
+ * F16：副本分出胜负（coop 结束 → settled）时，触发写各成员档与通关奖励。
  * 与 pvp 同款动态 import 规避 room ↔ coop 循环依赖；幂等靠 room.coopSettled。
  */
 function maybeSettleCoop(roomId: string): void {
@@ -230,7 +230,7 @@ export async function applyRoomIntent(params: {
     // 不靠「代放补齐」静默吞掉（房间内核 autoSubmit 的 'skip' 占位不走这里）。
     const cur = rooms.get(params.roomId);
     if (cur?.mode === 'coop' && !parseCoopIntent(params.intent)) {
-      return { ok: false, code: 'COOP_INTENT_INVALID', reason: '共斗意图不合法（只支持 move: / switch:）' };
+      return { ok: false, code: 'COOP_INTENT_INVALID', reason: '共斗意图不合法（只支持 enter: / move: / switch: / idle）' };
     }
     const res = rooms.submitIntent({
       roomId: params.roomId,

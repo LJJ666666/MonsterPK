@@ -124,30 +124,55 @@ export type CoopPublicMonster = {
   alive: boolean;
 };
 
-/** P4-2e：共斗只读视图（服务端按接收者裁剪，Boss HP 是房间真值）。 */
+/** F16：共斗六房副本中一间的只读状态（房间状态对全体可见，敌人 HP 是房间真值）。 */
+export type CoopRoomView = {
+  index: number;
+  state: "pending" | "fighting" | "cleared" | "defeated";
+  occupantSeat: number | null;
+  clearedBy: number | null;
+  defeatedBySeat: number | null;
+  contributions: Record<number, number>;
+  enemyPreviews: {
+    specId: string;
+    name: string;
+    level: number;
+    hp: number;
+    maxHp: number;
+    status: string;
+    isShiny: boolean;
+    alive: boolean;
+  }[];
+};
+
+/** F16：共斗六房副本只读视图（服务端按接收者裁剪，队友不下发完整队伍 / 技能 PP）。 */
 export type CoopView = {
   bossId: string;
   bossName: string;
-  boss: CoopPublicMonster;
+  theme: string;
   turn: number;
   finished: boolean;
   result: "win" | "lose" | null;
   log: string[];
+  rooms: CoopRoomView[];
+  cleared: number;
+  total: number;
   self: {
     userId: string;
     seat: number;
+    roomIndex: number;
     activeIndex: number;
     party: PvpMonster[];
     ppByMonster: Record<string, Record<string, number>>;
-    damage: number;
+    contribution: number;
     out: boolean;
   };
   members: {
     seat: number;
     userId: string;
     self: boolean;
-    damage: number;
+    roomIndex: number;
     out: boolean;
+    contribution: number;
     active: CoopPublicMonster;
   }[];
 };

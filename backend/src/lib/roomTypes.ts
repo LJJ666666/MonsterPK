@@ -118,7 +118,7 @@ export type RoomState = {
   pvp?: PvpState | null;
   /** P4-2d：pvp 分出胜负后是否已写回双方档（防重复结算）。 */
   pvpSettled?: boolean;
-  /** P4-2e：共斗战斗态（仅 coop 模式有值）。Boss HP 是全房唯一真值。 */
+  /** P4-2e / F16：共斗六房副本态（仅 coop 模式有值）。每房敌人 HP 是房间真值。 */
   coop?: CoopState | null;
   /** P4-2e：共斗结束后是否已写回各成员档（防重复结算）。 */
   coopSettled?: boolean;

@@ -38,6 +38,7 @@
 - 清理/账号：`cd backend && npm run clean:e2e`（`--dry` 预览；只删测试前缀、永不删 admin）；`npm run admin -- grant|revoke|ban|unban|list|audit <名>`。⚠️ 不授权用测试菜单会被封号，绝不写死用户名。
 - **项目路径随机器而异**：文档与脚本一律用相对路径 / 动态 ROOT（`git rev-parse --show-toplevel`），不写死盘符或用户名；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`（换 JWT_SECRET）→ 前后端各 `npm install` → **`prisma migrate deploy`**（给已有库加列/加表，漏了必 `P2022`，§34）→ `generate` → `npm run dev`；改 schema 前停 :3001（§12）。`.env`/`dev.db` gitignore。**git 走代理报 502 → `git config --local http.version HTTP/1.1`**（§33）；探活加 `curl --noproxy '*'` 防假 502。
 - **Git 流程（11-07 杰哥定）**：验收通过 → 建 `rollback-YYYYMMDD-<阶段>` tag 推远端 → `git add -A` 确认无 `.env`/`*.db` → commit（中文分条、末尾写数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净。
+- **推送 502 别纠结（11-09 杰哥定）**：网络波动报 `CONNECT tunnel failed, response 502` 属常态，**直接多试几次**（本次第 1 次重试即成功）；不做分层诊断、不绕道改协议/换通道/走 API。未推上去时如实写「本地 ahead N、远端仍 <hash>」，恢复后重试并核对两端 HEAD。
 
 ## 5. 后端架构与风控现状（独立 `backend/`）
 - 栈：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + SQLite + bcryptjs + zod + tsx。
@@ -73,5 +74,5 @@
 - **P4-2e ✅（2026-11-08）**：共斗 Boss/副本（见 §5）。**P4-2 五阶段全部完成**。证据：`verify` **29/29**、后端 **336**/前端 **122**、`e2e:p42e` **22/22**、`ui_smoke_p42e` **16/16**；`SCHEMA_VERSION` 未动、未加迁移（§27/§32）。
 - **F01/F02 ✅（11-09）**：`e2e:f01f02` **31/31**、`ui_smoke_f01f02` **17/17**、后端 **350**/前端 **129** 单测；`SCHEMA_VERSION` 未动、新增一条迁移（§28/§34）。
 - **下一步待定**：P4-3 交易/赠送，或偿还台账 **F04**（账号等级）、**F09/F14**（Boss/共斗产出规则）、**F15**（1v1 奖励排位）、**F16**（共斗榜）。野怪/房间/锁单进程内存态，**P5-1 前统一迁共享存储**。契约 `P4-2_多人玩法排期_2026-11-07.md`（已走完）。
-- **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端。`dev.db`/`.env` gitignore。
+- **Git**：`fe159eb`→`2f2c8b7`→…→`d73624e`(P4-2b)→`c837f33`(P4-2c) 已推送；`rollback-20261107-pre/post-p41` 与 pre/post `p42-plan`/`p42a`/`p42b`/`p42c` 成对在远端；**11-09 F01/F02 `5b5cc5e` + `292fba2` 与 `rollback-20261109-pre/post-f01f02` 均已推送，远端 HEAD `292fba2`**。`dev.db`/`.env` gitignore。
 - **交接**：`HANDOFF.md` + `check_home_env.py`/`doc_check.py`；11-07 已重建并 `ENV_CHECK_OK`。

@@ -6,7 +6,7 @@
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
 - 进度：P0~P4-2e 全 ✅。台账 F01/F02/F12/F14/F16/F04/F17 已偿还；F15 1v1 零产出冻结；F17 单档化（`SCHEMA_VERSION` 10→11，`Save.userId @unique`）。
-- F18：a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落+3×经验/5×金钱、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** / d 剧情骨架 ✅（占位文案债务，政策先支撑后补）。P4-3 交易/赠送阶段冻结。
+- F18：a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落+3×经验/5×金钱、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** / **d 剧情 ✅（2026-11-10：21 beat 正式文案——7 到达 intro + 7 演武堂贺词 + 7 地图首领讨伐胜利 `on_mapboss_clear`；占位债务已偿）**。P4-3 交易/赠送阶段冻结。
 
 ## 2. 技术栈 / 入口 / 测试
 - React18+TS+Vite6+Tailwind3+zustand5+react-router7；路由 `/` `/camp` `/arena` `/auth`。内容唯一源 `src/game/data.ts`；全局状态 `src/stores/useGameStore.ts`（单档，`SCHEMA_VERSION`=11，migrate 1→11）；**BattleState 不进存档**。

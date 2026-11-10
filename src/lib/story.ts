@@ -8,7 +8,7 @@
 //  - on_gym_clear：F18-b 胜馆主后调用返回的 fire(getGymClearBeat(loc.id)) 显式触发。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGameStore } from "@/stores/useGameStore";
-import { getArrivalBeat, getGymClearBeat, type StoryBeat } from "@/game/story";
+import { getArrivalBeat, getGymClearBeat, getMapBossClearBeat, type StoryBeat } from "@/game/story";
 import type { LocationId } from "@/game/types";
 
 /** 同会话已播放过的 beat id，避免重复触发。模块级 = 不落档、重载即清。 */
@@ -45,4 +45,9 @@ export function useStoryTriggers() {
 /** F18-b 便捷入口：胜馆主后直接 fire 对应贺词 beat（届时在演武堂结算成功处调用）。 */
 export function fireGymClearBeat(locationId: LocationId, fire: (b: StoryBeat | null) => void) {
   fire(getGymClearBeat(locationId));
+}
+
+/** F18-c 便捷入口：讨伐地图首领胜利后直接 fire 对应贺词 beat（在 Arena 胜首领处调用）。 */
+export function fireMapBossClearBeat(mapBossId: string, fire: (b: StoryBeat | null) => void) {
+  fire(getMapBossClearBeat(mapBossId));
 }

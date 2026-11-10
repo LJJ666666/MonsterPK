@@ -10,7 +10,7 @@ import { requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 import {
   useWildList, wildStatusText, SHARED_WILD_AREA_ID,
 } from "@/lib/wild";
-import { useStoryTriggers, fireGymClearBeat } from "@/lib/story";
+import { useStoryTriggers, fireGymClearBeat, fireMapBossClearBeat } from "@/lib/story";
 import type { LocationId } from "@/game/types";
 
 import TypeChartModal from "@/components/TypeChartModal";
@@ -56,6 +56,14 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
       fireGymClearBeat(battle.gymId as LocationId, fire);
     }
   }, [battle?.finished, battle?.result, battle?.gymId, fire]);
+
+  // F18-c：地图首领胜利（enemy_fainted）时触发对应首领的贺词弹窗。
+  // 与演武堂同机制：firedSession 去重，逃跑 / 全灭不触发。
+  useEffect(() => {
+    if (battle?.finished && battle.result === "enemy_fainted" && battle.mapBossId) {
+      fireMapBossClearBeat(battle.mapBossId, fire);
+    }
+  }, [battle?.finished, battle?.result, battle?.mapBossId, fire]);
 
   const [playerHit, setPlayerHit] = useState(false);
   const [enemyHit, setEnemyHit] = useState(false);

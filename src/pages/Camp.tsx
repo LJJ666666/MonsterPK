@@ -16,6 +16,8 @@ import BadgeModal from "@/components/BadgeModal";
 import BossBoardModal from "@/components/BossBoardModal";
 import PvpModal from "@/components/PvpModal";
 import CoopModal from "@/components/CoopModal";
+import StoryModal from "@/components/StoryModal";
+import { useStoryTriggers } from "@/lib/story";
 
 import { MonsterName } from "@/components/MonsterName";
 
@@ -157,6 +159,10 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [showPvp, setShowPvp] = useState(false);
   const [showCoop, setShowCoop] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
+
+  // F18-d 剧情薄触发器：监听 locationId 变化自动播放到达 intro；
+  // fire 供 F18-b 胜馆主后显式触发演武堂贺词（getGymClearBeat）。
+  const { activeBeat, dismiss, fire } = useStoryTriggers();
   const [dexSelectedSpecId, setDexSelectedSpecId] = useState<string | null>(null);
   const [dexSearchQuery, setDexSearchQuery] = useState("");
   /** P3-2：服务端拒绝写操作时的提示（治疗/道具/进化/队伍整理都可能是 400）。 */
@@ -1132,6 +1138,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       {showBadge && <BadgeModal onClose={() => setShowBadge(false)} />}
       {showPvp && <PvpModal onClose={() => setShowPvp(false)} />}
       {showCoop && <CoopModal onClose={() => setShowCoop(false)} />}
+      {activeBeat && <StoryModal beat={activeBeat} onClose={dismiss} />}
       {showBoss && (
         <BossBoardModal
           onClose={() => setShowBoss(false)}

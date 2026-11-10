@@ -2092,7 +2092,17 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
 - Boss 按区域归属 + `unlockAreaId` 判定；与 §25 / §30 的 Boss 讨伐 / 共斗结算纪律保持一致，
   不发奖励、禁捕获、逃跑不上榜等口径延续。
 
-### 33.5 F18-d 剧情（待开工）
+### 33.5 F18-d 剧情（2026-11-10 骨架已实现）
 
-- 轻量对话 + 触发播片，**不持久化**（不新增存档字段、不动 `SCHEMA_VERSION`）。
-- 触发条件与播片资源由内容表或静态配置驱动，跑完即释放，状态不入档。
+- 轻量对话 + 触发播片，**不持久化**（不新增存档字段、不动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`）。
+- 触发条件与播片资源由内容表驱动，跑完即释放，状态不入档（同会话模块级 `Set` 去重，重载即清）。
+- **实现记录（2026-11-10）**：
+  - 内容模块 `src/game/story.ts`：`STORY_BEATS` 内容表 + 纯函数 `getArrivalBeat(locationId)` / `getGymClearBeat(locationId)`；
+    现状 14 个 beat（7 城到达 intro + 7 城演武堂贺词），**全部 `placeholder:true` 占位文案**（债务，见技术债台账 F18-d）。
+  - 薄触发器 `src/lib/story.ts`：`useStoryTriggers()` 监听 `save.locationId` 变化自动播到达 intro；
+    返回 `fire(beat)` 供 F18-b 胜馆主后显式触发演武堂贺词（`fireGymClearBeat`）。
+  - 弹窗 `src/components/StoryModal.tsx`：底部卡片、逐行推进、占位 beat 显式标注「（占位·待补全）」、播片位预留。
+  - 接入 `src/pages/Camp.tsx`：`useStoryTriggers()` + `<StoryModal>`；`on_gym_clear` 由 F18-b 在演武堂结算成功处调用 `fire`。
+  - 单测 `src/game/story.test.ts` **3/3**。
+- **债务**：真剧情文案未写，仅占位支撑开发；补全时把对应 beat `placeholder` 置 false 并替换 `lines`，**无需改触发器/弹窗**。
+- **杰哥 11-10 政策**：后续剧情向内容一律「先支撑（Schema + 薄触发器 + 占位对话）后补」，不影响其他开发。

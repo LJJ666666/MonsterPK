@@ -76,6 +76,8 @@ const STAGES = [
   { id: 'e2e:f18b', name: 'E2E 演武堂挑战（F18-b）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18b'], need: 'backend', timeout: 300_000 },
   // F18-c：地图首领（不上榜 + 每日次数上限 + 解锁门槛 + 胜发掉落 / 逃跑不发奖）。
   { id: 'e2e:f18c', name: 'E2E 地图首领（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c'], need: 'backend', timeout: 300_000 },
+  // F18-c 防御性：伪造/越权/顶号/超上限/跨用户/幂等/放弃泄漏回归。
+  { id: 'e2e:f18c_security', name: 'E2E 地图首领防御性越权（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c_security'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -96,7 +98,7 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04'],
   docs: ['docs:doc', 'docs:memory'],
 };

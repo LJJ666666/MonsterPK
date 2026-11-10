@@ -526,8 +526,10 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const state = battles.get(userId, parsed.data.battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
     battles.drop(userId);
-    // P4-2c：放弃 Boss 战 = 不扣次数（release 在途名额），也不写伤害事件。
-    if (state.bossId && state.bossQuotaKey) bossQuota.release(state.bossQuotaKey);
+    // P4-2c / F18-c：放弃 Boss / 地图首领战 = 不扣次数（release 在途名额），也不写伤害事件。
+    // 按 quotaKey 释放即可，boss 与 mapBoss 共用 bossQuota；mapBoss 战 state 只有 mapBossId 没有 bossId，
+    // 原 `state.bossId &&` 守卫会让 mapBoss 战的在途名额泄漏（每天白丢次数），故去掉该守卫。
+    if (state.bossQuotaKey) bossQuota.release(state.bossQuotaKey);
     // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。
     const released = wilds.release(parsed.data.battleId, Date.now());
     for (const areaId of released) {

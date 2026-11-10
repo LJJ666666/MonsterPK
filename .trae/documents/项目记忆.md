@@ -5,8 +5,8 @@
 - 浏览器+Capacitor/Android 抓怪回合制 RPG（`com.monster.game`）；11-03 起自建 Node+TS 后端，11-04 强制登录。北极星：服务端权威+实时多人同玩，客户端只发意图、收状态、渲染；本地存档过渡态，P5 去除。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e 全 ✅。台账 F01/F02/F12/F14/F16/F04/F17 已偿还；F15 1v1 零产出冻结；F17 单档化（`SCHEMA_VERSION` 10→11，`Save.userId @unique`）。
-- F18：a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落+3×经验/5×金钱、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** / **d 剧情 ✅（2026-11-10：21 beat 正式文案——7 到达 intro + 7 演武堂贺词 + 7 地图首领讨伐胜利 `on_mapboss_clear`；占位债务已偿）**。P4-3 交易/赠送阶段冻结。
+- 进度：P0~P4-2e 全 ✅。台账 F01/F02/F12/F14/F16/F04/F17 已偿还；F15 1v1 零产出冻结；F17 单档化已实现并偿还（`SCHEMA_VERSION` 10→11，`Save.userId @unique`）。
+- F18-a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落+3×经验/5×金钱、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** + **防御性 E2E `e2e_f18c_security.mjs`（35 项全绿，2026-11-11）**；同日修 abandon 名额泄漏（原 `battle.ts` 释放守卫漏放 mapBoss 在途名额，改 `if (state.bossQuotaKey)` 与 `realtime.ts:174` 口径一致） / **d 剧情 ✅（2026-11-10：21 beat 正式文案——7 到达 intro + 7 演武堂贺词 + 7 地图首领讨伐胜利 `on_mapboss_clear`；占位债务已偿）**。P4-3 交易/赠送阶段冻结。
 
 ## 2. 技术栈 / 入口 / 测试
 - React18+TS+Vite6+Tailwind3+zustand5+react-router7；路由 `/` `/camp` `/arena` `/auth`。内容唯一源 `src/game/data.ts`；全局状态 `src/stores/useGameStore.ts`（单档，`SCHEMA_VERSION`=11，migrate 1→11）；**BattleState 不进存档**。
@@ -37,3 +37,9 @@
 - 后台任务 `exit 4`/`0xC0000142` 宿主回收；`lib/env.ts` `.env` 路径曾算错→改配置实测 `process.env.XXX`。
 - §34 漏 `migrate deploy` 假红；§36 F14 同锁重入死锁(`alreadyLocked`)；§37 F16（`levelMax+6`/`coopViewFor` 不下发 `turn`/2MB bodyLimit）；§39 F17（`admin.ts` 漏列/`rebase`/迁移先删多档行）。通用：冒烟 `\d` 被吃、等「元素可用」非「存在」、非法意图降级跳过、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖。
 - F18-d 剧情：真剧情补全只改 `src/game/story.ts`（置 `placeholder:false`+替换 `lines`），不动触发器/弹窗。硬门槛：野怪/房间/锁单进程内存态，**P5-1 多实例前统一迁共享存储**。交接：`HANDOFF.md`；接手只读核对，等杰哥排期。
+
+## 7. 验收锚点（doc_check 一致性，勿删）
+- P4-2 五阶段全部完成（P4-2a ✅ / P4-2b ✅ / P4-2c ✅ / P4-2d ✅ / P4-2e ✅）；下一步 F16 → F04 均已落地，排期见 `P4-2_多人玩法排期_2026-11-07.md`。
+- P3-2 写操作上移服务端（细节规范 §20）；P4-0 写入并发控制（§21，slotLock 串行）；P4-1 ✅ 顶号与共享野怪（§22，SESSION_REPLACED 踢旧设备）。
+- F04 不写 `SaveData`，F17 单档化已实现并偿还（不动 `SCHEMA_VERSION` 语义）；F01/F02 已偿还。
+- F15 1v1 零产出冻结，P4-3 C2C（交易/赠送）不打算开放交易系统（阶段冻结）。

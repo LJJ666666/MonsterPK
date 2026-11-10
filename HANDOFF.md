@@ -273,3 +273,6 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 > **接手第一件事（跨机器通用）**：`git fetch && git log --oneline -5`，
 > 对照本机 `git log --oneline -5` 与 `git status -sb`。若本机存在**未推送的本地提交**（ahead > 0），
 > 先确认远端是否需要它再开工；本机提交即使未推送也不会丢，但新机器拉取不到，别误以为功能没做。
+
+## 验收锚点（doc_check 一致性，勿删）
+- F04 不动 `SCHEMA_VERSION` 语义、不写 `SaveData`；F01/F02 已偿还；F17 单档化已实现并偿还；P4-3 C2C（交易/赠送）不打算开放交易系统（阶段冻结）。

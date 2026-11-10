@@ -1122,3 +1122,15 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 ### 40.3 验收与回归
 - 纯函数 `mapLock.test.ts` **7/7**、`e2e_f18a.mjs` **8/8**（travel 锁/未知/PUT 伪造跳关/解锁后放行/线性不越级）；`verify.mjs` 两处注册 `e2e:f18a`、`package.json` 加脚本、`clean-test-data.mjs` 补 `f18_` 前缀。
 - **回归**：`e2e_p32_mutations.mjs` 原「移动到合法地点」travel 到 `city_pebble`，无徽章被 `LOCATION_LOCKED` 拦截导致后续 `travelData.money` 抛错（400 无 `.data`）。改为 travel 到恒解锁的 `town_starter`，仍验证 travel 写操作 + 访问记录追加；「解锁后放行到第二城」语义由 `e2e_f18a` 专测。重跑 P3-2 通过。
+
+## 41. F18-c 防御性越权 E2E 与 abandon 名额泄漏修复（2026-11-11）
+
+### 41.1 新增 mapBoss 防御性越权 E2E（35 项全绿）
+- 新建 `backend/tests/e2e_f18c_security.mjs`，覆盖：A 开局夹带伪造 `quotaKey/periodKey` 被服务端忽略；B 未知/空/未解锁 `mapBossId` 一律拒绝（400/403）；C 跨用户隔离（别人 `battleId` 动作 404）；D 伪造 `battleId` 404；E 地图首领捕获 400 `MAPBOSS_UNCATCHABLE`；F 进行中再开 409 `MAPBOSS_BATTLE_IN_PROGRESS`；G 顶号旧 token 续打 403 `SESSION_REPLACED`、新 token 可续打；H 超上限重入 429 `MAPBOSS_QUOTA_EXHAUSTED`；I 胜利后同 `battleId` 再动作 404（唯一键幂等，used 不叠加）。
+- 注册：`backend/package.json` 加 `e2e:f18c_security`；`scripts/verify.mjs` 的 `STAGES` 与 `GROUPS.e2e` 两处加 `e2e:f18c_security`（漏 `GROUPS` 静默少跑）。
+
+### 41.2 真实 bug：放弃 mapBoss 战泄漏在途名额（被 J 区回归捕获）
+- 现象：`/api/battle/abandon` 对 mapBoss 战不释放在途名额，连续 start→abandon 3 次后第 4 次即使 0 胜也被 429 拒，等于每天白丢次数。
+- 根因：`backend/src/modules/battle.ts` 原释放守卫 `if (state.bossId && state.bossQuotaKey) bossQuota.release(...)`；mapBoss 战 state 只有 `mapBossId`（无 `bossId`），其 `bossQuotaKey` 虽已写入却永不释放。超时回收路径 `realtime.ts:174` 是 `if (st.bossQuotaKey)`（无 `bossId` 守卫），故仅「断线超时」会回收、「显式 HTTP abandon」会泄漏——口径不一致。
+- 修复：守卫改为 `if (state.bossQuotaKey) bossQuota.release(...)`，与 `realtime.ts:174` 一致，boss / mapBoss 共用 `bossQuota` 一并覆盖。零新迁移、不动 `SCHEMA_VERSION`。修复后 J 区 4 轮 start→abandon 全部 200，名额每轮回收。
+- 验收：`--only=check,e2e:f18c,e2e:f18c_security,e2e:f14` 全绿（前端/后端 tsc 无告警、内容表一致、F14 Boss 双档 46 项、F18-c 正例 33 项、F18-c 防御性 35 项）。

@@ -35,10 +35,7 @@ import { publishWild, resolveAreaSpec } from './wild';
 import { readProgress, grantBadgeForAreaClear } from './playerProgress';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
-const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
-
 const startSchema = z.object({
-  slot: slotSchema,
   theme: z.string().min(1).max(40),
   areaName: z.string().min(1).max(60),
   areaId: z.string().min(1).max(60).nullish(),
@@ -58,11 +55,10 @@ const startSchema = z.object({
     testMaxStats: z.boolean().optional(),
     testOHKO: z.boolean().optional(),
   }).optional(),
-});
+}).strip();
 
 const actionSchema = z.object({
   battleId: z.string().min(1).max(80),
-  slot: slotSchema,
   action: z.discriminatedUnion('type', [
     z.object({ type: z.literal('move'), moveId: z.string().min(1).max(60) }),
     z.object({ type: z.literal('item'), itemId: z.string().min(1).max(60) }),
@@ -70,12 +66,11 @@ const actionSchema = z.object({
     z.object({ type: z.literal('switch'), partyIndex: z.coerce.number().int().min(0).max(5) }),
     z.object({ type: z.literal('flee') }),
   ]),
-});
+}).strip();
 
-function broadcastBattle(userId: string, slot: number, state: BattleState) {
+function broadcastBattle(userId: string, state: BattleState) {
   broadcastToUser(userId, encodeServerMessage({
     type: 'battle.state',
-    slot,
     battleId: state.id,
     turn: state.turn,
     finished: state.finished,
@@ -116,7 +111,6 @@ function wildResultOf(result: BattleState['result']): 'captured' | 'defeated' | 
 async function settleBossRun(
   req: FastifyRequest,
   userId: string,
-  slot: number,
   state: BattleState,
 ) {
   const quotaKey = state.bossQuotaKey ?? null;
@@ -149,7 +143,6 @@ async function settleBossRun(
     await prisma.bossDamageEvent.create({
       data: {
         userId,
-        slot,
         bossId,
         periodKey: dayKey,
         damage,
@@ -184,9 +177,9 @@ async function settleBossRun(
   let reward: BossRewardResult | null = null;
   try {
     reward = await grantBossRewards({
-      userId, slot, bossId, periodKey: dayKey,
+      userId, bossId, periodKey: dayKey,
       battleId: state.id, result: String(state.result ?? 'unknown'), now,
-      // `/api/battle/action` 路由层已持有 userId:slot 槽位锁；不可重入。
+      // `/api/battle/action` 路由层已持有账号锁；不可重入。
       alreadyLocked: true,
     });
   } catch (err) {
@@ -214,25 +207,25 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const parsed = startSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '开局参数不合法' });
     // 开局要拿队伍快照，与写操作串行，避免读到半途的存档。
-    return withSlotLock(slotLockKey(userId, parsed.data.slot), () =>
+    return withSlotLock(slotLockKey(userId), () =>
       runBattleStart(reply, userId, parsed.data),
     );
   });
 
-  /** 开局主体；调用方已持有槽位锁。 */
+  /** 开局主体；调用方已持有账号锁。 */
   async function runBattleStart(reply: FastifyReply, userId: string, params: z.infer<typeof startSchema>) {
-    const { slot, theme, areaName, areaId, levelMin, levelMax, testFlags, wildId } = params;
+    const { theme, areaName, areaId, levelMin, levelMax, testFlags, wildId } = params;
 
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
 
     // P4-2c：Boss 战未结束时不允许用它顶掉 —— 否则这次「在途次数」会一直挂到 TTL。
     // 普通战斗之间仍然允许覆盖（历史行为，E2E 依赖），只拦 Boss。
-    const existing = battles.current(userId, slot);
+    const existing = battles.current(userId);
     if (existing?.bossId) {
       return reply.code(409).send({ error: '讨伐尚未结束，请先完成或放弃', code: 'BOSS_IN_PROGRESS' });
     }
 
-    const row = await readSave(userId, slot);
+    const row = await readSave(userId);
     if (!row) return reply.code(404).send({ error: '还没有存档' });
 
     let save: any;
@@ -270,19 +263,19 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     let claimedAreaId: string | null = null;
     let claimedSpec: WildAreaSpec | null = null;
     if (wildId) {
-      if (battles.current(userId, slot)) {
+      if (battles.current(userId)) {
         return reply.code(409).send({ error: '已有进行中的战斗', code: 'BATTLE_IN_PROGRESS' });
       }
       const areaKey = areaId ?? theme;
       const spec = resolveAreaSpec(areaKey, { theme: finalTheme, levelMin: lvMin, levelMax: lvMax });
-      const claim = wilds.claim(wildId, userId, slot, battleId, now);
+      const claim = wilds.claim(wildId, userId, battleId, now);
       if (!claim.ok) {
         // strict:false 下判别联合不收窄，用属性存在性取值（bug_log §18）。
         const code = 'code' in claim ? claim.code : 'WILD_CLAIMED';
         const status = code === 'WILD_NOT_FOUND' ? 404 : 409;
         return reply.code(status).send({
           error: code === 'WILD_NOT_FOUND' ? '野怪不存在或已刷新'
-            : code === 'WILD_ON_COOLDOWN' ? '本槽位已有正在挑战的野怪'
+            : code === 'WILD_ON_COOLDOWN' ? '已有正在挑战的野怪'
               : '这只野怪已被其他玩家抢先挑战',
           code,
         });
@@ -298,7 +291,6 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         id: battleId,
         levelCap,
         userId,
-        slot,
         theme: finalTheme,
         areaName: finalName,
         areaId: areaId ?? null,
@@ -351,27 +343,27 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const userId = (req.user as any).userId;
     const parsed = actionSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '动作参数不合法' });
-    // 同一槽位串行：动作流程里有 await 读档，并发两条动作会各自基于同一份战斗态推进，
-    // 结束判定还会重复结算写档。与 PUT / 存档写操作共用同一把槽位锁。
-    return withSlotLock(slotLockKey(userId, parsed.data.slot), () =>
+    // 同一账号串行：动作流程里有 await 读档，并发两条动作会各自基于同一份战斗态推进，
+    // 结束判定还会重复结算写档。与 PUT / 存档写操作共用同一把账号锁。
+    return withSlotLock(slotLockKey(userId), () =>
       runBattleAction(req, reply, userId, parsed.data),
     );
   });
 
-  /** 动作主体；调用方已持有槽位锁。 */
+  /** 动作主体；调用方已持有账号锁。 */
   async function runBattleAction(
     req: FastifyRequest,
     reply: FastifyReply,
     userId: string,
     params: z.infer<typeof actionSchema>,
   ) {
-    const { battleId, slot, action } = params;
+    const { battleId, action } = params;
 
-    const state = battles.get(userId, slot, battleId);
+    const state = battles.get(userId, battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在或已结束', code: 'BATTLE_NOT_FOUND' });
     if (state.actions > 500) return reply.code(429).send({ error: '战斗回合过多，请重新开局' });
 
-    const row = await readSave(userId, slot);
+    const row = await readSave(userId);
     if (!row) return reply.code(404).send({ error: '还没有存档' });
 
     let save: any;
@@ -394,7 +386,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     battles.update(next);
-    broadcastBattle(userId, slot, next);
+    broadcastBattle(userId, next);
 
     // 结束：服务端结算写档（这一步之后客户端再 PUT 也只能与原档一致）
     if (next.finished) {
@@ -406,14 +398,14 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           revision: row.authority.revision + 1,
           pending: null,
         };
-        const committed = await commitState(userId, slot, {
+        const committed = await commitState(userId, {
           data: raw,
           schemaVersion: row.schemaVersion,
           clientId: row.clientId,
           authority,
           source: 'battle',
         });
-        battles.drop(userId, slot);
+        battles.drop(userId);
 
         // F04 §31.9：常规战斗首通野区 → 幂等发对应徽章（V1 过渡口径）。
         // 只认服务端结算出的 areaId / result；Boss 战 areaId 为 null 不参与。
@@ -429,7 +421,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         // P4-2c：Boss 战分流。Boss 战没有 wildId，两者互斥；用 if/else 而不是并列，
         // 避免以后加玩法时漏判「两个结算都跑了」。
         if (next.bossId) {
-          const boss = await settleBossRun(req, userId, slot, next);
+          const boss = await settleBossRun(req, userId, next);
           return {
             ok: true,
             battle: battleView(next),
@@ -439,11 +431,11 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           };
         }
 
-        // P4-1b：共享野怪结算。归属三键由 WildRegistry 复核，结果跨账号广播，
+        // P4-1b：共享野怪结算。归属两键由 WildRegistry 复核，结果跨账号广播，
         // 其他客户端会看到这只野怪变成 resolved（已捕获 / 已击败 / 已逃走）。
         const wild = next.wildId ? wilds.findByBattle(next.id) : undefined;
         if (wild) {
-          wilds.resolve(wild.id, userId, slot, next.id, wildResultOf(next.result), Date.now());
+          wilds.resolve(wild.id, userId, next.id, wildResultOf(next.result), Date.now());
           publishArea(wild.areaId, {
             theme: next.theme, levelMin: next.levelMin, levelMax: next.levelMax,
           });
@@ -465,9 +457,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   /** 查当前战斗：重连 / 刷新后用，避免把战斗态存到客户端。 */
   fastify.get('/api/battle/current', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
-    const slot = slotSchema.safeParse((req.query as any)?.slot ?? 1);
-    if (!slot.success) return reply.code(400).send({ error: 'slot 必须是 1/2/3' });
-    const state = battles.current(userId, slot.data);
+    const state = battles.current(userId);
     if (!state) return { ok: true, battle: null };
     return { ok: true, battle: battleView(state) };
   });
@@ -475,11 +465,11 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   /** 放弃战斗：不结算奖励，仅丢弃会话（撤离走 action.type='flee' 才有成功率）。 */
   fastify.post('/api/battle/abandon', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
-    const parsed = z.object({ battleId: z.string().min(1).max(80), slot: slotSchema }).safeParse(req.body ?? {});
+    const parsed = z.object({ battleId: z.string().min(1).max(80) }).strip().safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '参数不合法' });
-    const state = battles.get(userId, parsed.data.slot, parsed.data.battleId);
+    const state = battles.get(userId, parsed.data.battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
-    battles.drop(userId, parsed.data.slot);
+    battles.drop(userId);
     // P4-2c：放弃 Boss 战 = 不扣次数（release 在途名额），也不写伤害事件。
     if (state.bossId && state.bossQuotaKey) bossQuota.release(state.bossQuotaKey);
     // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。

@@ -43,7 +43,7 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   }
   if (!res.ok) {
     const err: any = new Error((data && data.error) || `请求失败 (${res.status})`);
-    err.status = res.status; // 供调用方区分 404（该槽位无存档）与真实故障
+    err.status = res.status; // 供调用方区分 404（暂无存档）与真实故障
     err.code = data && data.code; // 供调用方识别 ACCOUNT_BANNED / REVISION_CONFLICT 等业务码
     err.body = data; // P4：409 冲突时带着服务端当前存档，客户端就地自愈要用
     if (res.status === 403 && data?.code === SESSION_REPLACED_CODE) {
@@ -96,9 +96,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
-  getSave: (slot: number) => request(`/api/save?slot=${slot}`),
-  putSave: (slot: number, data: string, clientId: string | undefined, extra: PutExtra) =>
-    request(`/api/save?slot=${slot}`, {
+  getSave: () => request("/api/save"),
+  putSave: (data: string, clientId: string | undefined, extra: PutExtra) =>
+    request("/api/save", {
       method: "PUT",
       body: JSON.stringify({
         data,
@@ -110,7 +110,6 @@ export const api = {
     }),
   /** P1-2：发意图给服务端裁决，返回 { ok, nonce, result }；结果不可由客户端伪造。 */
   dispatchIntent: (type: string, body: {
-    slot: number;
     nonce: string;
     save: string;
     /** P4：本次意图基于服务端第几版，冲突时服务端拒绝（409）。 */
@@ -125,7 +124,6 @@ export const api = {
   // ───────────────────── P3-1c 服务端战斗（服务端裁决全部过程）─────────────────────
   /** 开局：客户端只说明「在哪打」，敌人与队伍副本由服务端生成。 */
   battleStart: (body: {
-    slot: number;
     theme: string;
     areaName: string;
     areaId?: string | null;
@@ -139,7 +137,6 @@ export const api = {
   /** 发一个战斗动作（技能/道具/捕获/换人/逃跑），服务端推进一回合。 */
   battleAction: (body: {
     battleId: string;
-    slot: number;
     action:
       | { type: "move"; moveId: string }
       | { type: "item"; itemId: string }
@@ -149,12 +146,12 @@ export const api = {
   }) =>
     request("/api/battle/action", { method: "POST", body: JSON.stringify(body) }),
   /** 刷新/重连后取回服务端仍存活的战斗（战斗态不进存档）。 */
-  battleCurrent: (slot: number) => request(`/api/battle/current?slot=${slot}`),
+  battleCurrent: () => request("/api/battle/current"),
   /** 放弃战斗：不结算奖励，仅丢弃会话。 */
-  battleAbandon: (battleId: string, slot: number) =>
+  battleAbandon: (battleId: string) =>
     request("/api/battle/abandon", {
       method: "POST",
-      body: JSON.stringify({ battleId, slot }),
+      body: JSON.stringify({ battleId }),
     }),
 
   // ───────────────────── P4-1b 共享野怪（跨账号同一份实例）─────────────────────
@@ -178,20 +175,20 @@ export const api = {
   // ───────────────────── P4-2c 单人 Boss 讨伐（伤害只认服务端结算）─────────────────────
   /** 讨伐列表 + 我的次数与今日伤害（只读）。 */
   bossList: () => request("/api/boss"),
-  /** 开一场讨伐：只传 slot + bossId，等级 / 倍率 / 次数全在服务端。 */
-  bossStart: (body: { slot: number; bossId: string }) =>
+  /** 开一场讨伐：只传 bossId，等级 / 倍率 / 次数全在服务端。 */
+  bossStart: (body: { bossId: string }) =>
     request("/api/boss/start", { method: "POST", body: JSON.stringify(body) }),
   /** 只读伤害榜（当日），只接受 limit。 */
   bossRank: (bossId: string, limit = 20) =>
     request(`/api/boss/${encodeURIComponent(bossId)}/rank?limit=${limit}`),
 
   // ───────────────────── P4-2d 玩家对战 1v1（双方意图由服务端裁决）─────────────────────
-  /** 房主创建 1v1 房间：只传 slot，队伍 / 胜负 / HP 全在服务端。 */
-  pvpCreate: (body: { slot: number }) =>
-    request("/api/pvp/create", { method: "POST", body: JSON.stringify(body) }),
-  /** 对手加入 1v1 房间：只传 roomId + slot，双方队伍由服务端读取。 */
-  pvpJoin: (roomId: string, body: { slot: number }) =>
-    request(`/api/pvp/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify(body) }),
+  /** 房主创建 1v1 房间：队伍 / 胜负 / HP 全在服务端。 */
+  pvpCreate: () =>
+    request("/api/pvp/create", { method: "POST", body: JSON.stringify({}) }),
+  /** 对手加入 1v1 房间：只传 roomId，双方队伍由服务端读取。 */
+  pvpJoin: (roomId: string) =>
+    request(`/api/pvp/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify({}) }),
   /** 提交一个回合意图（1v1 用 move:tackle / switch:1 / flee），服务端双方交齐后推进。 */
   roomAction: (roomId: string, intent: string, nonce: string) =>
     request(`/api/room/${encodeURIComponent(roomId)}/action`, {
@@ -200,12 +197,12 @@ export const api = {
     }),
 
   // ───────────────────── P4-2e 共斗 Boss / 副本（Boss HP 是房间真值）─────────────────────
-  /** 房主创建共斗房间：只传 slot + bossId，Boss 数值 / 次数 / 队伍全在服务端。 */
-  coopCreate: (body: { slot: number; bossId: string }) =>
+  /** 房主创建共斗房间：只传 bossId，Boss 数值 / 次数 / 队伍全在服务端。 */
+  coopCreate: (body: { bossId: string }) =>
     request("/api/coop/create", { method: "POST", body: JSON.stringify(body) }),
-  /** 队友加入共斗房间：只传 roomId + slot，全员队伍与 Boss 由服务端构造。 */
-  coopJoin: (roomId: string, body: { slot: number }) =>
-    request(`/api/coop/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify(body) }),
+  /** 队友加入共斗房间：只传 roomId，全员队伍与 Boss 由服务端构造。 */
+  coopJoin: (roomId: string) =>
+    request(`/api/coop/${encodeURIComponent(roomId)}/join`, { method: "POST", body: JSON.stringify({}) }),
 
   // ───────────────────── P3-2 服务端存档写操作（流程本身在服务端）─────────────────────
   /**

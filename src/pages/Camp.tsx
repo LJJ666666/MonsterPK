@@ -137,7 +137,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   // 测试菜单仅管理员可见（服务端判定）。普通账号即使改前端也只是看到按钮，
   // 真正写入异常存档仍会被后端风控封号。
   const isAdmin = useIsAdmin();
-  const { slot, save1, save2, save3, startEncounter, startBossBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
+  const { save, startEncounter, startBossBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
   const [selected, setSelected] = useState<number | null>(null);
   const [boxSelected, setBoxSelected] = useState<number | null>(null);
@@ -172,10 +172,10 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   };
 
   const maxPlayerLevel = useMemo(() => {
-    const s = useGameStore.getState()[`save${slot}` as keyof ReturnType<typeof useGameStore.getState>] as any;
+    const s = useGameStore.getState().save;
     if (!s || !s.party || s.party.length === 0) return 1;
     return Math.max(...s.party.map((m: any) => m.level));
-  }, [slot]);
+  }, [save]);
   
   useEffect(() => {
     if (location.state?.returnToTown) {
@@ -191,9 +191,6 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
     const timer = setInterval(() => setIdleNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [idleOpen]);
-
-  const saves = [save1, save2, save3];
-  const save = saves[slot - 1];
 
   const party = save?.party ?? [];
   const box = save?.box ?? [];

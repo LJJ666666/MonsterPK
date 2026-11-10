@@ -23,7 +23,7 @@
  */
 
 /** 与前端 src/stores/saveVersion.ts 的 SCHEMA_VERSION 保持一致；升级版本时两处同步修改。 */
-export const EXPECTED_SAVE_VERSION = 10;
+export const EXPECTED_SAVE_VERSION = 11;
 
 /** 数值边界集中定义，便于后续按运营数据调整；每项都注明来源。 */
 export const SAVE_LIMITS = {

@@ -55,7 +55,7 @@ export const OP_MESSAGES: Record<string, string> = {
   SAVE_UNREADABLE: "服务端存档不可用",
   NAME_INVALID: "名字需要 1~12 个字符",
   STARTER_INVALID: "只能选择初始幻兽",
-  SAVE_EXISTS: "该槽位已有存档",
+  SAVE_EXISTS: "已经有一份存档",
 };
 
 export async function runGameOp(op: MutationOp, body: Record<string, unknown>): Promise<OpResult> {
@@ -70,7 +70,7 @@ export async function runGameOp(op: MutationOp, body: Record<string, unknown>): 
     const revision = Number(res.revision ?? 0);
     // P4：服务端已经写过一版，把基线版本对齐到这一版，
     // 否则后续自动上传会拿着旧 revision 去撞 409（内容其实没变，属于无谓冲突）。
-    if (typeof body.slot === "number") setRevision(body.slot, revision);
+    setRevision(revision);
     return {
       ok: true,
       data: res.data,

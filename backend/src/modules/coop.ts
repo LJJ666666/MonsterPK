@@ -31,19 +31,16 @@ import { tokenDigest } from '../lib/roomAuth';
 
 export const COOP_INPUT_FORBIDDEN_CODE = 'COOP_INPUT_FORBIDDEN';
 
-const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
-
 const createSchema = z.object({
   bossId: z.string().min(1).max(64),
-  slot: slotSchema,
 }).strip();
-const joinSchema = z.object({ slot: slotSchema }).strip();
+const joinSchema = z.object({}).strip();
 const paramsSchema = z.object({ roomId: z.string().min(1).max(96) });
 
 /**
  * 客户端不得上报的字段：房间状态 / 敌人 HP / 伤害 / 贡献 / 队伍 / 回合 / 结果 / 奖励。
  * 与 Boss / 榜单 / 1v1 同一口径：不是静默忽略，而是明确 400。
- * 注意 `bossId` 与 `slot` 是合法入参，不能列进来。
+ * 注意 `bossId` 是合法入参，不能列进来。
  */
 const FORBIDDEN_COOP_FIELDS = [
   'boss', 'bossHp', 'hp', 'maxHp', 'damage', 'party', 'coop', 'result', 'winner', 'winnerUserId',
@@ -74,9 +71,9 @@ function connectionOf(userId: string): string | null {
   return wsRegistry.listForUser(userId)[0]?.id ?? null;
 }
 
-/** 读某账号某槽位的队伍（活体校验）。返回 null 表示无档 / 队伍不可用。 */
-async function readParty(userId: string, slot: number) {
-  const row = await readSave(userId, slot);
+/** 读某账号单档的队伍（活体校验）。返回 null 表示无档 / 队伍不可用。 */
+async function readParty(userId: string) {
+  const row = await readSave(userId);
   if (!row) return null;
   let save: any;
   try {
@@ -108,17 +105,16 @@ export async function applyCoopCreate(params: {
   userId: string;
   digest: string;
   connectionId: string | null;
-  slot: number;
   bossId: string;
   now?: number;
 }): Promise<CoopApiResult<{ room: any }>> {
   const now = params.now ?? Date.now();
   const spec = getBoss(params.bossId);
   if (!spec) return fail('COOP_BOSS_UNKNOWN', '未知的共斗目标', 400);
-  const party = await readParty(params.userId, params.slot);
+  const party = await readParty(params.userId);
   if (!party) return fail('COOP_NO_PARTY', '还没有可用队伍，无法共斗', 404);
 
-  return withSlotLock(slotLockKey(params.userId, params.slot), async () => {
+  return withSlotLock(slotLockKey(params.userId), async () => {
     const roomId = `coop_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
     return withRoomLock(roomId, async () => {
       if (!params.digest || !params.connectionId) {
@@ -146,7 +142,6 @@ export async function applyCoopJoin(params: {
   userId: string;
   digest: string;
   connectionId: string | null;
-  slot: number;
   now?: number;
 }): Promise<CoopApiResult<{ room: any }>> {
   const now = params.now ?? Date.now();
@@ -172,8 +167,8 @@ export async function applyCoopJoin(params: {
       const ordered = [...room.seats].sort((a, b) => a.seat - b.seat);
       const parties: { userId: string; party: any[] }[] = [];
       for (const seat of ordered) {
-        // MVP 各成员都用槽位 1；副本态按座位顺序建立，N 人通用。
-        const p = await readParty(seat.userId, 1);
+        // 副本态按座位顺序建立，N 人通用。
+        const p = await readParty(seat.userId);
         if (!p) {
           rooms.abandon(room.roomId, now, 'party_unavailable');
           publishRoom(room.roomId);
@@ -203,7 +198,7 @@ export async function applyCoopJoin(params: {
  * `result='win'` 时按 §30.7 追加通关奖励：
  *  - 只给 `contribution >= COOP_MIN_CONTRIBUTION` 的成员（纯挂机不发）；
  *  - 每日上限 + 唯一键防刷由 `grantCoopClearReward()` 保证；
- *  - ⚠️ 该调用链只持有**房间锁**，所以发奖函数自己取 `userId:slot` 槽位锁，
+ *  - ⚠️ 该调用链只持有**房间锁**，所以发奖函数自己取账号锁，
  *    绝不传 `alreadyLocked`（否则并发写档无保护，见 §30.7）。
  * 幂等由 `room.coopSettled` 标记 + `CoopRewardGrant` 唯一键双保险。
  */
@@ -212,15 +207,14 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
   const coop = room?.coop;
   if (!coop || !coop.finished) return;
   const result = coop.result;
-  const slot = 1; // MVP：房间成员固定使用槽位 1
 
   for (let seat = 0; seat < coop.sides.length; seat += 1) {
     const side = coop.sides[seat];
 
-    // ① 回写队伍状态（每人一次槽位锁 + commitState）。
+    // ① 回写队伍状态（每人一次账号锁 + commitState）。
     try {
-      await withSlotLock(slotLockKey(side.userId, slot), async () => {
-        const rec = await readSave(side.userId, slot);
+      await withSlotLock(slotLockKey(side.userId), async () => {
+        const rec = await readSave(side.userId);
         if (!rec) return;
         let save: any;
         try {
@@ -237,7 +231,7 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
           revision: rec.authority.revision + 1,
           pending: null,
         };
-        await commitState(side.userId, slot, {
+        await commitState(side.userId, {
           data: raw,
           schemaVersion: rec.schemaVersion,
           clientId: rec.clientId,
@@ -249,13 +243,12 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
       console.warn(`[F16] 回写队伍状态失败 room=${roomId} seat=${seat}:`, e);
     }
 
-    // ② 通关奖励（独立槽位锁，失败只记日志、不阻断副本结束响应）。
+    // ② 通关奖励（独立账号锁，失败只记日志、不阻断副本结束响应）。
     if (result === 'win') {
       try {
         await grantCoopClearReward({
           roomId,
           userId: side.userId,
-          slot,
           contribution: contributionOf(coop, seat),
           result,
         });
@@ -281,7 +274,6 @@ export async function coopRoutes(fastify: FastifyInstance): Promise<void> {
       userId: req.user.userId,
       digest: tokenDigest(bearerOf(req)),
       connectionId: connectionOf(req.user.userId),
-      slot: parsed.data.slot,
       bossId: parsed.data.bossId,
     });
     if ('code' in res) return reply.code(res.status).send({ error: res.reason, code: res.code });
@@ -302,7 +294,6 @@ export async function coopRoutes(fastify: FastifyInstance): Promise<void> {
       userId: req.user.userId,
       digest: tokenDigest(bearerOf(req)),
       connectionId: connectionOf(req.user.userId),
-      slot: b.data.slot,
     });
     if ('code' in res) return reply.code(res.status).send({ error: res.reason, code: res.code });
     return reply.send({ ok: true, ...res.value });

@@ -2,11 +2,11 @@
  * F14 Boss 双档奖励发放（服务端唯一写入口）。
  *
  * 权威口径（与 F02 `rankSettlement.ts::grantOne` 同范式）：
- *  - 槽位锁串行 → **唯一键占位** → `readSave()` → `applyPlayReward()` → 同步
+ *  - 账号锁串行 → **唯一键占位** → `readSave()` → `applyPlayReward()` → 同步
  *    `authority.expected = digestOf(新档)` → `commitState(source='action')` → 回填 revision。
  *    顺序不可颠倒：先写档再插记录，插入冲突时奖励已经进档会凭空多发一份。
  *  - 每场小包幂等键 = `battleId`（与 `BossDamageEvent` 同一场战斗唯一）；
- *    每日首讨大包幂等键 = `(userId, slot, bossId, periodKey)`。
+ *    每日首讨大包幂等键 = `(userId, bossId, periodKey)`。
  *  - 只有 `enemy_fainted` 才发：逃跑已在 `settleBossRun` 提前返回，全灭不发安慰奖
  *    （杰哥 2026-11-09「按上表默认」，上表口径即只打赢发）。
  *  - 客户端没有任何领取 / 上报入口；发放失败只记日志、不阻断战斗结束响应，
@@ -40,19 +40,18 @@ function isUniqueViolation(e: unknown): boolean {
   return !!e && typeof e === 'object' && (e as { code?: string }).code === 'P2002';
 }
 
-/** 单笔发放；调用方已持有该账号该槽位的锁。 */
+/** 单笔发放；调用方已持有该账号的锁。 */
 async function grantOne(p: {
   grantKey: string;
   tier: 'per_run' | 'first';
   userId: string;
-  slot: number;
   bossId: string;
   periodKey: string;
   battleId: string;
   reward: PlayReward;
   nowIso: string;
 }): Promise<GrantState> {
-  const { grantKey, userId, slot } = p;
+  const { grantKey, userId } = p;
   const existing = await prisma.bossRewardGrant.findUnique({ where: { grantKey } });
   if (existing) return 'skipped';
 
@@ -61,7 +60,6 @@ async function grantOne(p: {
     const created = await prisma.bossRewardGrant.create({
       data: {
         userId: p.userId,
-        slot: p.slot,
         bossId: p.bossId,
         periodKey: p.periodKey,
         tier: p.tier,
@@ -78,7 +76,7 @@ async function grantOne(p: {
   }
 
   try {
-    const row = await readSave(userId, slot);
+    const row = await readSave(userId);
     if (!row) {
       await prisma.bossRewardGrant.delete({ where: { id: recordId } });
       return 'skipped';
@@ -92,7 +90,7 @@ async function grantOne(p: {
       revision: row.authority.revision + 1,
       pending: null,
     };
-    const committed = await commitState(userId, slot, {
+    const committed = await commitState(userId, {
       data: raw,
       schemaVersion: row.schemaVersion,
       clientId: row.clientId,
@@ -116,20 +114,19 @@ async function grantOne(p: {
  */
 export async function grantBossRewards(params: {
   userId: string;
-  slot: number;
   bossId: string;
   periodKey: string;
   battleId: string;
   result: string;
   now?: number;
   /**
-   * 调用方已持有 `slotLockKey(userId, slot)` 时置 true（如 `/api/battle/action` 路由层）。
+   * 调用方已持有 `slotLockKey(userId)` 时置 true（如 `/api/battle/action` 路由层）。
    * `withSlotLock` 是**单 key 链式队列、不可重入**，重入会自我死锁（见 slotLock.ts 头注释）。
    * 默认 false：独立调用（脚本 / 补发）时自己加锁，保证 read→commit 原子。
    */
   alreadyLocked?: boolean;
 }): Promise<BossRewardResult> {
-  const { userId, slot, bossId, periodKey, battleId, result } = params;
+  const { userId, bossId, periodKey, battleId, result } = params;
   const base: BossRewardResult = {
     eligible: false, reason: 'not_win', perRun: 'skipped', first: 'skipped', reward: null,
   };
@@ -137,7 +134,7 @@ export async function grantBossRewards(params: {
 
   const nowIso = new Date(params.now ?? Date.now()).toISOString();
   const run = async (): Promise<BossRewardResult> => {
-    const common = { userId, slot, bossId, periodKey, battleId, nowIso };
+    const common = { userId, bossId, periodKey, battleId, nowIso };
     const perRun = await grantOne({
       ...common,
       grantKey: perRunGrantKey(battleId),
@@ -146,7 +143,7 @@ export async function grantBossRewards(params: {
     });
     const first = await grantOne({
       ...common,
-      grantKey: firstGrantKey(userId, slot, bossId, periodKey),
+      grantKey: firstGrantKey(userId, bossId, periodKey),
       tier: 'first',
       reward: BOSS_FIRST_REWARD,
     });
@@ -162,5 +159,5 @@ export async function grantBossRewards(params: {
     };
     return out;
   };
-  return params.alreadyLocked ? run() : withSlotLock(slotLockKey(userId, slot), run);
+  return params.alreadyLocked ? run() : withSlotLock(slotLockKey(userId), run);
 }

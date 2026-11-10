@@ -66,9 +66,9 @@ async function request(path, { method = 'GET', token, body } = {}) {
   return { status: res.status, data };
 }
 
-// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token × 槽位跟踪当前版本。
+// P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token 跟踪当前版本。
 const saveWriter = makeSaveWriter(request);
-const put = (token, data, slot = 1) => saveWriter.put(token, data, {}, slot);
+const put = saveWriter.put;
 
 let pass = 0;
 let fail = 0;
@@ -137,14 +137,12 @@ async function main() {
   }
 
   // ——————————————— D. 安全边界 ———————————————
-  const noToken = await request('/api/save?slot=1', { method: 'PUT', body: { data: asText(validSave()) } });
+  const noToken = await request('/api/save', { method: 'PUT', body: { data: asText(validSave()) } });
   check('无 token → 401', noToken.status === 401, JSON.stringify(noToken.data));
-  const badSlot = await put(main.token, validSave(), 9);
-  check('非法 slot=9 → 400', badSlot.status === 400, JSON.stringify(badSlot.data));
   // 带正确 revision 才能测到「空文本」这一层（否则先被 REVISION_REQUIRED 拦下）。
-  const emptyBody = await request('/api/save?slot=1', {
+  const emptyBody = await request('/api/save', {
     method: 'PUT', token: main.token,
-    body: { data: '', revision: await saveWriter.revOf(main.token, 1) },
+    body: { data: '', revision: await saveWriter.revOf(main.token) },
   });
   check('空存档文本 → 400', emptyBody.status === 400, JSON.stringify(emptyBody.data));
 
@@ -152,7 +150,7 @@ async function main() {
   const futureUser = await freshUser('ft');
   const futureSave = await put(futureUser.token, validSave({ lastSavedAt: FUTURE }));
   check('lastSavedAt 填 2099 → 200 且不封号', futureSave.status === 200, JSON.stringify(futureSave.data));
-  const gotFuture = await request('/api/save?slot=1', { token: futureUser.token });
+  const gotFuture = await request('/api/save', { token: futureUser.token });
   const storedFuture = typeof gotFuture.data?.data === 'string' ? JSON.parse(gotFuture.data.data) : null;
   const clampedT = Date.parse(storedFuture?.lastSavedAt ?? '');
   check('未来时间戳被服务端钳制为当前时间',
@@ -164,7 +162,7 @@ async function main() {
     idle: { areaId: 'a', areaName: 'A', level: 10, startedAt: FUTURE },
   }));
   check('idle.startedAt 填 2099 → 200 且不封号', idleFuture.status === 200, JSON.stringify(idleFuture.data));
-  const gotIdle = await request('/api/save?slot=1', { token: idleTimeUser.token });
+  const gotIdle = await request('/api/save', { token: idleTimeUser.token });
   const storedIdle = typeof gotIdle.data?.data === 'string' ? JSON.parse(gotIdle.data.data) : null;
   check('挂机开始时间被钳制，改时间拿不到额外收益',
     Date.parse(storedIdle?.idle?.startedAt ?? '') <= Date.now() + 60_000,
@@ -175,7 +173,7 @@ async function main() {
   const marker = validSave({ money: 4321, playerName: 'E2E_MARKER' });
   await put(markerUser.token, marker); // 首次写档建立基线
   await put(markerUser.token, validSave({ version: '999' }));
-  const got = await request('/api/save?slot=1', { token: markerUser.token });
+  const got = await request('/api/save', { token: markerUser.token });
   const stored = typeof got.data?.data === 'string' ? JSON.parse(got.data.data) : null;
   check('被拒档不落库（GET 回读仍为 4321）',
     got.status === 200 && stored?.money === 4321 && stored?.playerName === 'E2E_MARKER',
@@ -198,7 +196,7 @@ async function main() {
     check(`改档封号 / ${name} → 403 ${BAN_CODE}`,
       r.status === 403 && r.data?.code === BAN_CODE && !!r.data?.reason, JSON.stringify(r.data));
 
-    const after = await request('/api/save?slot=1', { token: u.token });
+    const after = await request('/api/save', { token: u.token });
     check(`改档封号 / ${name} 后续请求被守卫拒绝 → 403`,
       after.status === 403 && after.data?.code === BAN_CODE, JSON.stringify(after.data));
 

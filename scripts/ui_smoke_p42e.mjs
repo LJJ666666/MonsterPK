@@ -172,12 +172,12 @@ async function main() {
   if (!token) return report();
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const put = await apiJson('/api/save?slot=1', {
+  const put = await apiJson('/api/save', {
     method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
@@ -208,7 +208,7 @@ async function main() {
   // 服务端对照：伪上报共斗字段被拦（Boss HP / 伤害只认服务端）。
   const forged = await apiJson('/api/coop/create', {
     method: 'POST', headers: auth,
-    body: JSON.stringify({ slot: 1, bossHp: 1, damage: 99999, winner: 'A' }),
+    body: JSON.stringify({ bossHp: 1, damage: 99999, winner: 'A' }),
   });
   check('服务端拒绝客户端伪造共斗字段',
     forged.status === 400 && forged.data?.code === 'COOP_INPUT_FORBIDDEN',

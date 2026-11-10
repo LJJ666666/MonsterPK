@@ -21,8 +21,8 @@ const mkSave = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const src = (username: string, save: unknown, userId = username, slot = 1): RankSource => ({
-  userId, username, slot, metrics: deriveMetrics(save)!,
+const src = (username: string, save: unknown, userId = username): RankSource => ({
+  userId, username, metrics: deriveMetrics(save)!,
 });
 
 test('四榜类型固定，parseRankType 拒绝未知/伪造类型', () => {
@@ -117,12 +117,12 @@ test('推图榜首通数相同时比较最高区域难度（secondary）', () =>
   assert.match(board[0].detail, /Lv\.20/);
 });
 
-test('同分按用户名 / 槽位稳定排序，可复现', () => {
+test('同分按用户名稳定排序，可复现', () => {
   const b = src('bob', mkSave());
   const a = src('amy', mkSave());
-  const a2 = src('amy', mkSave(), 'amy', 2);
+  const a2 = src('amy', mkSave(), 'amy');
   const board = buildBoard('team_power', [b, a2, a]);
-  assert.deepEqual(board.map((r) => `${r.username}#${r.slot}`), ['amy#1', 'amy#2', 'bob#1']);
+  assert.deepEqual(board.map((r) => r.username), ['amy', 'amy', 'bob']);
   assert.deepEqual(buildBoard('team_power', [a2, b, a]).map((r) => r.rank), [1, 2, 3]);
 });
 

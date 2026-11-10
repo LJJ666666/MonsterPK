@@ -223,12 +223,12 @@ async function main() {
   if (!token) return report();
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const put = await apiJson('/api/save?slot=1', {
+  const put = await apiJson('/api/save', {
     method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
@@ -258,7 +258,7 @@ async function main() {
   // 服务端对照：六房状态 / 贡献 / 奖励字段一律不准客户端上报。
   const forged = await apiJson('/api/coop/create', {
     method: 'POST', headers: auth,
-    body: JSON.stringify({ slot: 1, bossId: 'boss_ember_behemoth', rooms: [], contribution: 99999, reward: 1 }),
+    body: JSON.stringify({ bossId: 'boss_ember_behemoth', rooms: [], contribution: 99999, reward: 1 }),
   });
   check('服务端拒绝客户端伪造六房状态 / 贡献 / 奖励',
     forged.status === 400 && forged.data?.code === 'COOP_INPUT_FORBIDDEN',

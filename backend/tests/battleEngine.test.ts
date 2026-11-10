@@ -140,12 +140,12 @@ test('奖励公式：与 P1-2 的 battle_reward 口径一致（该意图已下�
 test('遭遇生成：同一种子完全可复现，且选手来自主题表', () => {
   const theme = Object.keys(THEME_TABLE)[0];
   const a = createBattle({
-    id: 'b1', userId: 'u1', slot: 1, theme, areaName: '测试区', areaId: null,
+    id: 'b1', userId: 'u1', theme, areaName: '测试区', areaId: null,
     levelMin: 5, levelMax: 8, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(12345),
   });
   const b = createBattle({
-    id: 'b2', userId: 'u1', slot: 1, theme, areaName: '测试区', areaId: null,
+    id: 'b2', userId: 'u1', theme, areaName: '测试区', areaId: null,
     levelMin: 5, levelMax: 8, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(12345),
   });
@@ -160,7 +160,7 @@ test('遭遇生成：同一种子完全可复现，且选手来自主题表', ()
 
 test('技能动作：扣 PP、推进回合、敌方也行动', () => {
   const state = createBattle({
-    id: 'b3', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b3', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(7),
   });
@@ -179,7 +179,7 @@ test('技能动作：扣 PP、推进回合、敌方也行动', () => {
 
 test('技能校验：未掌握 / PP 耗尽都被服务端拒绝', () => {
   const state = createBattle({
-    id: 'b4', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b4', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(11),
   });
@@ -199,7 +199,7 @@ test('技能校验：未掌握 / PP 耗尽都被服务端拒绝', () => {
 
 test('道具：不足时拒绝，治疗扣次数并让敌方行动', () => {
   const state = createBattle({
-    id: 'b5', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b5', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(21),
   });
@@ -225,7 +225,7 @@ test('道具：不足时拒绝，治疗扣次数并让敌方行动', () => {
 test('捕获：成功即结束并产出 captured，失败则敌方行动', () => {
   const theme = Object.keys(THEME_TABLE)[0];
   const base = createBattle({
-    id: 'b6', userId: 'u1', slot: 1, theme, areaName: '测试区',
+    id: 'b6', userId: 'u1', theme, areaName: '测试区',
     areaId: null, levelMin: 2, levelMax: 2, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(31),
   });
@@ -253,7 +253,7 @@ test('捕获：成功即结束并产出 captured，失败则敌方行动', () =>
 
 test('逃跑：速度占优 + 随机成功 → fled 结束', () => {
   const state = createBattle({
-    id: 'b7', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b7', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(41),
   });
@@ -267,7 +267,7 @@ test('逃跑：速度占优 + 随机成功 → fled 结束', () => {
 test('换人：切换出战索引并让敌方行动，不能换成倒地或同一个', () => {
   const party = [serverMonster('spark_mouse', 10), serverMonster('sprout_owl', 10)];
   const state = createBattle({
-    id: 'b8', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b8', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party, themes: THEME_TABLE,
     now: 1, rng: seeded(51),
   });
@@ -291,7 +291,7 @@ test('换人：切换出战索引并让敌方行动，不能换成倒地或同�
 
 test('击杀：结束并给出经验与金钱，经验落到出战幻兽', () => {
   const state = createBattle({
-    id: 'b9', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b9', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 10, levelMax: 10, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(61),
   });
@@ -309,7 +309,7 @@ test('击杀：结束并给出经验与金钱，经验落到出战幻兽', () =>
 
 test('战斗结束后再发动作被拒绝', () => {
   const state = createBattle({
-    id: 'b10', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+    id: 'b10', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
     areaId: null, levelMin: 3, levelMax: 3, party: [serverMonster()], themes: THEME_TABLE,
     now: 1, rng: seeded(71),
   });
@@ -323,7 +323,7 @@ test('战斗结束后再发动作被拒绝', () => {
 test('队伍为空 / 全灭时不允许开局', () => {
   assert.throws(
     () => createBattle({
-      id: 'b11', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+      id: 'b11', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
       areaId: null, levelMin: 1, levelMax: 1, party: [], themes: THEME_TABLE, now: 1, rng: seeded(1),
     }),
     (err: any) => err instanceof BattleError && err.code === 'PARTY_EMPTY',
@@ -331,7 +331,7 @@ test('队伍为空 / 全灭时不允许开局', () => {
   const fainted = [{ ...serverMonster(), hp: 0 }];
   assert.throws(
     () => createBattle({
-      id: 'b12', userId: 'u1', slot: 1, theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
+      id: 'b12', userId: 'u1', theme: Object.keys(THEME_TABLE)[0], areaName: '测试区',
       areaId: null, levelMin: 1, levelMax: 1, party: fainted, themes: THEME_TABLE, now: 1, rng: seeded(1),
     }),
     (err: any) => err instanceof BattleError && err.code === 'PARTY_FAINTED',

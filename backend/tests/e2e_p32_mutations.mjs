@@ -84,12 +84,12 @@ function validSave(overrides = {}) {
 // 需要构造版本冲突时显式传 { revision: n }。
 const saveWriter = makeSaveWriter(request);
 const put = saveWriter.put;
-const getSave = (token) => request('/api/save?slot=1', { token });
+const getSave = (token) => request('/api/save', { token });
 // 服务端写操作也会推进版本号，成功后必须同步，否则下一次 PUT 会被自己的 CAS 拒掉。
 const op = async (token, name, body = {}) => {
-  const res = await request(`/api/game/${name}`, { method: 'POST', token, body: { slot: 1, ...body } });
+  const res = await request(`/api/game/${name}`, { method: 'POST', token, body: { ...body } });
   if (res.status === 200 && typeof res.data?.revision === 'number') {
-    saveWriter.set(token, 1, res.data.revision);
+    saveWriter.set(token, res.data.revision);
   }
   return res;
 };
@@ -169,7 +169,7 @@ async function main() {
   check('初始存档写入 200', first.status === 200, `${first.status} ${asText(first.data).slice(0, 120)}`);
 
   // —— 未登录 / 未知操作 ——
-  const anon = await request('/api/game/heal', { method: 'POST', body: { slot: 1 } });
+  const anon = await request('/api/game/heal', { method: 'POST', body: {} });
   check('未登录调用写操作 401', anon.status === 401, String(anon.status));
   const badOp = await op(token, 'not_an_op');
   check('未知操作返回 400/OP_UNKNOWN', badOp.status === 400 && badOp.data?.code === 'OP_UNKNOWN',
@@ -354,7 +354,7 @@ async function main() {
 
   const start = await request('/api/battle/start', {
     method: 'POST', token,
-    body: { slot: 1, theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2 },
+    body: { theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2 },
   });
   check('开局成功（用于验证战斗中禁写）', start.status === 200 && !!start.data?.battle?.battleId,
     `${start.status} ${asText(start.data).slice(0, 120)}`);
@@ -366,7 +366,7 @@ async function main() {
     `${inBattleItem.status} ${asText(inBattleItem.data)}`);
   await request('/api/battle/abandon', {
     method: 'POST', token,
-    body: { slot: 1, battleId: start.data.battle.battleId },
+    body: { battleId: start.data.battle.battleId },
   });
 
   // —— revision 单调递增 ——

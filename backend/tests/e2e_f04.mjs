@@ -35,7 +35,7 @@ async function winBattle(token, areaId) {
   const st = await api('/api/battle/start', {
     method: 'POST', token,
     body: {
-      slot: 1, theme: 'grass', areaName: '初心草原', areaId,
+      theme: 'grass', areaName: '初心草原', areaId,
       levelMin: 2, levelMax: 2, levelCap: 999,
     },
   });
@@ -45,7 +45,7 @@ async function winBattle(token, areaId) {
     for (let i = 0; i < 24 && !last?.battle?.finished; i += 1) {
       const r = await api('/api/battle/action', {
         method: 'POST', token,
-        body: { slot: 1, battleId: bid, action: { type: 'move', moveId: 'tackle' } },
+        body: { battleId: bid, action: { type: 'move', moveId: 'tackle' } },
       });
       if (r.status !== 200) break;
       last = r.data ?? last;

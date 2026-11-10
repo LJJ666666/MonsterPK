@@ -34,7 +34,7 @@ const mk = async (prefix) => {
 /** 带存档的账号（/api/battle/start 会读档取队伍）。 */
 async function accountWithSave(prefix) {
   const acc = await mk(prefix);
-  const r = await api('/api/save?slot=1', {
+  const r = await api('/api/save', {
     method: 'PUT', token: acc.token, body: { data: asText(validSave()), revision: 0 },
   });
   if (r.status !== 200) throw new Error(`基线存档失败 ${r.status}: ${JSON.stringify(r.data).slice(0, 200)}`);
@@ -46,17 +46,17 @@ const listWild = (token) => api(WILD_QUERY, { token });
 const startBattle = (token, wildId) => api('/api/battle/start', {
   method: 'POST', token,
   body: {
-    slot: 1, theme: 'grass', areaName: '共享草地', areaId: AREA,
+    theme: 'grass', areaName: '共享草地', areaId: AREA,
     levelMin: 1, levelMax: 5, ...(wildId ? { wildId } : {}),
   },
 });
 
 const abandon = (token, battleId) => api('/api/battle/abandon', {
-  method: 'POST', token, body: { battleId, slot: 1 },
+  method: 'POST', token, body: { battleId },
 });
 
 const battleAction = (token, battleId, action) => api('/api/battle/action', {
-  method: 'POST', token, body: { battleId, slot: 1, action },
+  method: 'POST', token, body: { battleId, action },
 });
 
 async function main() {

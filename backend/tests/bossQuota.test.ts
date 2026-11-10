@@ -1,7 +1,7 @@
 /**
  * P4-2c Boss 伤害榜聚合与次数在途闸的单测（零 IO）。
  *
- * 榜单口径：**按账号合并多槽位**（限次按账号计，按槽位拆会变成刷榜）；
+ * 榜单口径：**按账号合并**（一账号一档，限次按账号计）；
  * 次数口径：已用次数由 DB 事件行数传入，内存只保证「同时开工不超卖」。
  */
 import test from 'node:test';
@@ -9,25 +9,25 @@ import assert from 'node:assert/strict';
 import { buildBossBoard, summarizeRuns, type BossRunRow } from '../src/game/bossRank.js';
 import { BossQuotaLedger } from '../src/lib/bossQuota.js';
 
-const run = (userId: string, username: string, slot: number, damage: number): BossRunRow => ({
-  userId, username, slot, damage, createdAt: 0,
+const run = (userId: string, username: string, damage: number): BossRunRow => ({
+  userId, username, damage, createdAt: 0,
 });
 
 test('summarizeRuns：只统计本账号，累计 / 最高 / 次数正确', () => {
   const rows = [
-    run('u1', '杰哥', 1, 100),
-    run('u1', '杰哥', 2, 350),
-    run('u2', '别人', 1, 9999),
+    run('u1', '杰哥', 100),
+    run('u1', '杰哥', 350),
+    run('u2', '别人', 9999),
   ];
   assert.deepEqual(summarizeRuns(rows, 'u1'), { total: 450, best: 350, attempts: 2 });
   assert.deepEqual(summarizeRuns(rows, 'nobody'), { total: 0, best: 0, attempts: 0 });
 });
 
-test('buildBossBoard：按账号合并多槽位，而不是按槽位各占一行', () => {
+test('buildBossBoard：按账号合并，一账号一行', () => {
   const rows = [
-    run('u1', '杰哥', 1, 100),
-    run('u1', '杰哥', 2, 200),
-    run('u2', '别人', 1, 350),
+    run('u1', '杰哥', 100),
+    run('u1', '杰哥', 200),
+    run('u2', '别人', 350),
   ];
   const board = buildBossBoard(rows, 20);
   assert.equal(board.length, 2, '两个账号只有两行');
@@ -42,10 +42,10 @@ test('buildBossBoard：按账号合并多槽位，而不是按槽位各占一行
 
 test('buildBossBoard：累计相同看单场最高，再按用户名稳定排序', () => {
   const rows = [
-    run('u1', '甲', 1, 100),
-    run('u1', '甲', 2, 100),
-    run('u2', '乙', 1, 150),
-    run('u2', '乙', 2, 50),
+    run('u1', '甲', 100),
+    run('u1', '甲', 100),
+    run('u2', '乙', 150),
+    run('u2', '乙', 50),
   ];
   const board = buildBossBoard(rows, 20);
   assert.deepEqual(board.map((r) => r.username), ['乙', '甲'], '同为 200，单场最高 150 > 100');
@@ -53,7 +53,7 @@ test('buildBossBoard：累计相同看单场最高，再按用户名稳定排序
 
 test('buildBossBoard：isMe 只按账号标记，limit 被钳制且不改变排序', () => {
   const rows = [
-    run('u1', '甲', 1, 10), run('u2', '乙', 1, 20), run('u3', '丙', 1, 30),
+    run('u1', '甲', 10), run('u2', '乙', 20), run('u3', '丙', 30),
   ];
   const board = buildBossBoard(rows, 2, 'u3');
   assert.equal(board.length, 2);
@@ -67,8 +67,8 @@ test('buildBossBoard：空 / 脏数据不炸', () => {
   assert.deepEqual(buildBossBoard([], 20), []);
   assert.deepEqual(buildBossBoard(null as any, 20), []);
   const board = buildBossBoard([
-    run('u1', '甲', 1, NaN as any),
-    { ...run('u2', '', 1, 5) } as any,
+    run('u1', '甲', NaN as any),
+    { ...run('u2', '', 5) } as any,
   ], 20);
   // NaN 记为 0，但空用户名那行仍会被收进来（用户名由服务端保证，不在这里兜）
   assert.equal(board.length, 2);

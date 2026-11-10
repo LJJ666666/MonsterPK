@@ -34,7 +34,6 @@ function startBossBattle(bossId = 'boss_ember_behemoth', level = 20) {
   return createBattle({
     id: `bt_${bossId}`,
     userId: 'u1',
-    slot: 1,
     theme: 'grass',
     areaName: '测试草地',
     levelMin: 1,
@@ -150,7 +149,7 @@ test('damageDealt 只等于敌方 HP 差，且逐次单调不减', () => {
 test('普通战斗也累计 damageDealt，但不影响结算产物', () => {
   const rng = seeded(5);
   const s = createBattle({
-    id: 'bt_plain', userId: 'u1', slot: 1, theme: 'grass', areaName: '草地',
+    id: 'bt_plain', userId: 'u1', theme: 'grass', areaName: '草地',
     levelMin: 2, levelMax: 2, party: partyOf(rng, 'spark_mouse', 20), themes: THEMES,
     now: 1_700_000_000_000, rng: seeded(9),
   });

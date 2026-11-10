@@ -19,8 +19,8 @@ import { classifyUploadError } from "./syncErrors";
 
 export type IntentResult = Record<string, any>;
 
-/** 应用裁决结果的回调：拿到服务端结果 + 当前存档 + 槽位，直接改 store。 */
-export type IntentApply = (result: IntentResult, save: SaveData, slot: number) => void;
+/** 应用裁决结果的回调：拿到服务端结果 + 当前存档，直接改 store。 */
+export type IntentApply = (result: IntentResult, save: SaveData) => void;
 
 /**
  * 发一次意图并落地裁决结果。
@@ -34,8 +34,7 @@ export async function runIntent(
   beginIntent();
   try {
     const s0 = useGameStore.getState();
-    const slot = s0.slot;
-    const exported = s0.exportSaveJson(slot);
+    const exported = s0.exportSaveJson();
     if (!exported.ok) return null;
 
     const nonce = uuid();
@@ -43,7 +42,7 @@ export async function runIntent(
     // 而不是两端各算一遍、后落库的静默覆盖前一方。
     let revision: number;
     try {
-      revision = await ensureWriteRevision(slot);
+      revision = await ensureWriteRevision();
     } catch {
       setSyncError("无法连接服务器，请稍后重试");
       return null;
@@ -51,7 +50,6 @@ export async function runIntent(
     let res: { ok: boolean; nonce: string; revision?: number; result: IntentResult };
     try {
       res = await api.dispatchIntent(type, {
-        slot,
         nonce,
         save: exported.json,
         revision,
@@ -59,7 +57,7 @@ export async function runIntent(
       });
     } catch (e: any) {
       if (classifyUploadError(e) === "conflict") {
-        recoverFromConflict(slot, e); // 服务端已更新：切过去，本次操作作废
+        recoverFromConflict(e); // 服务端已更新：切过去，本次操作作废
         return null;
       }
       setSyncError(e?.message ?? "操作失败，请稍后重试");
@@ -67,16 +65,16 @@ export async function runIntent(
     }
     // P4：服务端裁决时已经写过一版，提交结果必须基于裁决后的版本号，
     // 否则 commitIntent 会拿「裁决前」的 revision 去撞自己的 CAS。
-    if (typeof res.revision === "number") setRevision(slot, res.revision);
+    if (typeof res.revision === "number") setRevision(res.revision);
 
     const s1 = useGameStore.getState();
-    const save = s1[`save${slot}` as "save1"] as SaveData | null;
+    const save = s1.save;
     if (!save) return null;
 
-    apply(res.result, save, slot);
+    apply(res.result, save);
 
     // 立即提交，跳过防抖：防止旧快照在裁决结果之后落库。
-    const ok = await commitIntent(slot, nonce);
+    const ok = await commitIntent(nonce);
     if (!ok) return null;
     return res.result;
   } finally {

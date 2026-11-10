@@ -6,7 +6,7 @@
  * - `@@unique` + P2002 天然幂等，**不取应用层锁**：调用链可能在战斗结算的
  *   `slotLock` 内，自己再取同 key 会重演 F14 的同锁重入死锁（bug_log §36）。
  * - 客户端**只有 GET**：没有领取 / 上报 / 写入口；显式带上真值字段的查询一律 400。
- * - 新表按 `userId` 账号级，不按 slot，为 F17 单档化铺路。
+ * - 新表按 `userId` 账号级，与账号单档一致。
  */
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../lib/prisma';

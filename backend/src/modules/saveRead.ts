@@ -16,12 +16,12 @@ export type SaveRow = {
   authority: AuthorityState;
 };
 
-export async function readSave(userId: string, slot: number): Promise<SaveRow | null> {
-  const mem = gameSessions.get(userId, slot);
+export async function readSave(userId: string): Promise<SaveRow | null> {
+  const mem = gameSessions.get(userId);
   if (mem) {
     return { raw: mem.data, schemaVersion: mem.schemaVersion, clientId: mem.clientId, authority: mem.authority };
   }
-  const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
+  const rec = await prisma.save.findUnique({ where: { userId } });
   if (!rec) return null;
   return {
     raw: rec.data,

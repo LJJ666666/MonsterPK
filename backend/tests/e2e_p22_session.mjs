@@ -76,20 +76,20 @@ function validSave(overrides = {}) {
 // 需要构造版本冲突时显式传 { revision: n }。
 const saveWriter = makeSaveWriter(request);
 const put = saveWriter.put;
-const get = (token) => request('/api/save?slot=1', { token });
-const session = (token, slot = 1) => request(`/api/session?slot=${slot}`, { token });
+const get = (token) => request('/api/save', { token });
+const session = (token) => request('/api/session', { token });
 const health = () => request('/api/health');
 const me = (token) => request('/api/auth/me', { token });
 // P4：意图也要带 revision（CAS）。裁决成功后服务端返回新版本号，这里立刻同步，
 // 否则紧接着的 commitIntent（PUT 带 intentNonce）会拿旧版本撞 409。
 const intent = async (token, type, payload, save, nonce) => {
-  const revision = await saveWriter.revOf(token, 1);
+  const revision = await saveWriter.revOf(token);
   const res = await request(`/api/actions/${type}`, {
     method: 'POST', token,
-    body: { slot: 1, nonce, save: asText(save), payload, revision },
+    body: { nonce, save: asText(save), payload, revision },
   });
   if (res.status === 200 && typeof res.data?.revision === 'number') {
-    saveWriter.set(token, 1, res.data.revision);
+    saveWriter.set(token, res.data.revision);
   }
   return res;
 };
@@ -123,7 +123,7 @@ async function waitMsg(ctx, pred, timeout = 3_000) {
   return null;
 }
 const isHello = (m) => m?.type === 'hello';
-const isState = (m) => m?.type === 'session.state' && m.slot === 1;
+const isState = (m) => m?.type === 'session.state';
 const stateAfter = (rev) => (m) => isState(m) && m.revision > rev;
 
 function closeWs(ctx) {
@@ -165,9 +165,9 @@ async function main() {
   check('连接 A 收到 session.state 权威快照',
     !!snapA && snapA.revision === rev1 && snapA.source === 'hydrate',
     JSON.stringify(snapA && { revision: snapA.revision, source: snapA.source }));
-  check('快照含完整存档、slot 与在线连接数',
-    !!snapA && JSON.parse(snapA.data).money === 1200 && snapA.slot === 1 && snapA.online >= 1,
-    JSON.stringify(snapA && { slot: snapA.slot, online: snapA.online }));
+  check('快照含完整存档与在线连接数',
+    !!snapA && JSON.parse(snapA.data).money === 1200 && snapA.online >= 1,
+    JSON.stringify(snapA && { online: snapA.online }));
 
   const s1 = await session(token);
   check('/api/session：会话在线且 revision 与快照一致',
@@ -219,7 +219,7 @@ async function main() {
     JSON.stringify(resync && { revision: resync.revision }));
 
   b.ws.send(JSON.stringify({
-    type: 'session.state', slot: 1, revision: 999,
+    type: 'session.state', revision: 999,
     data: JSON.stringify(Object.assign(clone(spent), { money: 9_999_999 })),
   }));
   const err = await waitMsg(b, (m) => m?.type === 'error', 2_000);

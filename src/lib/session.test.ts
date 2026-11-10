@@ -2,6 +2,7 @@
  * P2-2 前端会话态纯逻辑单测（vitest）。
  * 不 import useGameStore / 浏览器 API，只覆盖 revision 幂等、意图在途暂存、
  * 以及下行快照的形状校验——这三条正是「收快照不回环、不覆盖未提交结果」的地基。
+ * F17：单档后 revision 是单值。
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -14,11 +15,10 @@ import { isSessionStateMessage } from "./ws";
 function msg(overrides: Partial<SessionStateMessage> = {}): SessionStateMessage {
   return {
     type: "session.state",
-    slot: 1,
     revision: 3,
-    data: '{"version":"10","party":[],"inventory":{}}',
+    data: '{"version":"11","party":[],"inventory":{}}',
     updatedAt: 1_700_000_000_000,
-    schemaVersion: "10",
+    schemaVersion: "11",
     source: "put",
     online: 1,
     ...overrides,
@@ -29,31 +29,29 @@ beforeEach(() => resetSessionStateForTest());
 
 describe("revision 幂等", () => {
   it("初始已见版本为 -1，任何合法 revision 都应应用", () => {
-    expect(getLastSeenRevision(1)).toBe(-1);
+    expect(getLastSeenRevision()).toBe(-1);
     expect(shouldApplySnapshot(msg({ revision: 1 }))).toBe(true);
   });
 
   it("noteRevision 后同版本 / 更旧版本一律忽略", () => {
-    noteRevision(1, 5);
-    expect(getLastSeenRevision(1)).toBe(5);
+    noteRevision(5);
+    expect(getLastSeenRevision()).toBe(5);
     expect(shouldApplySnapshot(msg({ revision: 5 }))).toBe(false);
     expect(shouldApplySnapshot(msg({ revision: 4 }))).toBe(false);
     expect(shouldApplySnapshot(msg({ revision: 6 }))).toBe(true);
   });
 
-  it("只记录更大的 revision，槽位之间互不干扰", () => {
-    noteRevision(1, 7);
-    noteRevision(1, 3);
-    noteRevision(2, 9);
-    expect(getLastSeenRevision(1)).toBe(7);
-    expect(getLastSeenRevision(2)).toBe(9);
-    expect(getLastSeenRevision(3)).toBe(-1);
+  it("只记录更大的 revision", () => {
+    noteRevision(7);
+    noteRevision(3);
+    noteRevision(9);
+    expect(getLastSeenRevision()).toBe(9);
   });
 
   it("非法 revision（NaN / 字符串）不被记录", () => {
-    noteRevision(1, Number.NaN);
-    noteRevision(1, "9" as any);
-    expect(getLastSeenRevision(1)).toBe(-1);
+    noteRevision(Number.NaN);
+    noteRevision("9" as any);
+    expect(getLastSeenRevision()).toBe(-1);
   });
 });
 
@@ -79,11 +77,11 @@ describe("意图在途保护", () => {
   });
 
   it("reset 清空版本与在途状态", () => {
-    noteRevision(1, 4);
+    noteRevision(4);
     beginIntent();
     deferSnapshot(msg());
     resetSessionStateForTest();
-    expect(getLastSeenRevision(1)).toBe(-1);
+    expect(getLastSeenRevision()).toBe(-1);
     expect(isIntentInFlight()).toBe(false);
     expect(endIntent()).toBeNull();
   });
@@ -94,10 +92,9 @@ describe("下行快照形状校验", () => {
     expect(isSessionStateMessage(msg())).toBe(true);
   });
 
-  it("缺 data / revision / slot / updatedAt 一律拒绝", () => {
+  it("缺 data / revision / updatedAt 一律拒绝", () => {
     expect(isSessionStateMessage({ ...msg(), data: undefined as any })).toBe(false);
     expect(isSessionStateMessage({ ...msg(), revision: undefined as any })).toBe(false);
-    expect(isSessionStateMessage({ ...msg(), slot: undefined as any })).toBe(false);
     expect(isSessionStateMessage({ ...msg(), updatedAt: undefined as any })).toBe(false);
   });
 

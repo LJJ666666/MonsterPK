@@ -24,7 +24,7 @@ function resultText(r: string | undefined) {
 
 export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
-  const { slot, save1, save2, save3, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, resumeBattle } = useGameStore();
+  const { save, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, resumeBattle } = useGameStore();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
   // 开局失败（断网 / 未登录 / 队伍全灭）要如实告知：现在没有本地降级，
   // 静默返回会让玩家以为按钮坏了。
@@ -32,9 +32,6 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   // P4-1b：共享野怪列表在组件顶层订阅（Hook 规则），战斗中也保持最新，
   // 结算后回到营地/训练场能立刻看到「已被捕获」与补进来的新怪。
   const wildView = useWildList(SHARED_WILD_AREA_ID, "grass", 1, 5);
-
-  const saves = [save1, save2, save3];
-  const save = saves[slot - 1];
 
   // P3-1c：我方队伍以服务端下发的战斗副本为准——战斗内的 HP / 经验只存在于那份副本里，
   // 存档要等结算才更新。本地降级已删除（2026-11-07），`?? save?.party` 只是服务端

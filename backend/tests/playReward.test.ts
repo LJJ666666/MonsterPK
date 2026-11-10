@@ -135,19 +135,18 @@ test('perRunGrantKey 按 battleId 隔离，确定性可复现', () => {
   assert.equal(perRunGrantKey('bt_1'), perRunGrantKey('bt_1'));
 });
 
-test('firstGrantKey 四个维度（账号/槽位/Boss/周期）任一变化都产生不同键', () => {
-  const base = ['user_a', 1, 'boss_ember_behemoth', '2026-11-09'];
+test('firstGrantKey 三个维度（账号/Boss/周期）任一变化都产生不同键', () => {
+  const base = ['user_a', 'boss_ember_behemoth', '2026-11-09'];
   const k = firstGrantKey(...base);
-  assert.equal(k, 'boss:first:2026-11-09:boss_ember_behemoth:user_a:1');
-  assert.notEqual(k, firstGrantKey('user_b', 1, 'boss_ember_behemoth', '2026-11-09'));
-  assert.notEqual(k, firstGrantKey('user_a', 2, 'boss_ember_behemoth', '2026-11-09'));
-  assert.notEqual(k, firstGrantKey('user_a', 1, 'boss_apex_dragon', '2026-11-09'));
-  assert.notEqual(k, firstGrantKey('user_a', 1, 'boss_ember_behemoth', '2026-11-10'));
+  assert.equal(k, 'boss:first:2026-11-09:boss_ember_behemoth:user_a');
+  assert.notEqual(k, firstGrantKey('user_b', 'boss_ember_behemoth', '2026-11-09'));
+  assert.notEqual(k, firstGrantKey('user_a', 'boss_apex_dragon', '2026-11-09'));
+  assert.notEqual(k, firstGrantKey('user_a', 'boss_ember_behemoth', '2026-11-10'));
   assert.equal(k, firstGrantKey(...base));
 });
 
 test('两档键前缀不同，不会互相占位', () => {
   assert.ok(perRunGrantKey('bt_1').startsWith('boss:run:'));
-  assert.ok(firstGrantKey('u', 1, 'b', 'p').startsWith('boss:first:'));
-  assert.notEqual(perRunGrantKey('bt_1'), firstGrantKey('u', 1, 'b', 'p'));
+  assert.ok(firstGrantKey('u', 'b', 'p').startsWith('boss:first:'));
+  assert.notEqual(perRunGrantKey('bt_1'), firstGrantKey('u', 'b', 'p'));
 });

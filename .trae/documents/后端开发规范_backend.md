@@ -1974,3 +1974,63 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
 （含 `ui_smoke_f04` **15/15**），文档一致性自检 **144 项 `DOC_CHECK_OK`**，
 记忆镜像 `sha256=e3d356899ffc` 一致，`git diff --check` 干净。
 机器无关证据：`.verify-report.json`；回滚点 `rollback-20261110-pre/post-f04`。
+
+## 32. F17 单档化：一账号一档（2026-11-10）
+
+### 32.1 口径与边界
+
+- 杰哥 11-10：「把三个档的设定删除，一个账号就一档，直接进去不需要选择，不走单机化了」。
+- 实测 **106 个文件**横切 `slot`（backend 66 / src 29 / scripts 11；11-10 台账登记的
+  94 是早间较窄口径，以本节为准）。8 张 Prisma 表含 `slot`，其中 `BadgeGrant` /
+  `AchievementGrant` 本就按 `userId` 账号级，零改动。
+- 与 F04 严格拆开：F04 等级真值在服务端独立表、故意**不动** `SCHEMA_VERSION`；
+  **F17 是唯一动版本号的阶段**（删 `slot` 属持久结构变更，三处必须联动）。
+- 开发阶段无真实老用户：不留兼容后门、不保留 `?slot=` 别名、不写「固定 `slot=1`」的假单档。
+
+### 32.2 数据层（第 11 条迁移）
+
+- 迁移 `20261110113000_f17_single_save`：先 `DELETE` 非 `slot=1` 的旧档（本机实测
+  51 行 → 50 行，只有 1 个用户有多档），再按 SQLite 重建表流程删 7 张表的 `slot` 列
+  与相关索引 / 唯一键。
+- `Save.userId @unique`（一账号一档由数据库唯一约束兜底）；`IntentLog` → `[userId, nonce]`、
+  `RankReward` → `[periodKey, boardKey, userId]`、`CoopRewardGrant` → `[roomId, userId]`。
+- 幂等键同步去槽位：`boss:first:<periodKey>:<bossId>:<userId>`、
+  `coop:clear:<roomId>:<userId>`（历史 grantKey 是审计值，不回改）。
+- 改 schema 前**先停 :3001**（Windows DLL 锁）→ `migrate deploy` + `generate`；
+  迁移前备份 `dev.db` 到 `.vtmp/dev.db.pre-f17`（不入库）。
+
+### 32.3 契约
+
+- `GET|PUT /api/save` **无参**；带 `?slot=` 一律 **400 `SAVE_SLOT_FORBIDDEN`**
+  （不是静默忽略），闸门在 zod / CAS / 风控之前；响应体、WS `session.state`、
+  榜单条目、Boss 伤害榜、奖励记录一律不含 `slot`。
+- 内部 key 全改单参数：`slotLockKey(userId)` / `sessionKey(userId)` / `battleKey(userId)` /
+  `commitState(userId, payload)` / `readSave(userId)`；`SESSION_SLOTS` 常量与三槽循环删除。
+  文件名 `slotLock.ts`、函数名 `withSlotLock` 保留历史命名，语义已是**账号级**。
+- `SCHEMA_VERSION` 10→**11**，前端 `migrateSaveState` 补 10→11 分支把
+  `{save1,save2,save3,slot}` 收敛成 `{ save }`；后端 `EXPECTED_SAVE_VERSION`=**11**。
+  历史 v1~v10 迁移分支保留（要认识旧三槽输入），但现行 persist 结构只有 `{ save }`。
+- `SessionStats.slots` 字段名暂留（E2E 依赖），单档后其值恒等于在线会话数，
+  不再按槽位解读。
+
+### 32.4 前端
+
+- store 单档 `{ save }`；删 `slot` / `setSlot` / `save1..3` / 动态取值；
+  所有 API 去 `?slot=` 与 body `slot`。
+- `sessionState.ts` 每槽 revision Map → 单值；`sync.ts` 单档上传；
+  409 `healFromConflict()` server-wins 不重试。
+- Start 页无选档 / 切档入口，榜单 UI 去「槽位 N」；视觉仍守 `.impeccable.md`
+  与 375px 无横向溢出。
+
+### 32.5 验收
+
+- 新增 `backend/tests/e2e_f17.mjs` **25/25**：`?slot=1/2/9` 与 PUT 带 slot 均 400、
+  无参 GET/PUT 往返 v11、只读接口与 WS 响应不含 `slot`、7 张表无 `slot` 列、
+  `Save.userId` 唯一（插第二档被唯一约束挡下）。
+- 注册 `verify.mjs` 的 **`STAGES` + `GROUPS` 两处**与 `backend/package.json`；
+  清理脚本补 `f17_` 前缀；既有 17 组 E2E / 10 组冒烟全量适配去槽位。
+- **最终 `npm run verify -- --strict` 37/37 `VERIFY_OK`**（0 失败 / 0 跳过，176.8s）：
+  前端 129 vitest + 构建、后端 394 node:test、18 组 E2E（`e2e:f17` 25/25）、
+  10 组 375px 冒烟、文档自检 `DOC_CHECK_OK`、记忆镜像一致、`git diff --check` 干净。
+  证据 `.verify-report.json`；回滚点 `rollback-20261110-pre/post-f17`。
+- 踩坑见 `bug_log §39`。

@@ -40,40 +40,39 @@ test('list：每个区域自动补足 3 只，字段完整且不含归属信息'
 test('捕获互斥：同一实例被两个账号同时 claim，只有第一个成功', () => {
   const r = new WildRegistry({ rng: seeded() });
   const id = r.list(AREA, SPEC, NOW).monsters[0].id;
-  const a = r.claim(id, 'userA', 1, 'battleA', NOW);
-  const b = r.claim(id, 'userB', 1, 'battleB', NOW);
+  const a = r.claim(id, 'userA', 'battleA', NOW);
+  const b = r.claim(id, 'userB', 'battleB', NOW);
   assert.equal(a.ok, true);
   assert.equal(b.ok, false);
   if ('code' in b) assert.equal(b.code, 'WILD_CLAIMED');
   assert.equal(r.list(AREA, SPEC, NOW).monsters.find((m) => m.id === id)?.status, 'claimed');
 });
 
-test('claim 未知实例 / 已结算实例 / 同槽位重复抢占，全部拒绝', () => {
+test('claim 未知实例 / 已结算实例 / 单账号重复抢占，全部拒绝', () => {
   const r = new WildRegistry({ rng: seeded() });
   const monsters = r.list(AREA, SPEC, NOW).monsters;
-  const unknown = r.claim('w_not_exist', 'u', 1, 'b', NOW);
+  const unknown = r.claim('w_not_exist', 'u', 'b', NOW);
   assert.equal(unknown.ok, false);
   if ('code' in unknown) assert.equal(unknown.code, 'WILD_NOT_FOUND');
 
-  assert.equal(r.claim(monsters[0].id, 'u', 1, 'b1', NOW).ok, true);
-  const cooldown = r.claim(monsters[1].id, 'u', 1, 'b2', NOW);
+  assert.equal(r.claim(monsters[0].id, 'u', 'b1', NOW).ok, true);
+  const cooldown = r.claim(monsters[1].id, 'u', 'b2', NOW);
   assert.equal(cooldown.ok, false);
   if ('code' in cooldown) assert.equal(cooldown.code, 'WILD_ON_COOLDOWN');
 
-  assert.equal(r.resolve(monsters[0].id, 'u', 1, 'b1', 'captured', NOW), true);
-  const resolved = r.claim(monsters[0].id, 'other', 1, 'b3', NOW);
+  assert.equal(r.resolve(monsters[0].id, 'u', 'b1', 'captured', NOW), true);
+  const resolved = r.claim(monsters[0].id, 'other', 'b3', NOW);
   assert.equal(resolved.ok, false);
   if ('code' in resolved) assert.equal(resolved.code, 'WILD_RESOLVED');
 });
 
-test('resolve 三键归属：别人不能结束我的野怪', () => {
+test('resolve 二键归属：别人不能结束我的野怪', () => {
   const r = new WildRegistry({ rng: seeded() });
   const id = r.list(AREA, SPEC, NOW).monsters[0].id;
-  assert.equal(r.claim(id, 'u1', 1, 'bt1', NOW).ok, true);
-  assert.equal(r.resolve(id, 'u2', 1, 'bt1', 'captured', NOW), false, 'userId 不符');
-  assert.equal(r.resolve(id, 'u1', 2, 'bt1', 'captured', NOW), false, 'slot 不符');
-  assert.equal(r.resolve(id, 'u1', 1, 'bt2', 'captured', NOW), false, 'battleId 不符');
-  assert.equal(r.resolve(id, 'u1', 1, 'bt1', 'captured', NOW), true);
+  assert.equal(r.claim(id, 'u1', 'bt1', NOW).ok, true);
+  assert.equal(r.resolve(id, 'u2', 'bt1', 'captured', NOW), false, 'userId 不符');
+  assert.equal(r.resolve(id, 'u1', 'bt2', 'captured', NOW), false, 'battleId 不符');
+  assert.equal(r.resolve(id, 'u1', 'bt1', 'captured', NOW), true);
   const view = r.list(AREA, SPEC, NOW).monsters.find((m) => m.id === id);
   assert.equal(view?.status, 'resolved');
   assert.equal(view?.result, 'captured');
@@ -82,13 +81,13 @@ test('resolve 三键归属：别人不能结束我的野怪', () => {
 test('release：放弃战斗把野怪放回池子，别人还能抢', () => {
   const r = new WildRegistry({ rng: seeded() });
   const id = r.list(AREA, SPEC, NOW).monsters[0].id;
-  assert.equal(r.claim(id, 'u1', 1, 'bt1', NOW).ok, true);
+  assert.equal(r.claim(id, 'u1', 'bt1', NOW).ok, true);
   assert.equal(r.findByBattle('bt1')?.id, id);
   const affected = r.release('bt1', NOW);
   assert.deepEqual(affected, [AREA]);
   assert.equal(r.findByBattle('bt1'), undefined);
   assert.equal(r.list(AREA, SPEC, NOW).monsters.find((m) => m.id === id)?.status, 'available');
-  assert.equal(r.claim(id, 'u2', 1, 'bt2', NOW).ok, true);
+  assert.equal(r.claim(id, 'u2', 'bt2', NOW).ok, true);
 });
 
 test('TTL：未抢占的野怪到期换新；抢占超时自动放回', () => {
@@ -100,7 +99,7 @@ test('TTL：未抢占的野怪到期换新；抢占超时自动放回', () => {
 
   const r2 = new WildRegistry({ rng: seeded() });
   const id = r2.list(AREA, SPEC, NOW).monsters[0].id;
-  assert.equal(r2.claim(id, 'u', 1, 'bt', NOW).ok, true);
+  assert.equal(r2.claim(id, 'u', 'bt', NOW).ok, true);
   r2.ensure(AREA, SPEC, NOW + WILD_CLAIM_TTL_MS + 1);
   assert.equal(r2.list(AREA, SPEC, NOW + WILD_CLAIM_TTL_MS + 1).monsters.find((m) => m.id === id)?.status,
     'available', '断线挂机不能永久占坑');
@@ -109,8 +108,8 @@ test('TTL：未抢占的野怪到期换新；抢占超时自动放回', () => {
 test('resolve 后保留宽限期，过期才补新实例', () => {
   const r = new WildRegistry({ rng: seeded(), graceMs: 10_000 });
   const id = r.list(AREA, SPEC, NOW).monsters[0].id;
-  assert.equal(r.claim(id, 'u', 1, 'bt', NOW).ok, true);
-  assert.equal(r.resolve(id, 'u', 1, 'bt', 'defeated', NOW), true);
+  assert.equal(r.claim(id, 'u', 'bt', NOW).ok, true);
+  assert.equal(r.resolve(id, 'u', 'bt', 'defeated', NOW), true);
   const during = r.list(AREA, SPEC, NOW + 5_000).monsters.find((m) => m.id === id);
   assert.equal(during?.status, 'resolved', '其他客户端要能看到「已被击败」');
   assert.equal(during?.result, 'defeated');
@@ -129,9 +128,9 @@ test('revision 按区域独立：别处补怪不影响本区域版本，且不�
   assert.ok(r.currentRevision > 0, '全局累计变更数仍单调');
 
   const id = r.list(AREA, SPEC, NOW + 1).monsters[0].id;
-  r.claim(id, 'u', 1, 'bt', NOW + 1);
+  r.claim(id, 'u', 'bt', NOW + 1);
   assert.ok(r.revisionFor(AREA) > v1, '抢占要推进本区域版本');
-  r.resolve(id, 'u', 1, 'bt', 'captured', NOW + 1);
+  r.resolve(id, 'u', 'bt', 'captured', NOW + 1);
   assert.ok(r.revisionFor(AREA) > v1 + 1);
 });
 

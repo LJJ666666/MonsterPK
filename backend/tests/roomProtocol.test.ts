@@ -76,9 +76,9 @@ test('房间意图的形状校验：缺 nonce / 坏 action / 坏 roomId / 缺意
 test('既有 ping / session.resync 不受房间协议影响', () => {
   const ping = parseClientMessage(JSON.stringify({ type: 'ping', ts: 1 }));
   assert.equal('message' in ping, true);
-  const resync = parseClientMessage(JSON.stringify({ type: 'session.resync', slot: 2 }));
+  const resync = parseClientMessage(JSON.stringify({ type: 'session.resync', foo: 2 }));
   assert.equal('message' in resync, true);
-  if ('message' in resync) assert.deepEqual(resync.message, { type: 'session.resync', slot: 2 });
+  if ('message' in resync) assert.deepEqual(resync.message, { type: 'session.resync' });
 });
 
 test('room.state 下行能编码为完整全量快照', () => {

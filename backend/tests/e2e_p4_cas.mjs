@@ -34,16 +34,16 @@ const mk = async (prefix) => {
 
 /** 直接发 PUT，完全手工控制 revision（CAS 用例必须精确控制）。 */
 const rawPut = (token, data, revision, extra = {}) =>
-  api('/api/save?slot=1', {
+  api('/api/save', {
     method: 'PUT',
     token,
     body: revision === undefined ? { data: asText(data), ...extra } : { data: asText(data), revision, ...extra },
   });
 
 const rawIntent = (token, type, body) =>
-  api(`/api/actions/${type}`, { method: 'POST', token, body: { slot: 1, ...body } });
+  api(`/api/actions/${type}`, { method: 'POST', token, body: { ...body } });
 
-const getSave = (token) => api('/api/save?slot=1', { token });
+const getSave = (token) => api('/api/save', { token });
 const nonceOf = (tag) => `${tag}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 const jsonOf = (res) => {
   try { return JSON.parse(res.data.data); } catch { return null; }
@@ -210,7 +210,7 @@ async function main() {
     locationId: 'town_starter',
     party: [{ ...validSave().party[0], hp: 1 }],
   });
-  const heal = await api('/api/game/heal', { method: 'POST', token: healAcc.token, body: { slot: 1 } });
+  const heal = await api('/api/game/heal', { method: 'POST', token: healAcc.token, body: {} });
   suite.check('服务端写操作不需要客户端声明版本（服务端自持状态）→ 200',
     heal.status === 200, `status=${heal.status} code=${heal.data?.code ?? ''}`);
   suite.check('服务端写操作推进版本号',
@@ -239,7 +239,7 @@ async function main() {
     suite.check('GET /api/save 的 revision 与 PUT 返回一致',
       got.data?.revision === putRev, `get=${got.data?.revision} put=${putRev}`);
 
-    const ses = await api('/api/session?slot=1', { token: wsAcc.token });
+    const ses = await api('/api/session', { token: wsAcc.token });
     suite.check('GET /api/session 的 revision 与 PUT 返回一致',
       ses.data?.revision === putRev, `session=${ses.data?.revision} put=${putRev}`);
   } finally {
@@ -272,7 +272,7 @@ async function main() {
 
   // ═══════════════════ H. 真并发（TOCTOU）═══════════════════
   // 上面都是「先 A 后 B」的串行冲突。真正危险的是两条请求同时进来：
-  // 校验和写之间有 await，若没有槽位保护，两条都会读到同一版本、都通过校验、
+  // 校验和写之间有 await，若没有并发保护，两条都会读到同一版本、都通过校验、
   // 都写成功，版本号却只涨一次 —— 后写的一方被静默覆盖，CAS 形同虚设。
   // 说明：本机这个形状（undici + Prisma 队列 + 内存会话）即使去掉锁也只会有
   // 一条成功，所以这里测的是「对外契约」；「临界区不交错」由
@@ -308,8 +308,8 @@ async function main() {
     party: [{ ...validSave().party[0], hp: 1 }],
   });
   const [h1, h2] = await Promise.all([
-    api('/api/game/heal', { method: 'POST', token: healRace.token, body: { slot: 1 } }),
-    api('/api/game/heal', { method: 'POST', token: healRace.token, body: { slot: 1 } }),
+    api('/api/game/heal', { method: 'POST', token: healRace.token, body: {} }),
+    api('/api/game/heal', { method: 'POST', token: healRace.token, body: {} }),
   ]);
   const healOk = [h1, h2].filter((r) => r.status === 200).length;
   suite.check('并发两条服务端写操作都成功（互相不吞）',

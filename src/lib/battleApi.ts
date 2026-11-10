@@ -106,7 +106,6 @@ export function toBattleState(view: ServerBattleView): BattleState {
 }
 
 export type StartInput = {
-  slot: number;
   theme: string;
   areaName: string;
   areaId?: string;
@@ -128,7 +127,6 @@ export const battleApi = {
   /** 开局。返回服务端战斗视图；失败抛原始错误，由调用方 `toFailure` 归一。 */
   async start(input: StartInput): Promise<ServerBattleView> {
     const res = await api.battleStart({
-      slot: input.slot,
       theme: input.theme,
       areaName: input.areaName,
       areaId: input.areaId ?? null,
@@ -143,24 +141,23 @@ export const battleApi = {
 
   /** 发动作。返回最新视图 + 是否已结算落档。 */
   async action(
-    slot: number,
     battleId: string,
     action: ActionInput,
   ): Promise<{ view: ServerBattleView; settled: boolean; revision?: number }> {
-    const res = await api.battleAction({ battleId, slot, action: action as any });
+    const res = await api.battleAction({ battleId, action: action as any });
     if (!res?.battle) throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
     // P4：结算会写档并推进版本，客户端要立刻对齐，否则下一次自动上传会撞 409。
-    if (res.settled && typeof res.revision === "number") setRevision(slot, res.revision);
+    if (res.settled && typeof res.revision === "number") setRevision(res.revision);
     return { view: res.battle as ServerBattleView, settled: !!res.settled, revision: res.revision };
   },
 
   /** 取回仍存活的战斗（刷新/断线重连）。没有则返回 null。 */
-  async current(slot: number): Promise<ServerBattleView | null> {
-    const res = await api.battleCurrent(slot);
+  async current(): Promise<ServerBattleView | null> {
+    const res = await api.battleCurrent();
     return (res?.battle as ServerBattleView) ?? null;
   },
 
-  async abandon(slot: number, battleId: string): Promise<void> {
-    await api.battleAbandon(battleId, slot);
+  async abandon(battleId: string): Promise<void> {
+    await api.battleAbandon(battleId);
   },
 };

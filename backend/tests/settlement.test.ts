@@ -23,7 +23,7 @@ function mon(id: string, level = 10, hp = 20, maxHp = 40) {
 
 function makeState(over: Partial<BattleState> = {}): BattleState {
   return {
-    id: 'bt_test', userId: 'u1', slot: 1, theme: 'grass', areaName: '测试草地',
+    id: 'bt_test', userId: 'u1', theme: 'grass', areaName: '测试草地',
     areaId: null, levelMin: 1, levelMax: 3, turn: 2, log: [], playerActiveIndex: 0,
     playerMods: emptyMods(), enemyMods: emptyMods(),
     enemy: mon('enemy_1', 3, 0, 20), party: [mon('p1', 10, 5, 40)],

@@ -28,7 +28,6 @@ export type BattleResult = 'captured' | 'enemy_fainted' | 'fled' | 'player_faint
 export type BattleState = {
   id: string;
   userId: string;
-  slot: number;
   theme: string;
   areaName: string;
   areaId: string | null;
@@ -136,7 +135,6 @@ export function generateEncounter(theme: string, partyLevel: number, rng: Rng, t
 export function createBattle(params: {
   id: string;
   userId: string;
-  slot: number;
   theme: string;
   areaName: string;
   areaId?: string | null;
@@ -182,7 +180,6 @@ export function createBattle(params: {
   return {
     id: params.id,
     userId: params.userId,
-    slot: params.slot,
     theme: params.boss ? params.boss.spec.theme : params.theme,
     areaName: params.boss ? params.boss.spec.name : params.areaName,
     areaId: params.boss ? null : (params.areaId ?? null),

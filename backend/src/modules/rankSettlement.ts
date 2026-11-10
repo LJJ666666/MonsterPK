@@ -4,7 +4,7 @@
  * 权威口径：
  *  - **只有已结束的周期能结算**：进行中的周期提前定榜会让人刷名次 / 刷奖励。
  *  - **快照幂等可重跑**：(periodKey, boardKey) 唯一键，重跑不覆盖首次快照；
- *    奖励逐条按 (periodKey, boardKey, userId, slot) 唯一键补发，中途失败可续跑。
+ *    奖励逐条按 (periodKey, boardKey, userId) 唯一键补发，中途失败可续跑。
  *  - **发奖只由服务端写档**：走 readSave → applyRankReward → 同步 authority.expected
  *    → commitState，客户端没有任何「领取」入口，也没有任何奖励数值上报口。
  *  - **不新增权威源**：四张派生榜仍从 Save 落库真值派生；Boss 伤害榜仍只认
@@ -34,7 +34,6 @@ export const SNAPSHOT_LIMIT = 50;
 export type RewardCandidate = {
   rank: number;
   username: string;
-  slot: number;
   value: number;
   userId: string;
 };
@@ -68,7 +67,7 @@ function isUniqueViolation(e: unknown): boolean {
 /**
  * 生成一张榜的结算快照。
  * `RankRow` / `BossRankRow` 都是**不含 userId 的公开视图**（P4-2a E2E 钉过口径），
- * 因此额外用 username(+slot) 反查内部 userId 作为发奖候选，绝不把 userId 写进快照。
+ * 因此额外用 username 反查内部 userId 作为发奖候选，绝不把 userId 写进快照。
  */
 async function snapshotOf(boardKey: string, periodKey: string): Promise<BoardSnapshot> {
   const parsed = parseBoardKey(boardKey);
@@ -77,20 +76,19 @@ async function snapshotOf(boardKey: string, periodKey: string): Promise<BoardSna
   if (parsed.kind === 'rank') {
     const { sources, eligible, skipped } = await loadRankSources();
     const entries = buildBoard(parsed.type, sources, SNAPSHOT_LIMIT);
-    const idOf = new Map(sources.map((s) => [`${s.username}#${s.slot}`, s.userId]));
+    const idOf = new Map(sources.map((s) => [s.username, s.userId]));
     const candidates: RewardCandidate[] = entries.map((e) => ({
       rank: e.rank,
       username: e.username,
-      slot: e.slot,
       value: e.value,
-      userId: idOf.get(`${e.username}#${e.slot}`) ?? '',
+      userId: idOf.get(e.username) ?? '',
     }));
     return { boardKey, label: RANK_META[parsed.type].label, entries, eligible, skipped, candidates };
   }
 
   const events = await prisma.bossDamageEvent.findMany({
     where: { bossId: parsed.id, periodKey },
-    select: { userId: true, slot: true, damage: true, createdAt: true },
+    select: { userId: true, damage: true, createdAt: true },
   });
   const ids = Array.from(new Set(events.map((e) => e.userId)));
   const users = ids.length
@@ -106,7 +104,6 @@ async function snapshotOf(boardKey: string, periodKey: string): Promise<BoardSna
     .map((e) => ({
       userId: e.userId,
       username: nameOf.get(e.userId)!,
-      slot: e.slot,
       damage: e.damage,
       createdAt: e.createdAt.getTime(),
     }));
@@ -114,7 +111,6 @@ async function snapshotOf(boardKey: string, periodKey: string): Promise<BoardSna
   const candidates: RewardCandidate[] = entries.map((e) => ({
     rank: e.rank,
     username: e.username,
-    slot: e.slot,
     value: e.damage,
     userId: idByUsername.get(e.username) ?? '',
   }));
@@ -125,7 +121,7 @@ async function snapshotOf(boardKey: string, periodKey: string): Promise<BoardSna
 }
 
 /**
- * 单笔奖励发放（槽位锁串行）。
+ * 单笔奖励发放（账号锁串行）。
  * 顺序：唯一键占位 → 读档 → 写档 → 回填 revision；任一步失败删除占位以便重跑补发。
  * 不能「先写档再插记录」：那样插入失败（重复）时奖励已经进档，会凭空多给一份。
  */
@@ -136,11 +132,11 @@ async function grantOne(params: {
   reward: RankReward;
 }): Promise<'granted' | 'skipped' | 'failed'> {
   const { periodKey, boardKey, candidate, reward } = params;
-  const { userId, slot, rank } = candidate;
-  return withSlotLock(slotLockKey(userId, slot), async () => {
-    const key = { periodKey, boardKey, userId, slot };
+  const { userId, rank } = candidate;
+  return withSlotLock(slotLockKey(userId), async () => {
+    const key = { periodKey, boardKey, userId };
     const existing = await prisma.rankReward.findUnique({
-      where: { periodKey_boardKey_userId_slot: key },
+      where: { periodKey_boardKey_userId: key },
     });
     if (existing) return 'skipped';
 
@@ -160,7 +156,7 @@ async function grantOne(params: {
     }
 
     try {
-      const row = await readSave(userId, slot);
+      const row = await readSave(userId);
       if (!row) {
         await prisma.rankReward.delete({ where: { id: recordId } });
         return 'skipped';
@@ -174,7 +170,7 @@ async function grantOne(params: {
         revision: row.authority.revision + 1,
         pending: null,
       };
-      const committed = await commitState(userId, slot, {
+      const committed = await commitState(userId, {
         data: raw,
         schemaVersion: row.schemaVersion,
         clientId: row.clientId,
@@ -308,7 +304,6 @@ export async function loadMyRewards(userId: string, limit = 50) {
       boardKey: r.boardKey,
       label: boardLabel(r.boardKey),
       rank: r.rank,
-      slot: r.slot,
       reward: (() => { try { return JSON.parse(r.reward); } catch { return { money: 0, items: [] }; } })(),
       revision: r.revision,
       grantedAt: r.grantedAt.toISOString(),

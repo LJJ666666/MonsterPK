@@ -1,5 +1,5 @@
 /**
- * 槽位级串行化单测（P4 前置）。
+ * 账号级串行化单测（P4 前置，F17 起一账号一档）。
  *
  * 为什么必须单独测这把锁：E2E 里「同版本并发两条 PUT」在本机跑出来始终只有一条成功，
  * 看起来像 CAS 已经够了 —— 但那依赖运行时调度（undici 连接复用、Prisma 队列、
@@ -15,7 +15,7 @@ const yieldTicks = () => new Promise<void>((r) => setTimeout(r, 0));
 
 test('同一 key：临界区不交错（进-出成对，不出现 A 进 B 进 A 出）', async () => {
   clearSlotLocksForTest();
-  const key = slotLockKey('u1', 1);
+  const key = slotLockKey('u1');
   const log: string[] = [];
 
   const job = (tag: string) =>
@@ -34,7 +34,7 @@ test('同一 key：临界区不交错（进-出成对，不出现 A 进 B 进 A 
 
 test('同一 key：共享计数器无丢失更新（读-改-写跨 await 也不丢）', async () => {
   clearSlotLocksForTest();
-  const key = slotLockKey('u2', 1);
+  const key = slotLockKey('u2');
   let value = 0;
 
   const bump = () =>
@@ -48,16 +48,16 @@ test('同一 key：共享计数器无丢失更新（读-改-写跨 await 也不�
   assert.equal(value, 20);
 });
 
-test('不同 key：互不阻塞（不同槽位/不同账号可并行）', async () => {
+test('不同账号：互不阻塞（不同 key 可并行）', async () => {
   clearSlotLocksForTest();
   const order: string[] = [];
 
-  const slow = withSlotLock(slotLockKey('u3', 1), async () => {
+  const slow = withSlotLock(slotLockKey('u3'), async () => {
     order.push('slow:in');
     await new Promise<void>((r) => setTimeout(r, 30));
     order.push('slow:out');
   });
-  const fast = withSlotLock(slotLockKey('u3', 2), async () => {
+  const fast = withSlotLock(slotLockKey('u4'), async () => {
     order.push('fast:in');
     await yieldTicks();
     order.push('fast:out');
@@ -70,7 +70,7 @@ test('不同 key：互不阻塞（不同槽位/不同账号可并行）', async 
 
 test('前一个任务失败不阻断后续任务，且返回值 / 异常各自正确传递', async () => {
   clearSlotLocksForTest();
-  const key = slotLockKey('u4', 1);
+  const key = slotLockKey('u5');
   const ran: string[] = [];
 
   const bad = withSlotLock(key, async () => {
@@ -92,7 +92,7 @@ test('队尾排空后清理队列（不随账号数增长）', async () => {
   clearSlotLocksForTest();
   assert.equal(activeSlotLocks(), 0);
 
-  await withSlotLock(slotLockKey('u5', 1), async () => {
+  await withSlotLock(slotLockKey('u6'), async () => {
     await yieldTicks();
   });
   // 清理挂在队尾的 then 上，多等一个 tick

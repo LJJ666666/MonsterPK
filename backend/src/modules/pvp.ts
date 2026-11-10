@@ -27,10 +27,8 @@ import { wsRegistry } from './sessionBus';
 
 export const PVP_INPUT_FORBIDDEN_CODE = 'PVP_INPUT_FORBIDDEN';
 
-const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
-
-const createSchema = z.object({ slot: slotSchema }).strip();
-const joinSchema = z.object({ slot: slotSchema }).strip();
+const createSchema = z.object({}).strip();
+const joinSchema = z.object({}).strip();
 const paramsSchema = z.object({ roomId: z.string().min(1).max(96) });
 
 /**
@@ -64,9 +62,9 @@ function connectionOf(userId: string): string | null {
   return wsRegistry.listForUser(userId)[0]?.id ?? null;
 }
 
-/** 读某账号某槽位的队伍（活体校验）。返回 null 表示无档 / 队伍不可用。 */
-async function readParty(userId: string, slot: number) {
-  const row = await readSave(userId, slot);
+/** 读某账号单档的队伍（活体校验）。返回 null 表示无档 / 队伍不可用。 */
+async function readParty(userId: string) {
+  const row = await readSave(userId);
   if (!row) return null;
   let save: any;
   try {
@@ -88,14 +86,13 @@ export async function applyPvpCreate(params: {
   userId: string;
   digest: string;
   connectionId: string | null;
-  slot: number;
   now?: number;
 }): Promise<PvpResult<{ room: any }>> {
   const now = params.now ?? Date.now();
-  const party = await readParty(params.userId, params.slot);
+  const party = await readParty(params.userId);
   if (!party) return fail('PVP_NO_PARTY', '还没有可用队伍，无法对战', 404);
 
-  return withSlotLock(slotLockKey(params.userId, params.slot), async () => {
+  return withSlotLock(slotLockKey(params.userId), async () => {
     const roomId = `pvp_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
     return withRoomLock(roomId, async () => {
       if (!params.digest || !params.connectionId) {
@@ -122,7 +119,6 @@ export async function applyPvpJoin(params: {
   userId: string;
   digest: string;
   connectionId: string | null;
-  slot: number;
   now?: number;
 }): Promise<PvpResult<{ room: any }>> {
   const now = params.now ?? Date.now();
@@ -138,13 +134,13 @@ export async function applyPvpJoin(params: {
     if ('code' in res) return fail(res.code, res.reason, 409);
     let room = res.value;
 
-    // 满员开局：读双方队伍生成 pvp 态（MVP 双方都用槽位 1）。
+    // 满员开局：读双方队伍生成 pvp 态。
     if (room.status === 'active' && !room.pvp) {
       const a = room.seats.find((s) => s.seat === 0);
       const b = room.seats.find((s) => s.seat === 1);
       if (a && b) {
-        const partyA = await readParty(a.userId, 1);
-        const partyB = await readParty(b.userId, 1);
+        const partyA = await readParty(a.userId);
+        const partyB = await readParty(b.userId);
         if (!partyA || !partyB) {
           rooms.abandon(room.roomId, now, 'party_unavailable');
           publishRoom(room.roomId);
@@ -185,9 +181,9 @@ export async function settlePvpRoom(roomId: string): Promise<void> {
   const pvp = room.pvp;
 
   for (const side of pvp.sides) {
-    const rec = await readSave(side.userId, 1);
+    const rec = await readSave(side.userId);
     if (!rec) continue;
-    await withSlotLock(slotLockKey(side.userId, 1), async () => {
+    await withSlotLock(slotLockKey(side.userId), async () => {
       let save: any;
       try {
         save = JSON.parse(rec.raw);
@@ -204,7 +200,7 @@ export async function settlePvpRoom(roomId: string): Promise<void> {
         revision: rec.authority.revision + 1,
         pending: null,
       };
-      await commitState(side.userId, 1, {
+      await commitState(side.userId, {
         data: raw,
         schemaVersion: rec.schemaVersion,
         clientId: rec.clientId,
@@ -230,7 +226,6 @@ export async function pvpRoutes(fastify: FastifyInstance): Promise<void> {
       userId: req.user.userId,
       digest: tokenDigest(bearerOf(req)),
       connectionId: connectionOf(req.user.userId),
-      slot: parsed.data.slot,
     });
     if ('code' in res) return reply.code(res.status).send({ error: res.reason, code: res.code });
     return reply.send({ ok: true, ...res.value });
@@ -250,7 +245,6 @@ export async function pvpRoutes(fastify: FastifyInstance): Promise<void> {
       userId: req.user.userId,
       digest: tokenDigest(bearerOf(req)),
       connectionId: connectionOf(req.user.userId),
-      slot: b.data.slot,
     });
     if ('code' in res) return reply.code(res.status).send({ error: res.reason, code: res.code });
     return reply.send({ ok: true, ...res.value });

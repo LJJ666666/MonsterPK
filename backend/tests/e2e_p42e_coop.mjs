@@ -59,10 +59,10 @@ async function makeRoom(hPrefix, gPrefix) {
   const guest = await accountWithSave(gPrefix, strongSave());
   await open(host.token);
   await open(guest.token);
-  const c = await post(host.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const c = await post(host.token, '/api/coop/create', { bossId: BOSS });
   if (c.status !== 200) throw new Error(`建房失败 ${c.status}: ${JSON.stringify(c.data)}`);
   const roomId = c.data.room.roomId;
-  const j = await post(guest.token, `/api/coop/${roomId}/join`, { slot: 1 });
+  const j = await post(guest.token, `/api/coop/${roomId}/join`, {});
   if (j.status !== 200) throw new Error(`加入失败 ${j.status}: ${JSON.stringify(j.data)}`);
   return { host, guest, roomId };
 }
@@ -72,24 +72,24 @@ async function main() {
 
   // ═══ A. 接口边界 ═══
   console.log('\n—— A. 接口边界 ——');
-  const noAuth = await post(null, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const noAuth = await post(null, '/api/coop/create', { bossId: BOSS });
   suite.check('未登录建房 401', noAuth.status === 401, `status=${noAuth.status}`);
 
   const A = await mk('p42e_a');
-  const forged = await post(A.token, '/api/coop/create', { slot: 1, bossId: BOSS, hp: 999, damage: 10000 });
+  const forged = await post(A.token, '/api/coop/create', { bossId: BOSS, hp: 999, damage: 10000 });
   suite.check('伪上报共斗状态 400 COOP_INPUT_FORBIDDEN',
     forged.status === 400 && forged.data?.code === 'COOP_INPUT_FORBIDDEN', JSON.stringify(forged.data));
 
-  const unknown = await post(A.token, '/api/coop/create', { slot: 1, bossId: 'boss_not_exist' });
+  const unknown = await post(A.token, '/api/coop/create', { bossId: 'boss_not_exist' });
   suite.check('未知共斗目标 400 COOP_BOSS_UNKNOWN',
     unknown.status === 400 && unknown.data?.code === 'COOP_BOSS_UNKNOWN', JSON.stringify(unknown.data));
 
-  const noParty = await post(A.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const noParty = await post(A.token, '/api/coop/create', { bossId: BOSS });
   suite.check('无队伍建房 404 COOP_NO_PARTY',
     noParty.status === 404 && noParty.data?.code === 'COOP_NO_PARTY', JSON.stringify(noParty.data));
 
   const A2 = await accountWithSave('p42e_a2', strongSave());
-  const noWs = await post(A2.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const noWs = await post(A2.token, '/api/coop/create', { bossId: BOSS });
   suite.check('无实时通道建房 409 ROOM_WS_REQUIRED',
     noWs.status === 409 && noWs.data?.code === 'ROOM_WS_REQUIRED', JSON.stringify(noWs.data));
 
@@ -100,7 +100,7 @@ async function main() {
   await open(host.token);
   await open(guest.token);
 
-  const created1 = await post(host.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const created1 = await post(host.token, '/api/coop/create', { bossId: BOSS });
   suite.check('建房 200 forming / mode=coop / 六房态尚未生成 / quota held',
     created1.status === 200 && created1.data?.room?.mode === 'coop'
     && created1.data.room.status === 'forming' && created1.data.room.coop === null
@@ -108,7 +108,7 @@ async function main() {
     JSON.stringify(created1.data?.room).slice(0, 240));
   const roomId = created1.data?.room?.roomId;
 
-  const joined = await post(guest.token, `/api/coop/${roomId}/join`, { slot: 1 });
+  const joined = await post(guest.token, `/api/coop/${roomId}/join`, {});
   suite.check('加入后 active / 六房态生成 / turn=1 / total=6 / 全员在大厅',
     joined.status === 200 && joined.data?.room?.status === 'active'
     && !!joined.data?.room?.coop && joined.data.room.coop.turn === 1
@@ -182,7 +182,7 @@ async function main() {
   suite.check('非成员读房间 404', outsiderRead.status === 404, `status=${outsiderRead.status}`);
 
   await open(outsider.token);
-  const full = await post(outsider.token, `/api/coop/${roomId}/join`, { slot: 1 });
+  const full = await post(outsider.token, `/api/coop/${roomId}/join`, {});
   suite.check('满员房间 join 被拒（ROOM_CLOSED / ROOM_FULL）',
     full.status === 409 && (full.data?.code === 'ROOM_FULL' || full.data?.code === 'ROOM_CLOSED'),
     JSON.stringify(full.data));

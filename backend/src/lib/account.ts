@@ -92,7 +92,6 @@ export type BanParams = {
   userId: string;
   reason: string;
   codes: string[];
-  slot?: number;
   stats?: Record<string, unknown>;
 };
 
@@ -106,7 +105,6 @@ export async function banAccount(params: BanParams): Promise<void> {
     prisma.banRecord.create({
       data: {
         userId: params.userId,
-        slot: params.slot ?? null,
         codes: JSON.stringify(params.codes),
         reason: params.reason,
         stats: params.stats ? JSON.stringify(params.stats) : null,

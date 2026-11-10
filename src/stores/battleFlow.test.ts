@@ -80,7 +80,7 @@ function monster(over: Partial<MonsterInstance> = {}): MonsterInstance {
 
 function makeSave(): SaveData {
   return {
-    version: "10",
+    version: "11",
     playerName: "旅行者",
     money: 1200,
     steps: 340,
@@ -130,7 +130,7 @@ beforeEach(() => {
   mem.clear();
   vi.clearAllMocks();
   loginAs();
-  useGameStore.setState({ slot: 1, save1: makeSave(), save2: null, save3: null, battle: null } as any);
+  useGameStore.setState({ save: makeSave(), battle: null });
   (api.battleStart as any).mockResolvedValue({ ok: true, battle: view(), ttlMs: 1_800_000 });
   (api.battleAction as any).mockResolvedValue({ ok: true, battle: view({ turn: 2 }), settled: false });
   (api.battleCurrent as any).mockResolvedValue({ ok: true, battle: null });
@@ -153,15 +153,15 @@ describe("startEncounter：开局走服务端", () => {
   });
 
   it("开局不改本地存档：图鉴「已见」与队伍 HP 都等服务端结算", async () => {
-    const before = JSON.stringify(useGameStore.getState().save1);
+    const before = JSON.stringify(useGameStore.getState().save);
     await useGameStore.getState().startEncounter("grass", "测试草地", 1, 5);
-    expect(JSON.stringify(useGameStore.getState().save1)).toBe(before);
+    expect(JSON.stringify(useGameStore.getState().save)).toBe(before);
   });
 
   it("请求参数带上区域与等级区间（服务端据此校准真值）", async () => {
     await useGameStore.getState().startEncounter("grass", "测试草地", 2, 6, "area_a");
     expect(api.battleStart).toHaveBeenCalledWith(
-      expect.objectContaining({ slot: 1, theme: "grass", areaName: "测试草地", areaId: "area_a", levelMin: 2, levelMax: 6 }),
+      expect.objectContaining({ theme: "grass", areaName: "测试草地", areaId: "area_a", levelMin: 2, levelMax: 6 }),
     );
   });
 
@@ -175,14 +175,14 @@ describe("startEncounter：开局走服务端", () => {
   it("服务端不可达（网络层失败）→ 如实报错，不再降级本地战斗", async () => {
     // 2026-11-07：本地降级已删除。本地战果必然被服务端增量核对拒绝，
     // 只会留下「打完不认」和同步 400 死循环，收益为零。
-    const saveBefore = JSON.stringify(useGameStore.getState().save1);
+    const saveBefore = JSON.stringify(useGameStore.getState().save);
     (api.battleStart as any).mockRejectedValue(new TypeError("Failed to fetch"));
     const res = await useGameStore.getState().startEncounter(...startArgs);
     expect(res.ok).toBe(false);
     expect((res as { reason?: string }).reason ?? "").toContain("网络中断");
     expect(currentBattle()).toBeNull();
     // 开局失败不能偷偷写档（旧实现会给图鉴补 seen 并刷新 lastSavedAt）
-    expect(JSON.stringify(useGameStore.getState().save1)).toBe(saveBefore);
+    expect(JSON.stringify(useGameStore.getState().save)).toBe(saveBefore);
   });
 
   it("未登录 → 拒绝开局，不发任何请求", async () => {
@@ -203,7 +203,7 @@ describe("五个战斗入口：转成对应意图", () => {
   it("useMove → { type: 'move', moveId }", async () => {
     await useGameStore.getState().useMove("tackle" as any);
     expect(api.battleAction).toHaveBeenCalledWith(
-      expect.objectContaining({ battleId: "bt_1", slot: 1, action: { type: "move", moveId: "tackle" } }),
+      expect.objectContaining({ battleId: "bt_1", action: { type: "move", moveId: "tackle" } }),
     );
     expect(currentBattle()?.turn).toBe(2);
   });
@@ -284,7 +284,7 @@ describe("并发与异常：不能用客户端算法兜底", () => {
     await useGameStore.getState().useMove("tackle" as any);
     expect(currentBattle()?.finished).toBe(true);
     expect(currentBattle()?.result).toBe("enemy_fainted");
-    expect(api.getSave).toHaveBeenCalledWith(1);
+    expect(api.getSave).toHaveBeenCalledWith();
   });
 });
 
@@ -292,7 +292,7 @@ describe("leaveBattle：中途离开要通知服务端", () => {
   it("战斗未结束 → 调 abandon，避免服务端会话悬挂", async () => {
     await useGameStore.getState().startEncounter(...startArgs);
     useGameStore.getState().leaveBattle();
-    await vi.waitFor(() => expect(api.battleAbandon).toHaveBeenCalledWith("bt_1", 1));
+    await vi.waitFor(() => expect(api.battleAbandon).toHaveBeenCalledWith("bt_1"));
     expect(currentBattle()).toBeNull();
   });
 

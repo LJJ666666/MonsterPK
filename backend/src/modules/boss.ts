@@ -2,13 +2,13 @@
  * P4-2c 单人 Boss 讨伐接口。
  *
  * 权威模型：
- *  - **开局**：只接受 `bossId` + `slot`；等级 / HP 倍率 / 每日次数全部由服务端内容表与 env 决定。
+ *  - **开局**：只接受 `bossId`；等级 / HP 倍率 / 每日次数全部由服务端内容表与 env 决定。
  *  - **战斗过程**：复用 `/api/battle/action`（同一个 `battleId`、同一个战斗状态机），
  *    伤害由 `applyBattleAction()` 按敌方 HP 差累计，客户端**没有任何伤害上报字段**。
  *  - **结算**：`modules/battle.ts` 的结束分支按 `bossId` 分流：
  *    写档（队伍 HP / 道具消耗，无奖励） → 插 `BossDamageEvent`（append-only，battleId 唯一）
  *    → 释放 quota 在途名额。逃跑 = 放弃（release，不写事件、不上榜）。
- *  - **榜**：只读聚合 `BossDamageEvent`，按账号合并多槽位，排除封号 / 管理员。
+ *  - **榜**：只读聚合 `BossDamageEvent`，按账号合并，排除封号 / 管理员。
  *
  * 次数：`BossQuotaLedger` 只记在途，已用次数真值来自 DB 行数，
  * 所以「进程重启重置次数」不成立（与房间 quota 的差异见 `lib/bossQuota.ts` 头注释）。
@@ -29,10 +29,7 @@ import { readSave } from './saveRead';
 export const BOSS_INPUT_FORBIDDEN_CODE = 'BOSS_INPUT_FORBIDDEN';
 export const BOSS_UNKNOWN_CODE = 'BOSS_UNKNOWN';
 
-const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
-
 const startSchema = z.object({
-  slot: slotSchema,
   bossId: z.string().min(1).max(60),
 }).strip();
 
@@ -57,7 +54,7 @@ function forgedField(obj: unknown): string | undefined {
   return FORBIDDEN_BOSS_FIELDS.find((k) => k in (obj as Record<string, unknown>));
 }
 
-/** 账号级次数锁：同账号多槽位共享每日次数，hold 必须串行。 */
+/** 账号级次数锁：一账号一档共享每日次数，hold 必须串行。 */
 function bossLockKey(userId: string): string {
   return `bossq:${userId}`;
 }
@@ -76,12 +73,11 @@ export function bossHealthStats() {
 }
 
 /**
- * 开局主体。锁顺序固定为 **槽位锁 → 账号次数锁**，
- * 结算 / 放弃走同一条顺序（都在槽位锁内操作 quota），因此不会互相死锁。
+ * 开局主体。锁顺序固定为 **账号锁 → 账号次数锁**，
+ * 结算 / 放弃走同一条顺序（都在账号锁内操作 quota），因此不会互相死锁。
  */
 export async function applyBossStart(params: {
   userId: string;
-  slot: number;
   bossId: string;
   now?: number;
 }): Promise<BossResult<Record<string, unknown>>> {
@@ -89,12 +85,12 @@ export async function applyBossStart(params: {
   if (!spec) return fail(BOSS_UNKNOWN_CODE, '未知的讨伐目标');
   const now = params.now ?? Date.now();
 
-  return withSlotLock(slotLockKey(params.userId, params.slot), () =>
+  return withSlotLock(slotLockKey(params.userId), () =>
     withSlotLock(bossLockKey(params.userId), async (): Promise<BossResult<Record<string, unknown>>> => {
-      if (battles.current(params.userId, params.slot)) {
-        return fail('BOSS_BATTLE_IN_PROGRESS', '该槽位已有进行中的战斗', 409);
+      if (battles.current(params.userId)) {
+        return fail('BOSS_BATTLE_IN_PROGRESS', '已有进行中的战斗', 409);
       }
-      const row = await readSave(params.userId, params.slot);
+      const row = await readSave(params.userId);
       if (!row) return fail('BOSS_NO_SAVE', '还没有存档', 404);
       let save: any;
       try {
@@ -125,7 +121,6 @@ export async function applyBossStart(params: {
         const state = createBattle({
           id: battleId,
           userId: params.userId,
-          slot: params.slot,
           theme: spec.theme,
           areaName: spec.name,
           levelMin: 1,
@@ -199,7 +194,7 @@ export async function loadBossRank(params: {
   const dayKey = dayKeyOf(params.now ?? Date.now());
   const events = await prisma.bossDamageEvent.findMany({
     where: { bossId: spec.bossId, periodKey: dayKey },
-    select: { userId: true, slot: true, damage: true, createdAt: true },
+    select: { userId: true, damage: true, createdAt: true },
   });
   const ids = Array.from(new Set(events.map((e) => e.userId)));
   // 排除封号 / 管理员：与 P4-2a 榜单同一口径（管理员测试数据不污染线上榜）。
@@ -215,7 +210,6 @@ export async function loadBossRank(params: {
     .map((e) => ({
       userId: e.userId,
       username: nameOf.get(e.userId)!,
-      slot: e.slot,
       damage: e.damage,
       createdAt: e.createdAt.getTime(),
     }));
@@ -264,7 +258,6 @@ export async function bossRoutes(fastify: FastifyInstance): Promise<void> {
     }
     const res = await applyBossStart({
       userId: req.user.userId,
-      slot: parsed.data.slot,
       bossId: parsed.data.bossId,
     });
     if ('code' in res) {

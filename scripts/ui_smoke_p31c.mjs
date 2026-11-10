@@ -184,12 +184,12 @@ async function main() {
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   // P4：整包 PUT 必须带 revision（CAS）。新账号服务端没有存档，基线就是 0。
-  const put = await apiJson('/api/save?slot=1', {
+  const put = await apiJson('/api/save', {
     method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status} ${JSON.stringify(put.data).slice(0, 120)}`);
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
@@ -218,14 +218,14 @@ async function main() {
   }
 
   // —— 服务端侧证据：动作真的到了服务端 ——
-  const after = await apiJson('/api/save?slot=1', { headers: auth });
+  const after = await apiJson('/api/save', { headers: auth });
   const cloudSave = (() => { try { return JSON.parse(after.data?.data ?? '{}'); } catch { return {}; } })();
   const hpAfter = cloudSave?.party?.[0]?.hp;
   check('服务端存档可读（结算后）', typeof hpAfter === 'number', JSON.stringify(after.data).slice(0, 160));
 
   // 战斗可能还没结束（血厚怪我方打不完），此时 current 仍存在；
   // 结束则 current 为 null 且存档 HP/金钱/图鉴已被服务端写过。
-  const cur = await apiJson('/api/battle/current?slot=1', { headers: auth });
+  const cur = await apiJson('/api/battle/current', { headers: auth });
   const stillRunning = !!cur.data?.battle;
   if (stillRunning) {
     check('战斗仍在服务端存活（GET /api/battle/current 可恢复）',

@@ -95,7 +95,7 @@ export function isOriginAllowed(
 /** 客户端 → 服务端：控制消息。业务状态只能由服务端下发，上行没有写入口。 */
 export type ClientMessage =
   | { type: 'ping'; ts?: number }
-  | { type: 'session.resync'; slot?: number }
+  | { type: 'session.resync' }
   /**
    * P4-2b 房间意图：只带「我要做什么」，绝不带房间状态 / 回合结果 / quota 次数。
    * nonce 必填且服务端去重，防网络重放；`room.state` 没有对应的上行类型。
@@ -114,7 +114,6 @@ export type ClientMessage =
 /** 会话快照消息体（P2-2）。 */
 export type SessionStatePayload = {
   type: 'session.state';
-  slot: number;
   revision: number;
   data: string;
   updatedAt: number;
@@ -130,7 +129,6 @@ export type SessionStatePayload = {
  */
 export type BattleStatePayload = {
   type: 'battle.state';
-  slot: number;
   battleId: string;
   turn: number;
   finished: boolean;
@@ -252,10 +250,7 @@ export function parseClientMessage(
   }
   if (obj.type === 'session.resync') {
     // 只接受「请求重推」，其它字段一律忽略（尤其不允许带 data 改状态）。
-    const slot = typeof obj.slot === 'number' && Number.isInteger(obj.slot) && obj.slot >= 1 && obj.slot <= 3
-      ? obj.slot
-      : undefined;
-    return { ok: true, message: slot === undefined ? { type: 'session.resync' } : { type: 'session.resync', slot } };
+    return { ok: true, message: { type: 'session.resync' } };
   }
   if (obj.type === 'room.resync') {
     // 只请求重推；带任何状态字段都忽略，不回显、不采信。

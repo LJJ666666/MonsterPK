@@ -56,8 +56,8 @@ const wsColor: Record<WsPhase, string> = {
 
 export default function Start() {
   const navigate = useNavigate();
-  const { slot, save1, save2, save3, newGame, resetSave } = useGameStore();
-  const activeSave = [save1, save2, save3][slot - 1] ?? null;
+  const { save, newGame, resetSave } = useGameStore();
+  const activeSave = save;
 
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -87,7 +87,7 @@ export default function Start() {
         }
       });
     api
-      .getSave(slot)
+      .getSave()
       .then(() => {
         if (alive) setCloud("available");
       })
@@ -97,7 +97,7 @@ export default function Start() {
     return () => {
       alive = false;
     };
-  }, [slot, navigate]);
+  }, [navigate]);
 
   const starterList = useMemo(
     () => STARTERS.map((id) => ({ id, spec: MONSTER_SPECS[id] })),
@@ -158,7 +158,7 @@ export default function Start() {
           捕捉、培养、记录每一只幻兽。进度跟随你的账号保存。
         </p>
 
-        {/* 进度摘要：只读展示，不再是存档槽位管理 */}
+        {/* 进度摘要：只读展示 */}
         <div className="mt-8 border-l-2 border-[color:var(--accent)] pl-4">
           <div className="text-xs text-[color:var(--muted)]">当前进度</div>
           {activeSave ? (
@@ -239,7 +239,7 @@ export default function Start() {
           />
           <span className="min-w-0 break-words leading-relaxed">
             {sessionView
-              ? `在线权威态 rev=${sessionView.revision}（槽位 ${sessionView.slot} · ${sessionView.online} 端在线）`
+              ? `在线权威态 rev=${sessionView.revision}（${sessionView.online} 端在线）`
               : "在线权威态：等待服务端快照"}
           </span>
         </div>

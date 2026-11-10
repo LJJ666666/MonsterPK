@@ -68,7 +68,6 @@ export async function loadRankSources(): Promise<{
     },
     select: {
       userId: true,
-      slot: true,
       data: true,
       user: { select: { username: true } },
     },
@@ -112,7 +111,6 @@ export async function loadRankSources(): Promise<{
     sources.push({
       userId: row.userId,
       username: row.user.username,
-      slot: row.slot,
       metrics,
     });
   }
@@ -128,7 +126,7 @@ export async function rankRoutes(fastify: FastifyInstance): Promise<void> {
     readonly: true,
   }));
 
-  /** 单张榜：按账号 + 槽位作为一条记录，同账号多槽各自上榜。 */
+  /** 单张榜：按账号单档一条记录上榜。 */
   fastify.get('/api/rank/:type', { preHandler: fastify.authenticate }, async (req, reply) => {
     const params = typeSchema.safeParse(req.params);
     if (!params.success) {

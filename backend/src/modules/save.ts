@@ -31,9 +31,9 @@ const putSchema = z.object({
   rebase: z.boolean().optional(),
 });
 
-const getQuerySchema = z.object({
-  slot: z.coerce.number().int().min(1).max(3).default(1),
-});
+// 账号单档：GET/PUT /api/save 不再接受任何查询参数（旧版存档参数一律拒绝）。
+const saveQuerySchema = z.object({}).strict();
+const SAVE_SLOT_FORBIDDEN = 'SAVE_SLOT_FORBIDDEN';
 
 /**
  * F04 §31.5：人物等级 / 徽章 / 成就的真值在服务端独立表，存档 JSON 里根本不该有这些键。
@@ -51,17 +51,17 @@ export const FORBIDDEN_PROGRESS_SAVE_FIELDS = [
  * 落库统一走 commitState()，保证内存会话态与 DB 同步、并把快照广播给所有在线连接。
  */
 export async function saveRoutes(fastify: FastifyInstance) {
-  // 读取某个槽位存档：在线期间以内存权威态为准，否则回 DB。
+  // 读取账号单档存档：在线期间以内存权威态为准，否则回 DB。
   fastify.get('/api/save', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
-    const parsed = getQuerySchema.safeParse(req.query);
-    if (!parsed.success) return reply.code(400).send({ error: 'slot 必须是 1/2/3' });
-    const slot = parsed.data.slot;
+    const q = saveQuerySchema.safeParse(req.query ?? {});
+    if (!q.success) {
+      return reply.code(400).send({ error: '账号已切换为单档，不再支持旧版存档参数', code: SAVE_SLOT_FORBIDDEN });
+    }
 
-    const live = gameSessions.get(userId, slot);
+    const live = gameSessions.get(userId);
     if (live) {
       return {
-        slot,
         data: live.data,
         updatedAt: new Date(live.updatedAt).toISOString(),
         clientId: live.clientId,
@@ -70,12 +70,11 @@ export async function saveRoutes(fastify: FastifyInstance) {
       };
     }
 
-    const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
-    if (!rec) return reply.code(404).send({ error: '该槽位无存档' });
+    const rec = await prisma.save.findUnique({ where: { userId } });
+    if (!rec) return reply.code(404).send({ error: '还没有存档' });
     let revision = 0;
     try { revision = JSON.parse(rec.authority ?? '{}')?.revision ?? 0; } catch { /* 忽略坏数据 */ }
     return {
-      slot,
       data: rec.data,
       updatedAt: rec.updatedAt,
       clientId: rec.clientId,
@@ -86,15 +85,16 @@ export async function saveRoutes(fastify: FastifyInstance) {
 
   fastify.put('/api/save', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
-    const query = getQuerySchema.safeParse(req.query);
-    if (!query.success) return reply.code(400).send({ error: 'slot 必须是 1/2/3' });
-    const slot = query.data.slot;
+    const q = saveQuerySchema.safeParse(req.query ?? {});
+    if (!q.success) {
+      return reply.code(400).send({ error: '账号已切换为单档，不再支持旧版存档参数', code: SAVE_SLOT_FORBIDDEN });
+    }
     // P4：CAS 的「读版本 → 比对 → 写」必须是一个原子段，
     // 否则并发 PUT 会同时通过校验（读档有 await，会让出事件循环）。
-    return withSlotLock(slotLockKey(userId, slot), () => handlePut(req, reply, userId, slot));
+    return withSlotLock(slotLockKey(userId), () => handlePut(req, reply, userId));
   });
 
-  async function handlePut(req: any, reply: any, userId: string, slot: number) {
+  async function handlePut(req: any, reply: any, userId: string) {
     const parsed = putSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: '存档数据格式不正确或过大' });
 
@@ -107,7 +107,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
         (k) => k in (incoming as Record<string, unknown>),
       );
       if (bad) {
-        req.log.warn({ userId, slot, kind: 'progress_field_forged', field: bad }, '存档内夹带服务端进度真值字段，已拒绝');
+        req.log.warn({ userId, kind: 'progress_field_forged', field: bad }, '存档内夹带服务端进度真值字段，已拒绝');
         return reply.code(400).send({
           error: '等级 / 徽章 / 成就为服务端只读真值，不接受存档内上报',
           code: 'SAVE_INPUT_FORBIDDEN',
@@ -119,14 +119,14 @@ export async function saveRoutes(fastify: FastifyInstance) {
     // —— P4 前置：CAS 版本校验，必须放在风控之前 ——
     // 并发写冲突不是作弊，先判版本能省掉一次全量结构校验，
     // 也避免「旧客户端拿着过期存档」被误判成改档而封号。
-    const server = await currentState(userId, slot);
+    const server = await currentState(userId);
     const currentRev = server?.revision ?? 0;
     const revCheck = checkWriteRevision(currentRev, parsed.data.revision);
     if (!revCheck.ok) {
       const bad = revCheck as RevisionFailure;
       if (bad.code === 'REVISION_CONFLICT') {
         req.log.info(
-          { userId, slot, kind: 'revision_conflict', current: bad.current, provided: parsed.data.revision },
+          { userId, kind: 'revision_conflict', current: bad.current, provided: parsed.data.revision },
           '写入版本冲突，已拒绝（由客户端拉回服务端版本后重放，不封号）',
         );
         return reply.code(409).send({
@@ -147,22 +147,22 @@ export async function saveRoutes(fastify: FastifyInstance) {
     const isAdmin = req.account?.isAdmin ?? false;
     const action = decideSaveAction(validation, isAdmin);
     if (action.kind === 'reject') {
-      req.log.warn({ userId, slot, kind: 'save_rejected', codes: action.codes, issues: validation.hard.slice(0, 10) }, '存档结构不合法，已拒绝写入（不封号）');
+      req.log.warn({ userId, kind: 'save_rejected', codes: action.codes, issues: validation.hard.slice(0, 10) }, '存档结构不合法，已拒绝写入（不封号）');
       return reply.code(400).send({ error: action.reason, code: action.codes[0], path: validation.hard[0]?.path });
     }
     if (action.kind === 'ban') {
-      await banAccount({ userId, reason: action.reason, codes: action.codes, slot, stats: validation.stats });
-      req.log.warn({ userId, slot, kind: 'save_banned', codes: action.codes, stats: validation.stats }, '检测到改档，已封号');
+      await banAccount({ userId, reason: action.reason, codes: action.codes, stats: validation.stats });
+      req.log.warn({ userId, kind: 'save_banned', codes: action.codes, stats: validation.stats }, '检测到改档，已封号');
       return reply.code(403).send({ error: '你已被封号', code: BAN_CODE, reason: action.reason });
     }
     const clamp = clampSaveTimestamps(parsed.data.data);
     if (clamp.adjusted.length > 0) {
-      req.log.info({ userId, slot, kind: 'save_clock_clamped', adjusted: clamp.adjusted }, '客户端时间戳已钳制为服务端时间（改系统时间不生效，不封号）');
+      req.log.info({ userId, kind: 'save_clock_clamped', adjusted: clamp.adjusted }, '客户端时间戳已钳制为服务端时间（改系统时间不生效，不封号）');
     }
     const dataToStore = clamp.data;
     const actual = digestOf(dataToStore);
 
-    const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
+    const rec = await prisma.save.findUnique({ where: { userId } });
     let authority: AuthorityState = parseAuthority(rec?.authority, dataToStore);
 
     // —— 分支 1：新建 / 重置存档，重建权威基线 ——
@@ -172,7 +172,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: `重置存档未通过校验：${fresh.reason}`, code: 'REBASE_REJECTED' });
       }
       authority = freshAuthority(dataToStore);
-      req.log.info({ userId, slot, kind: 'authority_rebased' }, '新游戏/重置：权威基线已重建');
+      req.log.info({ userId, kind: 'authority_rebased' }, '新游戏/重置：权威基线已重建');
     } else {
       const pending = authority.pending;
       // —— 分支 2：带 intentNonce 提交裁决结果，精确核对增量 ——
@@ -190,7 +190,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
           }
         }
         if (violations.length > 0) {
-          req.log.warn({ userId, slot, kind: 'intent_delta_rejected', type: pending.type, violations }, '裁决结果增量不合法，已拒绝');
+          req.log.warn({ userId, kind: 'intent_delta_rejected', type: pending.type, violations }, '裁决结果增量不合法，已拒绝');
           return reply.code(400).send({
             error: `结算结果与服务端裁决不一致：${violations[0].reason}`,
             code: 'INTENT_DELTA_MISMATCH',
@@ -199,7 +199,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
         }
         if (pending.allow.rebase) {
           authority = freshAuthority(dataToStore); // 管理员测试档：服务端授权重建基线
-          req.log.warn({ userId, slot, kind: 'admin_override' }, '管理员测试存档已授权放行');
+          req.log.warn({ userId, kind: 'admin_override' }, '管理员测试存档已授权放行');
         } else {
           const patch: Parameters<typeof advanceAuthority>[2] = { pending: null };
           if (pending.allow.idle === 'start' && pending.idleStart) {
@@ -213,7 +213,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
           }
           authority = advanceAuthority(authority, dataToStore, patch);
         }
-        req.log.info({ userId, slot, kind: 'intent_committed', type: pending.type, nonce: pending.nonce }, '裁决结果已落库');
+        req.log.info({ userId, kind: 'intent_committed', type: pending.type, nonce: pending.nonce }, '裁决结果已落库');
       } else {
         // —— 分支 3：普通整包 PUT，单调比对（客户端资源不得更富）——
         const violations = compareDigest(actual, authority.expected);
@@ -222,7 +222,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
         const stateViolation = checkPartyStateRegression(rec?.data, dataToStore);
         if (stateViolation) violations.push(stateViolation);
         if (violations.length > 0) {
-          req.log.warn({ userId, slot, kind: 'authority_mismatch', violations }, '存档资源增量未经服务端裁决，已拒绝（不封号）');
+          req.log.warn({ userId, kind: 'authority_mismatch', violations }, '存档资源增量未经服务端裁决，已拒绝（不封号）');
           return reply.code(400).send({
             error: `存档未通过服务端校验：${violations[0].reason}`,
             code: 'AUTHORITY_MISMATCH',
@@ -236,13 +236,13 @@ export async function saveRoutes(fastify: FastifyInstance) {
     }
 
     if (action.adminOverride) {
-      req.log.warn({ userId, slot, kind: 'admin_override', codes: action.codes, stats: validation.stats }, '管理员测试存档已放行');
+      req.log.warn({ userId, kind: 'admin_override', codes: action.codes, stats: validation.stats }, '管理员测试存档已放行');
     } else if (validation.soft.length > 0) {
-      req.log.warn({ userId, slot, kind: 'save_suspicious', codes: validation.soft.map((x) => x.code), stats: validation.stats }, '存档存在兼容类告警，已放行并记录');
+      req.log.warn({ userId, kind: 'save_suspicious', codes: validation.soft.map((x) => x.code), stats: validation.stats }, '存档存在兼容类告警，已放行并记录');
     }
 
     // P2-2：写入收敛到在线权威态（DB + 内存 + 广播），revision 由 commitState 保证单调递增。
-    const { saved, revision } = await commitState(userId, slot, {
+    const { saved, revision } = await commitState(userId, {
       data: dataToStore,
       schemaVersion: validation.schemaVersion,
       clientId: parsed.data.clientId ?? null,
@@ -250,7 +250,7 @@ export async function saveRoutes(fastify: FastifyInstance) {
       source: 'put',
     });
     return {
-      ok: true, slot,
+      ok: true,
       updatedAt: saved.updatedAt,
       clientId: saved.clientId,
       schemaVersion: saved.schemaVersion,

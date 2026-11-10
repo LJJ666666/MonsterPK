@@ -6,7 +6,7 @@ import {
 } from "./rank";
 
 const row: RankRow = {
-  rank: 1, username: "amy", slot: 1, value: 468,
+  rank: 1, username: "amy", value: 468,
   secondary: 468, detail: "出战 1 只六维总和", isMe: false,
 };
 

@@ -8,25 +8,29 @@
 //
 // 迁移采用「逐级累积 if」写法：fromVersion 会一路走到最新版本，
 // 每个分支只处理它负责的增量，且把 version 变量往上推。
+// F17（v11）起一账号一档，当前结构为 { save }；v1~v10 的历史分支仍需认识三槽字段，
+// 那是迁移输入而不是现行结构，别删。
 import { createInstance } from "@/game/rules";
 
 /** 存档结构版本号（唯一真源，数字）。persist.version 与 SaveData.version 均由此派生。 */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /** 写入 SaveData 内部的版本字段（字符串，便于 importSaveJson 做 typeof 校验）。 */
 export const SAVE_VERSION = String(SCHEMA_VERSION);
 
-/** 把每个非空槽位的内部 version 字段对齐到 SAVE_VERSION（幂等，可作为兜底）。 */
+/** 把当前单档（以及逐级迁移途中的旧三槽）内部 version 字段对齐到 SAVE_VERSION，幂等。 */
 function stampVersion(state: any): void {
+  const save = state?.save;
+  if (save && typeof save === "object") save.version = SAVE_VERSION;
   for (const slotKey of ["save1", "save2", "save3"]) {
-    const save = state?.[slotKey];
-    if (save && typeof save === "object") save.version = SAVE_VERSION;
+    const old = state?.[slotKey];
+    if (old && typeof old === "object") old.version = SAVE_VERSION;
   }
 }
 
 /**
  * 旧存档迁移：persist 每次重启用时调用，按 fromVersion 逐级补齐结构。
- * 入参/返回形状与 persist 的 partialize 一致：{ save1, save2, save3, slot }。
+ * v11 起入参/返回形状与 persist 的 partialize 一致：{ save }。
  */
 export function migrateSaveState(persistedState: any, fromVersion: number): any {
   let state = persistedState;
@@ -150,6 +154,16 @@ export function migrateSaveState(persistedState: any, fromVersion: number): any 
     // 归一化：把内部 version 字段对齐到 SAVE_VERSION（前序分支已补齐结构，此处仅统一版本号）。
     stampVersion(state);
     version = 10;
+  }
+  if (version === 10) {
+    // F17：三槽 → 单档。保留「当前选中槽」优先，其次 save1，再次任意非空档；
+    // 其余两档直接丢弃（开发阶段无真实老用户，服务端真值按 userId 也只有一份）。
+    const active = state?.slot;
+    const chosen =
+      (active ? state?.[`save${active}`] : null) ??
+      state?.save1 ?? state?.save2 ?? state?.save3 ?? null;
+    state = { save: chosen ?? null };
+    version = 11;
   }
 
   // 兜底：确保最终存档内部版本号与 SAVE_VERSION 一致。

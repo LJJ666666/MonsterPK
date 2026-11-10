@@ -234,7 +234,7 @@ export async function forgeToken(payload, { expiresInMs = 3_600_000 } = {}) {
  * @param {string[]} prefixes
  * @param {{dryRun?: boolean}} opts
  */
-export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_', 'p42c_', 'p42d_', 'p42e_'], opts = {}) {
+export async function cleanupByPrefix(prefixes = ['e2e_', 'ui_', 'harden_', 'hd_', 'edge_', 'bt_', 'p12_', 'ws_', 'b3a_', 'b3b_', 'ss_', 'p41_', 'p42a_', 'p42b_', 'p42c_', 'p42d_', 'p42e_', 'f17_'], opts = {}) {
   loadBackendEnv();
   const { PrismaClient } = await import('@prisma/client');
   const prisma = new PrismaClient();
@@ -268,7 +268,7 @@ const STATS = { hp: 45, atk: 55, def: 46, spAtk: 63, spDef: 53, spd: 68 };
 const GROWTH = { hp: 3, atk: 2, def: 2, spAtk: 2, spDef: 2, spd: 2 };
 export const recentIso = () => new Date(Date.now() - 60_000).toISOString();
 
-/** 合法存档基线（与前端 SCHEMA_VERSION=10 对齐）。 */
+/** 合法存档基线（version 留旧档号，服务端按 VERSION_OLD 软告警放行）。 */
 export function validSave(overrides = {}) {
   return {
     version: '10',
@@ -304,16 +304,16 @@ export function validSave(overrides = {}) {
 }
 
 /**
- * 存档相关接口。slot 默认 1。
- * P4：`put` 自动带 revision（CAS），逐 token/槽位跟踪当前版本；
+ * 存档相关接口（F17 单档：一账号一档）。
+ * P4：`put` 自动带 revision（CAS），逐 token 跟踪当前版本；
  * 需要构造版本冲突用例时显式传 `{ revision: n }`。
  */
 const saveWriter = makeSaveWriter(api);
 
 export const save = {
   put: saveWriter.put,
-  get: (token, slot = 1) => api(`/api/save?slot=${slot}`, { token }),
-  session: (token, slot = 1) => api(`/api/session?slot=${slot}`, { token }),
+  get: (token) => api('/api/save', { token }),
+  session: (token) => api('/api/session', { token }),
   /** 手工改本地跟踪的版本号（模拟「其它端已经写过」）。 */
   setRevision: saveWriter.set,
   /** 读取当前跟踪的版本号（不请求服务端）。 */
@@ -326,13 +326,13 @@ export const battle = {
   start: (token, body = {}) =>
     api('/api/battle/start', {
       method: 'POST', token,
-      body: { slot: 1, theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2, ...body },
+      body: { theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2, ...body },
     }),
-  action: (token, battleId, action, slot = 1) =>
-    api('/api/battle/action', { method: 'POST', token, body: { slot, battleId, action } }),
-  current: (token, slot = 1) => api(`/api/battle/current?slot=${slot}`, { token }),
-  abandon: (token, battleId, slot = 1) =>
-    api('/api/battle/abandon', { method: 'POST', token, body: { slot, battleId } }),
+  action: (token, battleId, action) =>
+    api('/api/battle/action', { method: 'POST', token, body: { battleId, action } }),
+  current: (token) => api('/api/battle/current', { token }),
+  abandon: (token, battleId) =>
+    api('/api/battle/abandon', { method: 'POST', token, body: { battleId } }),
 };
 
 // —————————————————————————— WebSocket ——————————————————————————

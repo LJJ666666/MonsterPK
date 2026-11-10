@@ -6,7 +6,7 @@
  *  A 接口边界   health.boss / 未登录 401 / 未知 Boss 400 / 伪上报 400 / 无写入口 404
  *  B 开局       Boss 字段与 theme 来自内容表 / 禁止捕获 / 战斗互斥 / 伤害只来自服务端
  *  C 结算       正常结算记事件 + 扣一次 / 重复结算不叠加 / 逃跑与放弃不扣次数 / 次数用完 429
- *  D 榜         按账号合并多槽位 / 封号与管理员不上榜 / limit / 只读字段 / 不含内部 id
+ *  D 榜         按账号合并 / 封号与管理员不上榜 / limit / 只读字段 / 不含内部 id
  *
  * 输出逐例 [PASS]/[FAIL]，末尾 E2E_P42C_OK；任一失败 exit 1。
  */
@@ -28,7 +28,7 @@ const mk = async (prefix) => {
 };
 
 /** 强档：Lv.40 / 高攻，保证几回合内打死 Lv.12 的 Boss，E2E 不必跑几十轮。
- * HP 与 F14 一致给到 8000：同一账号要连打多场 + 多槽位，结算会把队伍 HP 写回存档，
+ * HP 与 F14 一致给到 8000：同一账号要连打多场，结算会把队伍 HP 写回存档，
  * 420 在敌方 elite/rare 叠加的偶发高强度下会被打全灭，下一场开局直接 PARTY_FAINTED。
  * 8000 远低于 saveValidator STAT_MAX，纯用例确定性，产品逻辑零改动（bug_log §38）。
  */
@@ -53,20 +53,20 @@ async function accountWithSave(prefix, data) {
 }
 
 const bossList = (token) => api('/api/boss', { token });
-const bossStart = (token, bossId, slot = 1) =>
-  api('/api/boss/start', { method: 'POST', token, body: { slot, bossId } });
+const bossStart = (token, bossId) =>
+  api('/api/boss/start', { method: 'POST', token, body: { bossId } });
 const bossRank = (token, bossId, limit = 20) =>
   api(`/api/boss/${bossId}/rank?limit=${limit}`, { token });
-const act = (token, battleId, action, slot = 1) =>
-  api('/api/battle/action', { method: 'POST', token, body: { slot, battleId, action } });
+const act = (token, battleId, action) =>
+  api('/api/battle/action', { method: 'POST', token, body: { battleId, action } });
 
 const ATTACK = { type: 'move', moveId: 'tackle' };
 
 /** 一直打到战斗结束（最多 20 回合；PP 够用）。返回最后一次响应。 */
-async function fightToEnd(token, battleId, slot = 1) {
+async function fightToEnd(token, battleId) {
   let last = null;
   for (let i = 0; i < 20; i += 1) {
-    const r = await act(token, battleId, ATTACK, slot);
+    const r = await act(token, battleId, ATTACK);
     if (r.status !== 200) return { status: r.status, data: r.data, ended: false };
     last = r;
     if (r.data?.battle?.finished) return { status: 200, data: r.data, ended: true };
@@ -75,10 +75,10 @@ async function fightToEnd(token, battleId, slot = 1) {
 }
 
 /** 逃跑直到成功（速度优势下概率 75%，最多 8 次）。 */
-async function fleeUntilDone(token, battleId, slot = 1) {
+async function fleeUntilDone(token, battleId) {
   let last = null;
   for (let i = 0; i < 8; i += 1) {
-    const r = await act(token, battleId, { type: 'flee' }, slot);
+    const r = await act(token, battleId, { type: 'flee' });
     if (r.status !== 200) return { status: r.status, data: r.data };
     last = r;
     if (r.data?.battle?.finished) return { status: 200, data: r.data };
@@ -125,7 +125,7 @@ async function main() {
 
   const forgeDamage = await api('/api/boss/start', {
     method: 'POST', token: viewer.token,
-    body: { slot: 1, bossId: BOSS_MAIN, damage: 999999 },
+    body: { bossId: BOSS_MAIN, damage: 999999 },
   });
   suite.check('开局上报 damage → 400 BOSS_INPUT_FORBIDDEN',
     forgeDamage.status === 400 && forgeDamage.data?.code === 'BOSS_INPUT_FORBIDDEN'
@@ -134,7 +134,7 @@ async function main() {
 
   const forgeLimit = await api('/api/boss/start', {
     method: 'POST', token: viewer.token,
-    body: { slot: 1, bossId: BOSS_MAIN, dailyLimit: 99 },
+    body: { bossId: BOSS_MAIN, dailyLimit: 99 },
   });
   suite.check('开局上报 dailyLimit → 400（次数上限只由服务端定）',
     forgeLimit.status === 400 && forgeLimit.data?.code === 'BOSS_INPUT_FORBIDDEN',
@@ -191,13 +191,13 @@ async function main() {
     `${cap.status} ${JSON.stringify(cap.data).slice(0, 120)}`);
 
   const again = await bossStart(hero.token, BOSS_MAIN);
-  suite.check('同槽位已有讨伐 → 409 BOSS_BATTLE_IN_PROGRESS',
+  suite.check('已有讨伐 → 409 BOSS_BATTLE_IN_PROGRESS',
     again.status === 409 && again.data?.code === 'BOSS_BATTLE_IN_PROGRESS',
     `${again.status} ${JSON.stringify(again.data).slice(0, 120)}`);
 
   const plain = await api('/api/battle/start', {
     method: 'POST', token: hero.token,
-    body: { slot: 1, theme: 'grass', areaName: '草地', levelMin: 1, levelMax: 2 },
+    body: { theme: 'grass', areaName: '草地', levelMin: 1, levelMax: 2 },
   });
   suite.check('讨伐未结束时开普通遭遇 → 409 BOSS_IN_PROGRESS（不会顶掉在途次数）',
     plain.status === 409 && plain.data?.code === 'BOSS_IN_PROGRESS',
@@ -272,7 +272,7 @@ async function main() {
   const s3 = await bossStart(hero.token, BOSS_MAIN);
   const abandoned = await api('/api/battle/abandon', {
     method: 'POST', token: hero.token,
-    body: { slot: 1, battleId: s3.data?.battle?.battleId },
+    body: { battleId: s3.data?.battle?.battleId },
   });
   const listAfterAbandon = (await bossList(hero.token)).data?.bosses?.find((b) => b.bossId === BOSS_MAIN);
   suite.check('放弃讨伐 → dropped 且不扣次数',
@@ -280,7 +280,7 @@ async function main() {
     && listAfterAbandon?.used === 1 && listAfterAbandon?.remaining === 2,
     JSON.stringify({ status: abandoned.status, used: listAfterAbandon?.used }));
 
-  // 第二次真实讨伐（同槽位）→ used=2
+  // 第二次真实讨伐 → used=2
   const s4 = await bossStart(hero.token, BOSS_MAIN);
   const fin2 = await fightToEnd(hero.token, s4.data?.battle?.battleId);
   suite.check('第二次讨伐结算 → used=2，累计伤害 = 两场之和',
@@ -289,11 +289,10 @@ async function main() {
     && fin2.data?.boss?.quota?.remaining === 1,
     JSON.stringify(fin2.data?.boss ?? null).slice(0, 200));
 
-  // 同账号 slot 2 再打一次 → 次数按账号合并、榜也合并
-  await save.put(hero.token, strongSave(), {}, 2);
-  const s5 = await bossStart(hero.token, BOSS_MAIN, 2);
-  const fin3 = await fightToEnd(hero.token, s5.data?.battle?.battleId, 2);
-  suite.check('同账号第二槽位共享每日次数并合并统计（attempts=3）',
+  // 第三次讨伐 → 次数用满、统计累计到 3 场
+  const s5 = await bossStart(hero.token, BOSS_MAIN);
+  const fin3 = await fightToEnd(hero.token, s5.data?.battle?.battleId);
+  suite.check('第三次讨伐累计统计（attempts=3）',
     fin3.ended && fin3.data?.boss?.attempts === 3
     && fin3.data?.boss?.quota?.used === 3 && fin3.data?.boss?.quota?.remaining === 0,
     JSON.stringify(fin3.data?.boss ?? null).slice(0, 200));
@@ -309,7 +308,7 @@ async function main() {
   if (other.status === 200) {
     await api('/api/battle/abandon', {
       method: 'POST', token: hero.token,
-      body: { slot: 1, battleId: other.data.battle.battleId },
+      body: { battleId: other.data.battle.battleId },
     });
   }
 
@@ -324,7 +323,7 @@ async function main() {
     try {
       await prisma.bossDamageEvent.create({
         data: {
-          userId: ev.userId, slot: ev.slot, bossId: ev.bossId, periodKey: ev.periodKey,
+          userId: ev.userId, bossId: ev.bossId, periodKey: ev.periodKey,
           damage: 999999, result: ev.result, battleId: ev.battleId,
         },
       });
@@ -345,7 +344,7 @@ async function main() {
 
   const rank = await bossRank(viewer.token, BOSS_MAIN, 50);
   const mineRows = mineEntries(rank, [hero.username, brother.username]);
-  suite.check('伤害榜按账号合并多槽位：hero 只有一行且 attempts=3',
+  suite.check('伤害榜按账号合并：hero 只有一行且 attempts=3',
     mineRows.length === 2
     && mineRows.find((r) => r.username === hero.username)?.attempts === 3,
     JSON.stringify(mineRows.map((r) => `${r.username}:${r.damage}/${r.attempts}`)));

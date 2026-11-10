@@ -13,9 +13,9 @@ import { BossQuotaLedger } from '../lib/bossQuota';
 
 /** 在线 WebSocket 连接登记表（P2-1 已在用）。 */
 export const wsRegistry = new WsRegistry();
-/** 按 (userId, slot) 的在线权威态。 */
+/** 按 userId（账号单档）的在线权威态。 */
 export const gameSessions = new GameSessionRegistry();
-/** 按 (userId, slot) 的活跃战斗（P3-1）。 */
+/** 按 userId（账号单档）的活跃战斗（P3-1）。 */
 export const battles = new BattleRegistry();
 /** 按区域的共享野怪实例池（P4-1b），跨账号共享同一份实例。 */
 export const wilds = new WildRegistry();

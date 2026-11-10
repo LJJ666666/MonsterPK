@@ -178,12 +178,12 @@ async function main() {
   if (!token) return report();
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const put = await apiJson('/api/save?slot=1', {
+  const put = await apiJson('/api/save', {
     method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
@@ -225,7 +225,7 @@ async function main() {
     JSON.stringify({ status: list.status, readonly: list.data?.readonly }));
   const forged = await apiJson('/api/boss/start', {
     method: 'POST', headers: auth,
-    body: JSON.stringify({ slot: 1, bossId: 'boss_ember_behemoth', damage: 999999 }),
+    body: JSON.stringify({ bossId: 'boss_ember_behemoth', damage: 999999 }),
   });
   check('服务端拒绝客户端上报伤害',
     forged.status === 400 && forged.data?.code === 'BOSS_INPUT_FORBIDDEN',

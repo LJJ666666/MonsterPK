@@ -107,7 +107,7 @@ async function main(): Promise<void> {
       });
       console.log(`${username} 共 ${records.length} 条封号记录：`);
       for (const r of records) {
-        console.log(`  ${r.createdAt.toISOString()} slot=${r.slot ?? '-'} codes=${r.codes} reason=${r.reason}`);
+        console.log(`  ${r.createdAt.toISOString()} codes=${r.codes} reason=${r.reason}`);
       }
       break;
     }

@@ -509,6 +509,26 @@ checks = [
      "## 36." in bug_text and "alreadyLocked" in bug_text),
     ("每日日志记 F14 偿还与共斗 6 房设计",
      "F14" in log_text and "E2E_F14_OK" in log_text and "6 房" in log_text),
+    # ——— F17 单档化 ———
+    ("规范含 §32 F17 单档化工程契约",
+     "## 32." in spec_text and "SAVE_SLOT_FORBIDDEN" in spec_text
+     and "第 11 条迁移" in spec_text and "106" in spec_text),
+    ("F17 闸门：400 / 版本三处 11 / 第 11 条迁移存在",
+     "SAVE_SLOT_FORBIDDEN" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
+     and "SCHEMA_VERSION = 11" in text(ROOT / "src" / "stores" / "saveVersion.ts")
+     and "EXPECTED_SAVE_VERSION = 11" in text(ROOT / "backend" / "src" / "lib" / "saveValidator.ts")
+     and (ROOT / "backend" / "prisma" / "migrations" / "20261110113000_f17_single_save" / "migration.sql").exists()),
+    ("F17 E2E 接入 verify 两处且清理前缀含 f17_",
+     verify_text.count("e2e:f17") >= 2 and '"e2e:f17"' in pkg_text
+     and "f17_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")
+     and (ROOT / "backend" / "tests" / "e2e_f17.mjs").exists()),
+    ("F17 已偿还：台账 / 任务表 / HANDOFF / MEMORY / 日志 / bug_log",
+     "F17 单档化 ✅ 已偿还" in future_text
+     and "F17 单档化已实现并偿还" in task_text
+     and "F17 单档化已实现并偿还" in handoff_text
+     and "F17 单档化已实现并偿还" in memory_text
+     and "F17 单档化" in log_text and "## 39." in bug_text),
+    ("bug_log 含 §39 F17 踩坑", "## 39." in bug_text and "admin.ts" in bug_text),
 ]
 
 for name, ok, *detail in checks:

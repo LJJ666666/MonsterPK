@@ -60,20 +60,20 @@ async function accountWithSave(prefix, data) {
 }
 
 const bossList = (token) => api('/api/boss', { token });
-const bossStart = (token, bossId, slot = 1) =>
-  api('/api/boss/start', { method: 'POST', token, body: { slot, bossId } });
+const bossStart = (token, bossId) =>
+  api('/api/boss/start', { method: 'POST', token, body: { bossId } });
 const bossRank = (token, bossId, limit = 20) =>
   api(`/api/boss/${bossId}/rank?limit=${limit}`, { token });
-const act = (token, battleId, action, slot = 1) =>
-  api('/api/battle/action', { method: 'POST', token, body: { slot, battleId, action } });
+const act = (token, battleId, action) =>
+  api('/api/battle/action', { method: 'POST', token, body: { battleId, action } });
 
 const ATTACK = { type: 'move', moveId: 'tackle' };
 
 /** 一直打到战斗结束（最多 30 回合）。返回最后一次响应。 */
-async function fightToEnd(token, battleId, slot = 1) {
+async function fightToEnd(token, battleId) {
   let last = null;
   for (let i = 0; i < 30; i += 1) {
-    const r = await act(token, battleId, ATTACK, slot);
+    const r = await act(token, battleId, ATTACK);
     if (r.status !== 200) return { status: r.status, data: r.data, ended: false };
     last = r;
     if (r.data?.battle?.finished) return { status: 200, data: r.data, ended: true };
@@ -82,9 +82,9 @@ async function fightToEnd(token, battleId, slot = 1) {
 }
 
 /** 逃跑直到成功（速度优势下概率高，最多 10 次）。 */
-async function fleeUntilDone(token, battleId, slot = 1) {
+async function fleeUntilDone(token, battleId) {
   for (let i = 0; i < 10; i += 1) {
-    const r = await act(token, battleId, { type: 'flee' }, slot);
+    const r = await act(token, battleId, { type: 'flee' });
     if (r.status !== 200) return { status: r.status, data: r.data, ended: false };
     if (r.data?.battle?.finished) return { status: 200, data: r.data, ended: true };
   }
@@ -133,7 +133,7 @@ async function main() {
     (await api('/api/boss/claim', { method: 'POST', body: {} })).status === 404);
 
   const forgedAnon = await api('/api/boss/start', {
-    method: 'POST', body: { slot: 1, bossId: BOSS_MAIN, reward: 999999 },
+    method: 'POST', body: { bossId: BOSS_MAIN, reward: 999999 },
   });
   suite.check('未登录伪上报 reward → 401（鉴权先于字段校验）',
     forgedAnon.status === 401, `${forgedAnon.status}`);
@@ -149,7 +149,7 @@ async function main() {
   for (const field of ['reward', 'rewards', 'money', 'items', 'grantKey', 'tier']) {
     const forged = await api('/api/boss/start', {
       method: 'POST', token: viewer.token,
-      body: { slot: 1, bossId: BOSS_MAIN, [field]: 999999 },
+      body: { bossId: BOSS_MAIN, [field]: 999999 },
     });
     suite.check(`开局伪上报 ${field} → 400 BOSS_INPUT_FORBIDDEN`,
       forged.status === 400 && forged.data?.code === 'BOSS_INPUT_FORBIDDEN'
@@ -237,7 +237,7 @@ async function main() {
 
   const cur = await save.get(hero.token);
   const curData = saveDataOf(cur);
-  save.setRevision(hero.token, 1, cur.data?.revision ?? 0);
+  save.setRevision(hero.token, cur.data?.revision ?? 0);
   const put = await save.put(hero.token, curData);
   suite.check('发奖后整包 PUT 不被 authority.expected 拒绝 → 200',
     put.status === 200, `${put.status} ${JSON.stringify(put.data).slice(0, 180)}`);

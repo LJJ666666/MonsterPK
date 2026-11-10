@@ -85,5 +85,5 @@ test('前一个任务抛错不会阻断队列里的后续任务', async () => {
 
 test('roomLockKey 与 slotLockKey 命名空间不冲突', () => {
   assert.equal(roomLockKey('r1'), 'room:r1');
-  assert.notEqual(roomLockKey('r1'), slotLockKey('r1', 1));
+  assert.notEqual(roomLockKey('r1'), slotLockKey('r1'));
 });

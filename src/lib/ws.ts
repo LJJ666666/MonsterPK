@@ -53,7 +53,6 @@ export function parseServerMessage(raw: string): ServerEnvelope | null {
 export function isSessionStateMessage(m: ServerEnvelope | null): m is SessionStateMessage {
   return !!m
     && m.type === "session.state"
-    && typeof m.slot === "number"
     && typeof m.revision === "number"
     && Number.isFinite(m.revision)
     && typeof m.data === "string"

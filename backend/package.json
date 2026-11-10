@@ -34,6 +34,7 @@
     "e2e:f01f02": "node tests/e2e_f01f02.mjs",
     "e2e:f14": "node tests/e2e_f14.mjs",
     "e2e:f16": "node tests/e2e_f16.mjs",
+    "e2e:f17": "node tests/e2e_f17.mjs",
     "e2e:f04": "node tests/e2e_f04.mjs"
   },
   "dependencies": {

@@ -10,14 +10,12 @@ import { ELEMENT_LABEL, MOVE_SPECS } from "@/game/data";
 import { api } from "@/lib/api";
 import { ROOM_STATE_EVENT, type RoomView, type RoomStateMessage } from "@/lib/sessionState";
 import { newNonce, PVP_DISCLAIMER, pvpStatusText, pvpViewOf } from "@/lib/pvp";
-import { useGameStore } from "@/stores/useGameStore";
 import { getMoveMaxPP } from "@/game/rules";
 import { MonsterName } from "@/components/MonsterName";
 
 type Phase = "idle" | "creating" | "joining" | "waiting" | "fighting" | "finished";
 
 export default function PvpModal({ onClose }: { onClose: () => void }) {
-  const { slot } = useGameStore();
   const [phase, setPhase] = useState<Phase>("idle");
   const [room, setRoom] = useState<RoomView | null>(null);
   const [roomId, setRoomId] = useState("");
@@ -51,7 +49,7 @@ export default function PvpModal({ onClose }: { onClose: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      const res = await api.pvpCreate({ slot });
+      const res = await api.pvpCreate();
       if (res?.room) {
         setRoom(res.room);
         setRoomId(res.room.roomId ?? "");
@@ -71,7 +69,7 @@ export default function PvpModal({ onClose }: { onClose: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      const res = await api.pvpJoin(roomId.trim(), { slot });
+      const res = await api.pvpJoin(roomId.trim());
       if (res?.room) {
         setRoom(res.room);
         setPhase("fighting");

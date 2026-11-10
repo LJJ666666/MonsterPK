@@ -2,7 +2,7 @@
  * P4-2b 房间内核：类型、常量与服务端配置。
  *
  * 零依赖纯模块，便于 node:test 直接 import；不含任何 IO / WebSocket / Prisma。
- * 房间是继 `userId:slot` / `battleId` / `areaId` 之后的**第四个状态域**，
+ * 房间是继 `userId` / `battleId` / `areaId` 之后的**第四个状态域**，
  * owner key 为 `roomId`，写入一律经 `withRoomLock()` 串行。
  */
 

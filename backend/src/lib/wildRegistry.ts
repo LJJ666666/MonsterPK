@@ -8,7 +8,7 @@
  *
  * 约束：
  *  - 每个 areaId 维护 N 只野怪，过期 / 结算后按服务端 RNG 补新的；
- *  - claim 只有 available 能成功，归属用 (userId, slot, battleId) 三键；
+ *  - claim 只有 available 能成功，归属用 (userId, battleId) 两键；
  *  - resolve / release 都必须验证归属，别人不能结束我的野怪；
  *  - 对外视图不含 userId / battleId，避免泄露他人账号；
  *  - revision 全局单调递增，客户端按它幂等应用 wild.state 全量快照。
@@ -26,7 +26,7 @@ export const WILD_RESOLVED_GRACE_MS = 10_000;
 
 export type WildStatus = 'available' | 'claimed' | 'resolved';
 export type WildResult = 'captured' | 'defeated' | 'fled' | null;
-export type WildClaim = { userId: string; slot: number; battleId: string; at: number };
+export type WildClaim = { userId: string; battleId: string; at: number };
 
 export type WildInstance = {
   id: string;
@@ -243,12 +243,11 @@ export class WildRegistry {
 
   /**
    * 原子抢占。同步、无 await —— 同一 wildId 的两次 claim 只有第一次能成功。
-   * 同一账号同一槽位已有别的野怪在打时拒绝（一个槽位只允许一场战斗）。
+   * 同一账号已有别的野怪在打时拒绝（单账号只允许一场战斗）。
    */
   claim(
     wildId: string,
     userId: string,
-    slot: number,
     battleId: string,
     now: number,
   ): ClaimResult {
@@ -258,12 +257,12 @@ export class WildRegistry {
     if (w.status === 'claimed') return { ok: false, code: 'WILD_CLAIMED' };
     for (const other of this.byId.values()) {
       if (other.status === 'claimed' && other.claim
-        && other.claim.userId === userId && other.claim.slot === slot) {
+        && other.claim.userId === userId) {
         return { ok: false, code: 'WILD_ON_COOLDOWN' };
       }
     }
     w.status = 'claimed';
-    w.claim = { userId, slot, battleId, at: now };
+    w.claim = { userId, battleId, at: now };
     this.bump(w.areaId);
     return { ok: true, instance: w };
   }
@@ -272,14 +271,13 @@ export class WildRegistry {
   resolve(
     wildId: string,
     userId: string,
-    slot: number,
     battleId: string,
     result: Exclude<WildResult, null>,
     now: number,
   ): boolean {
     const w = this.byId.get(wildId);
     if (!w || w.status !== 'claimed' || !w.claim) return false;
-    if (w.claim.userId !== userId || w.claim.slot !== slot || w.claim.battleId !== battleId) return false;
+    if (w.claim.userId !== userId || w.claim.battleId !== battleId) return false;
     w.status = 'resolved';
     w.result = result;
     w.claim = null;

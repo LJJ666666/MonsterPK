@@ -5,7 +5,7 @@
  * 覆盖：
  *  - 开局：敌方由服务端按主题表生成，队伍/背包取自服务端存档（不采信客户端上报）
  *  - 动作：技能扣 PP、回合推进、敌方行动、换人、道具、捕获、逃跑；非法动作被拒
- *  - 隔离：别人的 battleId / 伪造 battleId 一律 404；同槽位新开局覆盖旧战斗
+ *  - 隔离：别人的 battleId / 伪造 battleId 一律 404；新开局覆盖旧战斗
  *  - 结算：战斗结束由服务端写档（金钱 / 队伍 HP / 图鉴 / 首通 / 道具消耗）并提升 revision
  *  - 实时：动作后同账号 WS 收到 battle.state 广播
  * 输出：逐例 [PASS]/[FAIL]，末尾 E2E_P31_OK；任一失败 exit 1。
@@ -91,17 +91,17 @@ function validSave(overrides = {}) {
 // P4：整包 PUT 必须带 revision（CAS）。saveWriter 逐 token 跟踪当前版本，
 // 需要构造版本冲突时显式传 { revision: n }。
 const put = makeSaveWriter(request).put;
-const getSave = (token) => request('/api/save?slot=1', { token });
-const getSession = (token) => request('/api/session?slot=1', { token });
+const getSave = (token) => request('/api/save', { token });
+const getSession = (token) => request('/api/session', { token });
 const health = () => request('/api/health');
 const startBattle = (token, body = {}) =>
   request('/api/battle/start', {
     method: 'POST', token,
-    body: { slot: 1, theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2, ...body },
+    body: { theme: 'grass', areaName: '初始草原', areaId: null, levelMin: 2, levelMax: 2, ...body },
   });
 const act = (token, battleId, action) =>
-  request('/api/battle/action', { method: 'POST', token, body: { slot: 1, battleId, action } });
-const current = (token) => request('/api/battle/current?slot=1', { token });
+  request('/api/battle/action', { method: 'POST', token, body: { battleId, action } });
+const current = (token) => request('/api/battle/current', { token });
 
 function openWs(token) {
   return new Promise((resolve, reject) => {
@@ -286,17 +286,17 @@ async function main() {
   const afterDone = await act(tokenA, battleId, { type: 'flee' });
   check('结束后再动作 404', afterDone.status === 404, String(afterDone.status));
 
-  // —— 同槽位新开局覆盖 ——
+  // —— 新开局覆盖 ——
   const s2 = await startBattle(tokenA, { levelMin: 1, levelMax: 1 });
   const id2 = s2.data?.battle?.battleId;
   const s3 = await startBattle(tokenA, { levelMin: 3, levelMax: 3 });
   const id3 = s3.data?.battle?.battleId;
-  check('同槽位再次开局生成新战斗', !!id2 && !!id3 && id2 !== id3, `${id2} / ${id3}`);
+  check('再次开局生成新战斗', !!id2 && !!id3 && id2 !== id3, `${id2} / ${id3}`);
   const stale = await act(tokenA, id2, { type: 'flee' });
   check('旧战斗被新开局覆盖（404）', stale.status === 404, String(stale.status));
 
   const abandon = await request('/api/battle/abandon', {
-    method: 'POST', token: tokenA, body: { slot: 1, battleId: id3 },
+    method: 'POST', token: tokenA, body: { battleId: id3 },
   });
   check('放弃战斗成功', abandon.status === 200 && abandon.data?.dropped === true, asText(abandon.data));
   check('放弃后 current 为空', (await current(tokenA)).data?.battle === null);
@@ -331,7 +331,7 @@ async function main() {
   // 若被采纳，下面每次开局必然都是异色；否则 8 次里至少出现一次非异色。
   // 用「多次开局不恒为异色」替代绝对断言，既不误报也不放过漏洞。
   const shinyTrials = [fb.enemy?.isShiny === true];
-  await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: fb.battleId } });
+  await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { battleId: fb.battleId } });
   for (let i = 1; i < 8; i++) {
     const trial = await startBattle(tokenA, {
       levelMin: 3, levelMax: 3,
@@ -339,7 +339,7 @@ async function main() {
     });
     const tb = trial.data?.battle ?? {};
     shinyTrials.push(tb.enemy?.isShiny === true);
-    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: tb.battleId } });
+    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { battleId: tb.battleId } });
   }
   check('普通账号 testShiny 未强制生效（8 次开局不恒为异色）',
     shinyTrials.some((s) => s === false), JSON.stringify(shinyTrials));
@@ -356,7 +356,7 @@ async function main() {
     check('管理员 testShiny 生效（敌方异色）', ab.enemy?.isShiny === true, String(ab.enemy?.isShiny));
     check('管理员测试标记写进战斗日志',
       (ab.log ?? []).some((l) => l.includes('管理员测试标记')), JSON.stringify(ab.log));
-    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { slot: 1, battleId: ab.battleId } });
+    await request('/api/battle/abandon', { method: 'POST', token: tokenA, body: { battleId: ab.battleId } });
     await prisma.user.update({ where: { username: userA }, data: { role: 'user' } });
   } else {
     console.log('[SKIP] 管理员测试标记（未连接数据库）');
@@ -370,7 +370,7 @@ async function main() {
   const idB = sb.data?.battle?.battleId;
   const cross = await act(tokenA, idB, { type: 'flee' });
   check('A 不能操作 B 的战斗（404）', cross.status === 404, `${cross.status} ${asText(cross.data)}`);
-  await request('/api/battle/abandon', { method: 'POST', token: tokenB, body: { slot: 1, battleId: idB } });
+  await request('/api/battle/abandon', { method: 'POST', token: tokenB, body: { battleId: idB } });
 
   await closeWs(wsCtx);
   await finish();

@@ -244,14 +244,14 @@ async function main() {
   // 独立账号做改档对抗，避免封号影响主链路
   const cheat = await accountWithSave('p42ch', rankedSave({ maxHp: 2000 }));
   const cheatBefore = mine(await board(viewer.token, 'team_power'), [cheat.username])[0]?.value;
-  const noRev = await api('/api/save?slot=1', {
+  const noRev = await api('/api/save', {
     method: 'PUT', token: cheat.token,
     body: { data: JSON.stringify(rankedSave({ maxHp: 90000 })) },
   });
   suite.check('缺 revision 的整包覆盖 → 400 REVISION_REQUIRED',
     noRev.status === 400 && noRev.data?.code === 'REVISION_REQUIRED',
     `${noRev.status} ${JSON.stringify(noRev.data).slice(0, 140)}`);
-  const stale = await api('/api/save?slot=1', {
+  const stale = await api('/api/save', {
     method: 'PUT', token: cheat.token,
     body: { data: JSON.stringify(rankedSave({ maxHp: 90000 })), revision: 0 },
   });

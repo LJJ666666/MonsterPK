@@ -23,7 +23,7 @@ const entry = {
 };
 
 const row = {
-  rank: 1, username: "杰哥", slot: 1, damage: 4200, best: 1800, attempts: 2, isMe: true,
+  rank: 1, username: "杰哥", damage: 4200, best: 1800, attempts: 2, isMe: true,
 };
 
 describe("parseBossList", () => {

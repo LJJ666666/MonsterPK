@@ -5,7 +5,7 @@ import PixelButton from "./PixelButton";
 import type { MonsterInstance } from "@/game/types";
 
 export function MoveLearnerModal() {
-  const save = useGameStore((s) => s[`save${s.slot}` as keyof typeof s]) as any;
+  const save = useGameStore((s) => s.save);
   const resolvePendingMove = useGameStore((s) => s.resolvePendingMove);
   // P3-2：学招/替换/放弃都在服务端校验（待学列表、技能栏位、要替换的技能是否真的在身上）。
   const [error, setError] = useState<string | null>(null);

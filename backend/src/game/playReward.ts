@@ -6,7 +6,7 @@
  *    不动协议 / 存档 schema / 前端。
  *  - 发放只增 `money` 与 `inventory` 两项，绝不碰队伍 / 等级 / 图鉴 / 首通，
  *    与 F02 `applyRankReward` 完全同口径（避免奖励被判成「凭空变强」或污染战力榜）。
- *  - 本文件零 IO，可重复调用但会重复累加；幂等由调用方的 DB 唯一键 + 槽位锁保证。
+ *  - 本文件零 IO，可重复调用但会重复累加；幂等由调用方的 DB 唯一键 + 账号锁保证。
  *  - 刻意不改动已验收的 `rankReward.ts`：将来出现第三处发奖写档再抽公共层，
  *    两处口径必须保持一致（改动任一处要同步核对另一处）。
  *
@@ -110,15 +110,15 @@ export function perRunGrantKey(battleId: string): string {
   return `boss:run:${battleId}`;
 }
 
-/** 每日首讨大包：账号 + 槽位 + Boss + 周期；同日同 Boss 只有第一场胜利能占位。 */
-export function firstGrantKey(userId: string, slot: number, bossId: string, periodKey: string): string {
-  return `boss:first:${periodKey}:${bossId}:${userId}:${slot}`;
+/** 每日首讨大包：账号 + Boss + 周期；同日同 Boss 只有第一场胜利能占位。 */
+export function firstGrantKey(userId: string, bossId: string, periodKey: string): string {
+  return `boss:first:${periodKey}:${bossId}:${userId}`;
 }
 
 /**
- * F16 共斗通关：一场副本对同一账号同一槽位只发一次。
+ * F16 共斗通关：一场副本对同一账号只发一次。
  * `roomId` 本身就是房间全局唯一 id，重复结算同一副本必然撞唯一键（P2002 兜底）。
  */
-export function coopClearGrantKey(roomId: string, userId: string, slot: number): string {
-  return `coop:clear:${roomId}:${userId}:${slot}`;
+export function coopClearGrantKey(roomId: string, userId: string): string {
+  return `coop:clear:${roomId}:${userId}`;
 }

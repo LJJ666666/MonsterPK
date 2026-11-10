@@ -102,7 +102,7 @@ f.addEventListener('load', function () {
     waitFor('board', function () {
       // 必须等榜单数据真正渲染完（有行、且不在 loading），否则点击 Tab 会与首屏请求竞态。
       return txt().indexOf('兽域榜单') >= 0 && txt().indexOf('服务端派生') >= 0
-        && /#\\d+/.test(txt()) && txt().indexOf('正在读取榜单') < 0;
+        && txt().indexOf('正在读取') < 0 && txt().indexOf('暂无上榜记录') < 0;
     }, once('board', function () {
       var t = txt();
       out.step = 'board';
@@ -111,7 +111,7 @@ f.addEventListener('load', function () {
       out.readonly = t.indexOf('只读') >= 0;
       out.serverDerived = t.indexOf('服务端派生') >= 0;
       out.tabs = buttons().map(function (b) { return b.textContent.trim(); });
-      out.rowMatches = t.match(/#\\d+/g) || [];
+      out.hasRows = txt().indexOf('暂无上榜记录') < 0 && txt().indexOf('正在读取') < 0;
       out.scrollWidth = overflow();
       var tab = buttons().filter(function (b) { return b.textContent.trim() === '推图'; })[0];
       if (!tab) { out.errors.push('no-progress-tab'); return finish(); }
@@ -172,12 +172,12 @@ async function main() {
   if (!token) return report();
 
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const put = await apiJson('/api/save?slot=1', {
+  const put = await apiJson('/api/save', {
     method: 'PUT', headers: auth, body: JSON.stringify({ data: JSON.stringify(save), revision: 0 }),
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
@@ -201,8 +201,8 @@ async function main() {
     ['单宠战力', '全队战力', '召唤师等级', '推图']
       .every((t) => Array.isArray(p.tabs) && p.tabs.includes(t)),
     JSON.stringify(p.tabs));
-  check('榜单行渲染出至少一条（账号#槽位）',
-    Array.isArray(p.rowMatches) && p.rowMatches.length >= 1, JSON.stringify(p.rowMatches));
+  check('榜单行渲染出至少一条（按账号）',
+    p.hasRows === true, JSON.stringify(p.hasRows));
   check('弹窗打开时 375px 无横向溢出',
     Number.isFinite(p.scrollWidth) && p.scrollWidth <= 375, `scrollWidth=${p.scrollWidth}`);
   check('切换到推图榜后说明文案更新',

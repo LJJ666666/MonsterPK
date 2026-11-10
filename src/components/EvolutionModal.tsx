@@ -5,7 +5,7 @@ import PixelButton from "./PixelButton";
 import type { MonsterInstance } from "@/game/types";
 
 export function EvolutionModal() {
-  const save = useGameStore((s) => s[`save${s.slot}` as keyof typeof s]) as any;
+  const save = useGameStore((s) => s.save);
   const resolvePendingEvolution = useGameStore((s) => s.resolvePendingEvolution);
   // P3-2：进化后六维由服务端算，本地只展示结果；失败要如实告诉玩家。
   const [error, setError] = useState<string | null>(null);

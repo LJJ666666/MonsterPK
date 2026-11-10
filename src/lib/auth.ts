@@ -22,7 +22,7 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  // P4：登录态结束必须一并丢掉各槽位的写入基线版本，
+  // P4：登录态结束必须一并丢掉写入基线版本，
   // 否则下一个账号会带着上一个账号的 revision 去写，白白撞一次 409。
   forgetAllRevisions();
 }

@@ -35,8 +35,6 @@ model BanRecord {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // 触发封号时操作的存档槽位（非存档类违规可为空）
-  slot      Int?
   // 触发封号的校验码列表，JSON 文本
   codes     String
   // 中文原因
@@ -48,38 +46,34 @@ model BanRecord {
   @@index([userId, createdAt])
 }
 
-// 存档表：每个用户最多 3 个槽位（slot 1/2/3），data 为完整存档 JSON 文本
+// 存档表：F17 起**一个账号只有一档**（userId 唯一），data 为完整存档 JSON 文本。
 model Save {
   id            String   @id @default(cuid())
-  userId        String
+  userId        String   @unique
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  slot          Int
   data          String
   // 存档内部 schema 版本（取自 data 解析后的 version 字段），用于识别脏档/版本错配
   schemaVersion String   @default("unknown")
-  // 最近一次写入的客户端标识（每设备唯一），用于冲突判断（多端并发编辑同一槽位时）
+  // 最近一次写入的客户端标识（每设备唯一），用于冲突判断（多端并发编辑时）
   clientId      String?
   // P1-2 服务端权威摘要（JSON 文本）：expected 资源摘要 + 挂机会话的服务端时钟 + revision。
   // 客户端整包 PUT 时用它做单调比对，自造的资源增量一律拒绝；裁决接口执行后同步更新。
   authority     String?
   updatedAt     DateTime @updatedAt
-
-  @@unique([userId, slot])
 }
 
 // 意图幂等表（P1-2）：每个意图带一次性 nonce，服务端用唯一索引防重放（重复领挂机收益等）。
-// 不建 User 关联，避免级联删除干扰；按 userId+slot 定期清理即可。
+// 不建 User 关联，避免级联删除干扰；按 userId 定期清理即可。
 model IntentLog {
   id        Int      @id @default(autoincrement())
   userId    String
-  slot      Int
   nonce     String
   // 意图类型：idle_start / idle_claim / idle_cancel / capture / battle_reward / shop_buy / ...
   type      String
   createdAt DateTime @default(now())
 
-  @@unique([userId, slot, nonce])
-  @@index([userId, slot, createdAt])
+  @@unique([userId, nonce])
+  @@index([userId, createdAt])
 }
 
 // Boss 伤害事件（P4-2c）：**append-only**，一行 = 一次有效讨伐的结算结果。
@@ -90,7 +84,6 @@ model IntentLog {
 model BossDamageEvent {
   id        String   @id @default(cuid())
   userId    String
-  slot      Int
   bossId    String
   // 周期键：固定 UTC+8 自然日 YYYY-MM-DD；周期结算规则待台账 F01 细化
   periodKey String
@@ -120,7 +113,7 @@ model RankPeriodSnapshot {
   @@index([periodKey])
 }
 
-// F02 榜单奖励发放记录：唯一键防重复领取（P2002 兜底 + 槽位锁串行）。
+// F02 榜单奖励发放记录：唯一键防重复领取（P2002 兜底 + 账号锁串行）。
 // 发奖由结算任务在服务端写档（commitState），客户端没有任何领取入口。
 // 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
 model RankReward {
@@ -128,25 +121,23 @@ model RankReward {
   periodKey String
   boardKey  String
   userId    String
-  slot      Int
   rank      Int
   reward    String
   revision  Int      @default(0)
   grantedAt DateTime @default(now())
 
-  @@unique([periodKey, boardKey, userId, slot])
+  @@unique([periodKey, boardKey, userId])
   @@index([userId, grantedAt])
 }
 
 
-// F14 Boss 双档奖励发放记录：唯一键防重复发放（P2002 兜底 + 槽位锁串行）。
-// 每场小包 grantKey = boss:run:<battleId>；每日首讨大包 = boss:first:<periodKey>:<bossId>:<userId>:<slot>。
+// F14 Boss 双档奖励发放记录：唯一键防重复发放（P2002 兜底 + 账号锁串行）。
+// 每场小包 grantKey = boss:run:<battleId>；每日首讨大包 = boss:first:<periodKey>:<bossId>:<userId>。
 // 发奖由服务端在 Boss 结算时写档（commitState），客户端没有任何领取入口。
 // 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
 model BossRewardGrant {
   id        Int      @id @default(autoincrement())
   userId    String
-  slot      Int
   bossId    String
   periodKey String
   // 档位：per_run（每场小包）/ first（每日首讨大包）
@@ -162,9 +153,9 @@ model BossRewardGrant {
 }
 
 // F16 共斗六房副本通关奖励发放记录（2026-11-09）。
-// 唯一键 (roomId, userId, slot) 保证「同一场副本重复结算不双花」；
-// grantKey = coop:clear:<roomId>:<userId>:<slot>，与 F02/F14 同一占位范式。
-// 每日通关上限以本表按 (userId, slot, periodKey) 计数为真值（重启不重置），
+// 唯一键 (roomId, userId) 保证「同一场副本重复结算不双花」；
+// grantKey = coop:clear:<roomId>:<userId>，与 F02/F14 同一占位范式。
+// 每日通关上限以本表按 (userId, periodKey) 计数为真值（重启不重置），
 // 内存 quota 只记在途 hold。发奖由服务端在副本结算时写档（commitState），
 // 客户端没有任何领取入口；伪上报房间状态 / 贡献 / 奖励一律 400。
 // 不建 User 关联：账号注销后仍保留审计线索；查询只按 userId 过滤。
@@ -172,7 +163,6 @@ model CoopRewardGrant {
   id           Int      @id @default(autoincrement())
   roomId       String
   userId       String
-  slot         Int
   periodKey    String
   // 该成员在本场副本的累计有效伤害（最低贡献门槛判定依据，服务端真值）
   contribution Int      @default(0)
@@ -181,15 +171,15 @@ model CoopRewardGrant {
   revision     Int      @default(0)
   grantedAt    DateTime @default(now())
 
-  @@unique([roomId, userId, slot])
-  @@index([userId, slot, periodKey])
+  @@unique([roomId, userId])
+  @@index([userId, periodKey])
 }
 
 // F04 召唤师等级 / 徽章 / 成就（2026-11-10，规范 §31.5）。
 // **按 userId 账号级**，不按 slot（F17 单档化铺路）；不写 SaveData、不动 SCHEMA_VERSION。
 // 等级完全由「基础 5 + Σ徽章加成」只读派生，没有 PlayerProgress 宽表、无需老档回填。
 // @@unique 保证重复发放 / 重复首通幂等（P2002 兜底），**不取应用层锁**：
-// 调用链可能在战斗结算的 slotLock 内，重演 F14 同锁重入死锁（bug_log §36）。
+// 调用链可能在战斗结算的账号锁内，重演 F14 同锁重入死锁（bug_log §36）。
 // 不建 User 关联，与 BossRewardGrant / CoopRewardGrant 同风格；按 userId 过滤。
 model BadgeGrant {
   id        String   @id @default(cuid())

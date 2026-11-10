@@ -37,7 +37,7 @@ describe("wild.state 下行校验", () => {
     expect(isWildStateMessage(parseServerMessage('{"type":"wild.state","areaId":3,"revision":7,"monsters":[]}'))).toBe(false);
   });
   it("session.state 不会被误判成 wild.state", () => {
-    const m = parseServerMessage('{"type":"session.state","slot":1,"revision":2,"data":"{}","updatedAt":1}');
+    const m = parseServerMessage('{"type":"session.state","revision":2,"data":"{}","updatedAt":1}');
     expect(isWildStateMessage(m)).toBe(false);
     expect((m as any)?.type).toBe("session.state");
   });

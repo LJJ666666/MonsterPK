@@ -2,7 +2,7 @@
  * 服务端 GameSession 在线权威态（P2-2）。
  *
  * 定位：P2-1 只有通道、没有状态；P3 才把战斗模拟整体搬上服务端。
- * 本层按 (userId, slot) 维护「服务端认可的那份存档」：
+ * F17 起一账号一档：本层按 userId 维护「服务端认可的那份存档」：
  *   - 内存态：在线期间以内存为准，避免每次读写都回 DB，且能立刻广播给同账号其它连接；
  *   - DB 持久化：仍落到既有的 Save 表（data + authority），不新增 Prisma 迁移，
  *     重启 / 新连接时从 DB hydrate，语义与 P1-2 的权威摘要完全兼容；
@@ -17,7 +17,6 @@ import type { AuthorityState } from './authority';
 
 /** 最后一个连接断开后，会话在内存里保留多久（重连可直接命中，不必回 DB）。 */
 export const SESSION_TTL_MS = 10 * 60 * 1000;
-export const SESSION_SLOTS = [1, 2, 3] as const;
 
 /**
  * 状态写入来源。
@@ -28,7 +27,6 @@ export type SessionSource = 'hydrate' | 'put' | 'intent' | 'battle' | 'action';
 
 export type GameSessionState = {
   userId: string;
-  slot: number;
   /** 服务端认可的存档 JSON 文本。 */
   data: string;
   schemaVersion: string;
@@ -45,7 +43,6 @@ export type GameSessionState = {
 /** 下行快照（session.state 消息体）。下行不受上行 4KB maxPayload 限制。 */
 export type SessionSnapshot = {
   type: 'session.state';
-  slot: number;
   revision: number;
   data: string;
   updatedAt: number;
@@ -65,20 +62,21 @@ export type SessionRecord = {
 
 export type SessionStats = {
   users: number;
+  /** 账号单档下的会话数（= 有会话的账号数）。 */
   slots: number;
   online: number;
   connections: number;
 };
 
-export function sessionKey(userId: string, slot: number): string {
-  return `${userId}:${slot}`;
+/** 账号单档：会话 key 就是 userId（历史名保留）。 */
+export function sessionKey(userId: string): string {
+  return userId;
 }
 
 /** 构造下发给客户端的全量快照。 */
 export function buildSnapshot(s: GameSessionState): SessionSnapshot {
   return {
     type: 'session.state',
-    slot: s.slot,
     revision: s.authority.revision,
     data: s.data,
     updatedAt: s.updatedAt,
@@ -113,32 +111,27 @@ export class GameSessionRegistry {
     return this.byKey.size;
   }
 
-  get(userId: string, slot: number): GameSessionState | undefined {
-    return this.byKey.get(sessionKey(userId, slot));
+  get(userId: string): GameSessionState | undefined {
+    return this.byKey.get(sessionKey(userId));
   }
 
+  /** 账号单档：一个账号至多一个会话；返回数组以兼容既有调用点。 */
   listForUser(userId: string): GameSessionState[] {
-    const out: GameSessionState[] = [];
-    for (const slot of SESSION_SLOTS) {
-      const s = this.get(userId, slot);
-      if (s && s.userId === userId) out.push(s);
-    }
-    return out;
+    const s = this.get(userId);
+    return s ? [s] : [];
   }
 
   /** 从 DB 记录恢复；内存已有会话时直接返回（在线期间内存即权威）。 */
   hydrate(
     userId: string,
-    slot: number,
     record: SessionRecord | null,
     now = Date.now(),
   ): GameSessionState | null {
-    const existing = this.get(userId, slot);
+    const existing = this.get(userId);
     if (existing) return existing;
     if (!record) return null;
     const state: GameSessionState = {
       userId,
-      slot,
       data: record.data,
       schemaVersion: record.schemaVersion,
       clientId: record.clientId,
@@ -148,7 +141,7 @@ export class GameSessionRegistry {
       connections: new Set<string>(),
       source: 'hydrate',
     };
-    this.byKey.set(sessionKey(userId, slot), state);
+    this.byKey.set(sessionKey(userId), state);
     return state;
   }
 
@@ -158,7 +151,6 @@ export class GameSessionRegistry {
    */
   apply(
     userId: string,
-    slot: number,
     input: {
       data: string;
       schemaVersion: string;
@@ -169,12 +161,11 @@ export class GameSessionRegistry {
     },
     now = Date.now(),
   ): GameSessionState {
-    const key = sessionKey(userId, slot);
+    const key = sessionKey(userId);
     const prev = this.byKey.get(key);
     const authority = monotonicAuthority(prev?.authority, input.authority);
     const state: GameSessionState = {
       userId,
-      slot,
       data: input.data,
       schemaVersion: input.schemaVersion,
       clientId: input.clientId,
@@ -188,7 +179,7 @@ export class GameSessionRegistry {
     return state;
   }
 
-  /** 连接登记到该用户所有已存在的会话。 */
+  /** 连接登记到该账号的单档会话。 */
   attach(userId: string, connectionId: string): void {
     for (const s of this.listForUser(userId)) s.connections.add(connectionId);
   }
@@ -228,7 +219,7 @@ export class GameSessionRegistry {
     for (const s of this.byKey.values()) {
       users.add(s.userId);
       if (s.connections.size > 0) online += 1;
-      // 一条连接会登记到该账号的多个槽位会话，统计在线连接数必须去重。
+      // 账号单档：一条连接只登记到该账号的唯一会话，仍统一去重计数。
       for (const id of s.connections) allConnections.add(id);
     }
     return { users: users.size, slots: this.byKey.size, online, connections: allConnections.size };

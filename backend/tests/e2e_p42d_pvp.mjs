@@ -74,20 +74,20 @@ async function main() {
 
   // ═══ A. 接口边界 ═══
   console.log('\n—— A. 接口边界 ——');
-  const noAuth = await post(null, '/api/pvp/create', { slot: 1 });
+  const noAuth = await post(null, '/api/pvp/create', {});
   suite.check('未登录建房 401', noAuth.status === 401, `status=${noAuth.status}`);
 
   const A = await mk('p42d_a');
-  const forged = await post(A.token, '/api/pvp/create', { slot: 1, winner: 'A', hp: 999 });
+  const forged = await post(A.token, '/api/pvp/create', { winner: 'A', hp: 999 });
   suite.check('伪上报对战字段 400 PVP_INPUT_FORBIDDEN',
     forged.status === 400 && forged.data?.code === 'PVP_INPUT_FORBIDDEN', JSON.stringify(forged.data));
 
-  const noParty = await post(A.token, '/api/pvp/create', { slot: 1 });
+  const noParty = await post(A.token, '/api/pvp/create', {});
   suite.check('无队伍建房 404 PVP_NO_PARTY',
     noParty.status === 404 && noParty.data?.code === 'PVP_NO_PARTY', JSON.stringify(noParty.data));
 
   const A2 = await accountWithSave('p42d_a2', strongSave());
-  const noWs = await post(A2.token, '/api/pvp/create', { slot: 1 });
+  const noWs = await post(A2.token, '/api/pvp/create', {});
   suite.check('无实时通道建房 409 ROOM_WS_REQUIRED',
     noWs.status === 409 && noWs.data?.code === 'ROOM_WS_REQUIRED', JSON.stringify(noWs.data));
 
@@ -98,14 +98,14 @@ async function main() {
   const hostWs = await open(host.token);
   const guestWs = await open(guest.token);
 
-  const created1 = await post(host.token, '/api/pvp/create', { slot: 1 });
+  const created1 = await post(host.token, '/api/pvp/create', {});
   suite.check('建房 200 forming / mode=pvp / pvp 态尚未生成',
     created1.status === 200 && created1.data?.room?.mode === 'pvp'
     && created1.data.room.status === 'forming' && created1.data.room.pvp === null,
     JSON.stringify(created1.data?.room).slice(0, 220));
   const roomId = created1.data?.room?.roomId;
 
-  const joined = await post(guest.token, `/api/pvp/${roomId}/join`, { slot: 1 });
+  const joined = await post(guest.token, `/api/pvp/${roomId}/join`, {});
   suite.check('加入后 active / pvp 态生成 / turn=1',
     joined.status === 200 && joined.data?.room?.status === 'active'
     && !!joined.data?.room?.pvp && joined.data.room.pvp.turn === 1
@@ -144,12 +144,12 @@ async function main() {
   const guest2 = await accountWithSave('p42d_g2', weakSave());
   const host2Ws = await open(host2.token);
   const guest2Ws = await open(guest2.token);
-  const c2 = await post(host2.token, '/api/pvp/create', { slot: 1 });
+  const c2 = await post(host2.token, '/api/pvp/create', {});
   const roomId2 = c2.data?.room?.roomId;
-  await post(guest2.token, `/api/pvp/${roomId2}/join`, { slot: 1 });
+  await post(guest2.token, `/api/pvp/${roomId2}/join`, {});
 
-  const revHostBefore = await save.revisionOf(host2.token, 1);
-  const revGuestBefore = await save.revisionOf(guest2.token, 1);
+  const revHostBefore = await save.revisionOf(host2.token);
+  const revGuestBefore = await save.revisionOf(guest2.token);
 
   // 打到分出胜负（最多 10 回合）。
   let settled = null;
@@ -168,8 +168,8 @@ async function main() {
 
   // 等结算写双方档（异步触发，轮询 revision）。
   await new Promise((r) => setTimeout(r, 800));
-  const sHost = await save.session(host2.token, 1);
-  const sGuest = await save.session(guest2.token, 1);
+  const sHost = await save.session(host2.token);
+  const sGuest = await save.session(guest2.token);
   suite.check('结算后双方 revision 各 +1（不互相覆盖）',
     (sHost.data?.revision ?? 0) > (revHostBefore ?? 0)
     && (sGuest.data?.revision ?? 0) > (revGuestBefore ?? 0),
@@ -181,9 +181,9 @@ async function main() {
   const guest3 = await accountWithSave('p42d_g3', strongSave());
   await open(host3.token);
   await open(guest3.token);
-  const c3 = await post(host3.token, '/api/pvp/create', { slot: 1 });
+  const c3 = await post(host3.token, '/api/pvp/create', {});
   const roomId3 = c3.data?.room?.roomId;
-  await post(guest3.token, `/api/pvp/${roomId3}/join`, { slot: 1 });
+  await post(guest3.token, `/api/pvp/${roomId3}/join`, {});
   // 房主逃跑（速度优势下 75% 成功；重试直到成功或判负）。
   let fled = false;
   for (let i = 0; i < 8 && !fled; i += 1) {
@@ -202,12 +202,12 @@ async function main() {
   // ═══ F. 越权与满员 ═══
   console.log('\n—— F. 越权与满员 ——');
   const outsiderWs = await open(outsider.token);
-  const full = await post(outsider.token, `/api/pvp/${roomId}/join`, { slot: 1 });
+  const full = await post(outsider.token, `/api/pvp/${roomId}/join`, {});
   suite.check('满员房间 join 被拒（ROOM_CLOSED / ROOM_FULL）',
     full.status === 409 && (full.data?.code === 'ROOM_FULL' || full.data?.code === 'ROOM_CLOSED'),
     JSON.stringify(full.data));
 
-  const joinForged = await post(outsider.token, `/api/pvp/${roomId}/join`, { slot: 1, hp: 999 });
+  const joinForged = await post(outsider.token, `/api/pvp/${roomId}/join`, { hp: 999 });
   suite.check('join 伪上报 400 PVP_INPUT_FORBIDDEN',
     joinForged.status === 400 && joinForged.data?.code === 'PVP_INPUT_FORBIDDEN', JSON.stringify(joinForged.data));
 

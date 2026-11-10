@@ -1079,3 +1079,31 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   high 那行必须 10；low/mid 的「基础 Lv.5」改查 `GET /api/player/progress`
   （账号级只读真值，不受榜单分页影响）；若 low 恰好在榜内，再校验它排在 high 之后。
   单独连跑 3 次全绿，最终全量验收全绿证据见任务表进度记录。
+
+## 39. F17 单档化（2026-11-10）
+
+### 39.1 `admin.ts` 审计日志打印已删列，后端类型检查抓不到
+
+- 后端 `npm run check` 只覆盖 `backend/src/**`；`backend/scripts/admin.ts` 里的
+  `${r.slot ?? '-'}` 在删列后照样编译得过，只有跑 `admin audit` 才会暴露。
+  全仓 `Grep '\bslot\b'` 复核时才发现 → 删掉该字段。
+- **通用教训**：Prisma 删列后，除 `src` 类型检查外必须全仓搜一遍列名，并对
+  `scripts/` / `tests/` 逐个判定（历史迁移 SQL、迁移分支、闸门断言允许保留）。
+
+### 39.2 专项 E2E 自己写错 `rebase` 用例
+
+- 首轮 `e2e:f17` 22/25：初始存档金币与二次 PUT 不一致，`rebase: true` 要求基线一致；
+  第二个 PUT 又擅自加钱，被风控按增量不符挡下。**是用例问题不是产品逻辑**。
+  改为二次 PUT 复用同一份 v11 存档后 **25/25**。
+
+### 39.3 SQLite 重建表迁移的顺序
+
+- 删列前必须先删多余档位的行，否则 `Save.userId @unique` 建唯一索引会因
+  重复 `userId` 失败；迁移里显式 `DELETE FROM Save WHERE slot <> 1`
+  （本机 51→50 行，仅 1 个用户有多档）。
+- `migrate deploy` 前停 :3001（Windows DLL 锁，§12 / §27）。
+
+### 39.4 新增阶段两处注册与清理前缀
+
+- `e2e:f17` 同时写进 `verify.mjs` 的 `STAGES` 与 `GROUPS`（漏 `GROUPS` 静默少跑，§32.5），
+  另补 `backend/package.json` 与 `clean-test-data.mjs` 的 `f17_` 清理前缀。

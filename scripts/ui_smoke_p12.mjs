@@ -88,14 +88,14 @@ async function main() {
   const regData = await reg.json();
   const token = regData.token;
   if (!token) throw new Error(`注册失败: ${JSON.stringify(regData)}`);
-  const putRes = await fetch(`${API}/api/save?slot=1`, {
+  const putRes = await fetch(`${API}/api/save`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ data: JSON.stringify(save) }),
   });
   check('建立云端基线存档', putRes.status === 200, String(putRes.status));
 
-  const persist = JSON.stringify({ state: { save1: save, save2: null, save3: null, slot: 1 }, version: 10 });
+  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
     localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});

@@ -17,7 +17,6 @@ import {
 } from "./sessionState";
 
 export type SessionView = {
-  slot: number;
   revision: number;
   online: number;
   updatedAt: number;
@@ -50,12 +49,11 @@ export type ApplyOutcome = "applied" | "ignored" | "deferred" | "invalid";
 
 /** 处理一条下行快照。可直接调用，便于单测与意图结束后的补应用。 */
 export function handleSessionState(m: SessionStateMessage): ApplyOutcome {
-  if (!m || typeof m.slot !== "number" || typeof m.revision !== "number"
+  if (!m || typeof m.revision !== "number"
     || !Number.isFinite(m.revision) || typeof m.data !== "string") {
     return "invalid";
   }
   setView({
-    slot: m.slot,
     revision: m.revision,
     online: typeof m.online === "number" ? m.online : 0,
     updatedAt: typeof m.updatedAt === "number" ? m.updatedAt : 0,
@@ -72,12 +70,12 @@ function applySnapshot(m: SessionStateMessage): ApplyOutcome {
   if (!shouldApplySnapshot(m)) return "ignored";
   // zustand.subscribe 同步触发；先抑制再写 store，否则会把远端快照又 PUT 回去。
   suppressNextUpload();
-  // P3-1c：权威快照不是「换档」，不能打断正在进行的战斗。
+  // P3-1c：权威快照不是换存档，不能打断正在进行的战斗。
   // 战斗态本来就不进存档，结算时快照到达恰恰是战斗结束的那一刻——
   // 若在这里清 battle，Arena 会直接从结算画面跳回「尚未开始遭遇」。
-  const r = useGameStore.getState().importSaveJson(m.data, m.slot as 1 | 2 | 3, { keepBattle: true });
+  const r = useGameStore.getState().importSaveJson(m.data, { keepBattle: true });
   if (!r.ok) return "invalid";
-  noteRevision(m.slot, m.revision);
+  noteRevision(m.revision);
   return "applied";
 }
 

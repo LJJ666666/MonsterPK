@@ -21,7 +21,7 @@ import { WebSocketServer, type RawData } from 'ws';
 import { prisma } from '../lib/prisma';
 import { getAccountState, checkSessionVersion, BAN_CODE, SESSION_REPLACED_CODE } from '../lib/account';
 import { type WsConnection } from '../lib/wsRegistry';
-import { buildSnapshot, SESSION_SLOTS } from '../lib/gameSession';
+import { buildSnapshot } from '../lib/gameSession';
 import {
   WS_PROTOCOL_VERSION,
   WS_CAPABILITIES,
@@ -291,7 +291,7 @@ function onConnected(
   const rejoined = rooms.reconnect(userId, digest, conn.id, now);
   if (rejoined.length > 0) publishRooms(rejoined);
 
-  // P2-2：连接就绪后把该用户已有槽位的权威快照推下去（重连等于拉最新状态）。
+  // P2-2：连接就绪后把该用户的账号单档权威快照推下去（重连等于拉最新状态）。
   void (async () => {
     try {
       const snapshots = await hydrateForUser(userId, conn.id);
@@ -348,11 +348,8 @@ function onConnected(
 
     // 上行只请求重推快照，不接收任何状态数据；写入口始终在服务端。
     if (msg.type === 'session.resync') {
-      for (const slot of SESSION_SLOTS) {
-        if (msg.slot !== undefined && slot !== msg.slot) continue;
-        const s = gameSessions.get(userId, slot);
-        if (s && ws.readyState === 1) ws.send(encodeServerMessage(buildSnapshot(s)));
-      }
+      const s = gameSessions.get(userId);
+      if (s && ws.readyState === 1) ws.send(encodeServerMessage(buildSnapshot(s)));
       return;
     }
 

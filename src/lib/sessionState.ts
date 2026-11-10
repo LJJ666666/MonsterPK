@@ -12,7 +12,6 @@ export const ROOM_STATE_EVENT = "mpk:room-state";
 
 export type SessionStateMessage = {
   type: "session.state";
-  slot: number;
   revision: number;
   data: string;
   updatedAt: number;
@@ -183,15 +182,15 @@ export type RoomStateMessage = {
   room: RoomView;
 };
 
-/** 每个槽位最近一次「已被本地认可」的权威态版本号（-1 = 尚未建立基线）。 */
-const lastSeen: Record<number, number> = {};
+/** 单档最近一次「已被本地认可」的权威态版本号（-1 = 尚未建立基线）。 */
+let lastSeen = -1;
 /** 正在进行的意图数量：发意图 → 提交裁决结果期间不能让远端快照覆盖本地。 */
 let inFlight = 0;
 /** 意图在途期间暂存的最后一份快照，意图结束后再判断是否应用。 */
 let deferred: SessionStateMessage | null = null;
 
-export function getLastSeenRevision(slot: number): number {
-  return lastSeen[slot] ?? -1;
+export function getLastSeenRevision(): number {
+  return lastSeen;
 }
 
 /**
@@ -199,15 +198,14 @@ export function getLastSeenRevision(slot: number): number {
  * 与 getLastSeenRevision 的区别：-1 是「不知道」，0 是「知道，且服务端还没有存档」，
  * 两者在 CAS 里语义完全不同（后者是新建存档的合法基线），不能混用。
  */
-export function getWriteRevision(slot: number): number | null {
-  const v = lastSeen[slot];
-  return typeof v === "number" && v >= 0 ? v : null;
+export function getWriteRevision(): number | null {
+  return lastSeen >= 0 ? lastSeen : null;
 }
 
 /** 本端 PUT 成功后也要记下 revision，否则自己的回显快照会被当成远端更新重复应用。 */
-export function noteRevision(slot: number, revision: number): void {
+export function noteRevision(revision: number): void {
   if (typeof revision !== "number" || !Number.isFinite(revision)) return;
-  if (revision > getLastSeenRevision(slot)) lastSeen[slot] = revision;
+  if (revision > lastSeen) lastSeen = revision;
 }
 
 /**
@@ -215,14 +213,14 @@ export function noteRevision(slot: number, revision: number): void {
  * 与 noteRevision 的「只增」不同：换账号时新账号的 revision 可能更小，
  * 只增策略会让本地一直带着旧账号的版本号去写，触发无谓的 409。
  */
-export function setRevision(slot: number, revision: number): void {
+export function setRevision(revision: number): void {
   if (typeof revision !== "number" || !Number.isFinite(revision) || revision < 0) return;
-  lastSeen[slot] = revision;
+  lastSeen = revision;
 }
 
-/** 登出时清空所有槽位的版本号，避免下一个账号继承。 */
+/** 登出时清空版本号，避免下一个账号继承。 */
 export function forgetAllRevisions(): void {
-  for (const k of Object.keys(lastSeen)) delete lastSeen[k as any];
+  lastSeen = -1;
 }
 
 /**
@@ -240,7 +238,7 @@ export function setSessionSuspended(value: boolean): void {
 }
 
 export function shouldApplySnapshot(m: SessionStateMessage): boolean {
-  return inFlight === 0 && m.revision > getLastSeenRevision(m.slot);
+  return inFlight === 0 && m.revision > lastSeen;
 }
 
 export function beginIntent(): void {
@@ -268,7 +266,7 @@ export function deferSnapshot(m: SessionStateMessage): void {
 
 /** 仅用于单测复位，不在业务路径调用。 */
 export function resetSessionStateForTest(): void {
-  for (const k of Object.keys(lastSeen)) delete lastSeen[k as any];
+  lastSeen = -1;
   inFlight = 0;
   deferred = null;
 }

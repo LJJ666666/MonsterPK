@@ -6,7 +6,7 @@ import {
 } from "./rank";
 
 const row = {
-  rank: 1, username: "amy", slot: 1, value: 468, secondary: 2,
+  rank: 1, username: "amy", value: 468, secondary: 2,
   detail: "出战 1 只六维总和", isMe: false,
 };
 
@@ -61,7 +61,7 @@ describe("F02 奖励记录解析", () => {
       ok: true, readonly: true,
       entries: [
         { periodKey: "2026-11-08", boardKey: "rank:team_power", label: "全队战力",
-          rank: 1, slot: 1, reward: { money: 300, items: [{ itemId: "capsule_prism", count: 1 }] },
+          rank: 1, reward: { money: 300, items: [{ itemId: "capsule_prism", count: 1 }] },
           revision: 7, grantedAt: "2026-11-09T00:00:00.000Z" },
         { periodKey: "坏键", label: "x", rank: 1, reward: {} },
       ],

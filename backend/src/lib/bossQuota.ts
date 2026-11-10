@@ -9,7 +9,7 @@
  *  - Boss 次数是**按自然日**的账号级配额，进程重启不能把次数重置（否则重启即刷榜）。
  *
  * 并发：`hold()` 是同步 Map 操作，Node 单线程下不会交错；跨槽位的「读 DB 已用次数 → hold」
- * 由路由层用 `withSlotLock('bossq:<userId>')` 串行（锁顺序统一为 槽位锁 → bossq 锁，无死锁）。
+ * 由路由层用 `withSlotLock('bossq:<userId>')` 串行（锁顺序统一为 账号锁 → bossq 锁，无死锁）。
  */
 export type QuotaUsage = { held: number; committed: number };
 

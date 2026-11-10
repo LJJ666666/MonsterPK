@@ -69,7 +69,7 @@ function parseSave(data) {
 }
 
 async function readSaveData(token) {
-  const r = await get(token, '/api/save?slot=1');
+  const r = await get(token, '/api/save');
   return parseSave(r.data?.data);
 }
 
@@ -94,10 +94,10 @@ function intentFor(coop) {
 }
 
 async function newRoom(host, guest) {
-  const c = await post(host.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const c = await post(host.token, '/api/coop/create', { bossId: BOSS });
   if (c.status !== 200) throw new Error(`建房失败 ${c.status}: ${JSON.stringify(c.data)}`);
   const roomId = c.data.room.roomId;
-  const j = await post(guest.token, `/api/coop/${roomId}/join`, { slot: 1 });
+  const j = await post(guest.token, `/api/coop/${roomId}/join`, {});
   if (j.status !== 200) throw new Error(`加入失败 ${j.status}: ${JSON.stringify(j.data)}`);
   return { roomId, created: c.data.room, joined: j.data.room };
 }
@@ -132,7 +132,7 @@ async function main() {
   console.log('\n—— A. 接口边界 ——');
   const probe = await accountWithSave('f16_a', 'a');
   const forgedRooms = await post(probe.token, '/api/coop/create', {
-    slot: 1, bossId: BOSS, rooms: [], contribution: 99999, reward: 1,
+    bossId: BOSS, rooms: [], contribution: 99999, reward: 1,
   });
   suite.check('伪上报六房状态 / 贡献 / 奖励 400 COOP_INPUT_FORBIDDEN',
     forgedRooms.status === 400 && forgedRooms.data?.code === 'COOP_INPUT_FORBIDDEN',
@@ -215,7 +215,7 @@ async function main() {
   const h3 = await waitForMoney(host.token, e3h);
   suite.check('第三场奖励到账（每日上限内）', h3?.money === e3h, `money=${h3?.money}`);
 
-  const fourth = await post(host.token, '/api/coop/create', { slot: 1, bossId: BOSS });
+  const fourth = await post(host.token, '/api/coop/create', { bossId: BOSS });
   suite.check('第 4 次建房被每日上限拦下 409 ROOM_QUOTA_EXHAUSTED',
     fourth.status === 409 && fourth.data?.code === 'ROOM_QUOTA_EXHAUSTED',
     `${fourth.status} ${JSON.stringify(fourth.data)}`);

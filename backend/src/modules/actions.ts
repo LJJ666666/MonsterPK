@@ -26,7 +26,6 @@ import { gameSessions } from './sessionBus';
 
 const paramsSchema = z.object({ type: z.string().min(1).max(40) });
 const bodySchema = z.object({
-  slot: z.coerce.number().int().min(1).max(3).default(1),
   /** 一次性意图标识；前端用 rules.ts 的 uuid() 生成，忌用 crypto.randomUUID（旧 WebView 没有）。 */
   nonce: z.string().min(8).max(64),
   /** 发起意图时客户端的完整存档（尚未应用裁决结果）。 */
@@ -34,7 +33,7 @@ const bodySchema = z.object({
   /** P4 前置：本次意图基于服务端第几版（CAS）。整数与非负由 checkWriteRevision 判定。 */
   revision: z.number().optional(),
   payload: z.record(z.unknown()).default({}),
-});
+}).strip();
 
 export async function actionRoutes(fastify: FastifyInstance) {
   fastify.post('/api/actions/:type', { preHandler: fastify.authenticate }, async (req, reply) => {
@@ -48,17 +47,15 @@ export async function actionRoutes(fastify: FastifyInstance) {
     if (!INTENT_TYPES.includes(type)) {
       return reply.code(400).send({ error: '未知的操作类型' });
     }
-    const { slot } = parsed.data;
-    // P4：意图同样要关进槽位临界区——它也会读当前版本、写基线并登记 pending，
+    // P4：意图同样要关进账号临界区——它也会读当前版本、写基线并登记 pending，
     // 与并发的整包 PUT 交错就会撞出 TOCTOU。
-    return withSlotLock(slotLockKey(userId, slot), () => handleIntent(req, reply, userId, slot, type, parsed.data));
+    return withSlotLock(slotLockKey(userId), () => handleIntent(req, reply, userId, type, parsed.data));
   });
 
   async function handleIntent(
     req: any,
     reply: any,
     userId: string,
-    slot: number,
     type: IntentType,
     body: z.infer<typeof bodySchema>,
   ) {
@@ -68,7 +65,7 @@ export async function actionRoutes(fastify: FastifyInstance) {
     // ⓪ P4 前置：CAS 版本校验。多人同时发意图时，后到的一方必须被拒，
     //    否则两端会各自基于同一份旧数据算出结果，后落库的一方静默覆盖前一方。
     //    放在消费 nonce 之前：冲突属并发而非攻击，不该吃掉一次性 nonce。
-    const server = await currentState(userId, slot);
+    const server = await currentState(userId);
     const revCheck = checkWriteRevision(server?.revision ?? 0, body.revision);
     if (!revCheck.ok) {
       const bad = revCheck as RevisionFailure;
@@ -86,7 +83,7 @@ export async function actionRoutes(fastify: FastifyInstance) {
 
     // ① 消费 nonce：唯一索引冲突即重放。放在最前面，裁决失败也不退还。
     try {
-      await prisma.intentLog.create({ data: { userId, slot, nonce, type } });
+      await prisma.intentLog.create({ data: { userId, nonce, type } });
     } catch (e: any) {
       if (e?.code === 'P2002') {
         return reply.code(409).send({ error: '重复的操作请求，请刷新后重试', code: 'INTENT_REPLAY' });
@@ -101,14 +98,14 @@ export async function actionRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: decision.reason, code: decision.codes[0], path: validation.hard[0]?.path });
     }
     if (decision.kind === 'ban') {
-      await banAccount({ userId, reason: decision.reason, codes: decision.codes, slot, stats: validation.stats });
+      await banAccount({ userId, reason: decision.reason, codes: decision.codes, stats: validation.stats });
       return reply.code(403).send({ error: '你已被封号', code: BAN_CODE, reason: decision.reason });
     }
     const clamp = clampSaveTimestamps(save);
     const baseData = clamp.data;
     const baseDigest = digestOf(baseData);
 
-    const rec = await prisma.save.findUnique({ where: { userId_slot: { userId, slot } } });
+    const rec = await prisma.save.findUnique({ where: { userId } });
     const authority = parseAuthority(rec?.authority, baseData);
 
     const skipBaselineCheck = type === 'admin_test' && isAdmin;
@@ -134,7 +131,7 @@ export async function actionRoutes(fastify: FastifyInstance) {
       nonce,
     });
     if (!outcome.ok || !outcome.pending) {
-      req.log.warn({ userId, slot, kind: 'intent_rejected', type, nonce, reason: outcome.reason }, '意图被服务端拒绝');
+      req.log.warn({ userId, kind: 'intent_rejected', type, nonce, reason: outcome.reason }, '意图被服务端拒绝');
       return reply.code(400).send({ error: outcome.reason ?? '操作无法完成', code: 'INTENT_REJECTED' });
     }
 
@@ -150,16 +147,16 @@ export async function actionRoutes(fastify: FastifyInstance) {
       authority.idleAreaId = null;
       authority.idleLevel = null;
     }
-    await commitState(userId, slot, {
+    await commitState(userId, {
       data: baseData,
       schemaVersion: validation.schemaVersion,
       clientId: rec?.clientId ?? null,
       authority,
       source: 'intent',
     });
-    req.log.info({ userId, slot, kind: 'intent_decided', type, nonce, result: pending.result }, '服务端裁决完成');
+    req.log.info({ userId, kind: 'intent_decided', type, nonce, result: pending.result }, '服务端裁决完成');
     // P4：返回裁决后的版本号。客户端提交结果（PUT 带 intentNonce）必须基于这一版，
     // 否则它手里还是「裁决前」的 revision，提交会被自己的 CAS 拒掉。
-    return { ok: true, nonce, revision: gameSessions.get(userId, slot)?.authority.revision ?? 0, result: pending.result };
+    return { ok: true, nonce, revision: gameSessions.get(userId)?.authority.revision ?? 0, result: pending.result };
   }
 }

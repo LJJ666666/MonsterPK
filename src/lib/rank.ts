@@ -21,7 +21,6 @@ export const RANK_DISCLAIMER = "战力仅为六维总和，不代表实战强弱
 export type RankRow = {
   rank: number;
   username: string;
-  slot: number;
   value: number;
   secondary: number;
   detail: string;
@@ -49,7 +48,6 @@ function isRankRow(v: unknown): v is RankRow {
   return (
     typeof r.rank === "number" && Number.isInteger(r.rank) &&
     typeof r.username === "string" && r.username.length > 0 &&
-    typeof r.slot === "number" && Number.isInteger(r.slot) &&
     typeof r.value === "number" && Number.isFinite(r.value) &&
     typeof r.secondary === "number" && Number.isFinite(r.secondary) &&
     typeof r.detail === "string" &&
@@ -110,7 +108,6 @@ export type MyReward = {
   boardKey: string;
   label: string;
   rank: number;
-  slot: number;
   reward: RewardView;
   revision: number;
   grantedAt: string;
@@ -190,7 +187,6 @@ export function parseMyRewards(res: unknown): MyRewards | null {
       boardKey: typeof e.boardKey === "string" ? e.boardKey : "",
       label: e.label as string,
       rank: Math.max(1, Math.floor(e.rank as number)),
-      slot: typeof e.slot === "number" ? e.slot : 1,
       reward: parseRewardView(e.reward),
       revision: typeof e.revision === "number" ? e.revision : 0,
       grantedAt: typeof e.grantedAt === "string" ? e.grantedAt : "",

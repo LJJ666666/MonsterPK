@@ -156,7 +156,7 @@ export default function BossBoardModal({
           )}
           {!rankLoading && !rankError && rank?.entries.map((row) => (
             <div
-              key={`${row.username}#${row.slot}#${row.rank}`}
+              key={`${row.username}#${row.rank}`}
               className={`flex items-center gap-2 border-2 p-2 min-w-0 ${
                 row.isMe
                   ? "border-[color:var(--accent)] bg-[color:var(--panel2)]"

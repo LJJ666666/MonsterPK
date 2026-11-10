@@ -3,7 +3,7 @@
 // 唯一真值在服务端：
 //  - 讨伐列表的等级 / 每日次数 / 剩余次数由 `GET /api/boss` 下发；
 //  - 伤害榜来自 `BossDamageEvent` 聚合（`GET /api/boss/:id/rank`）；
-//  - 开局只传 `bossId` + `slot`，战斗过程仍走 `/api/battle/action`。
+//  - 开局只传 `bossId`，战斗过程仍走 `/api/battle/action`。
 // 本文件没有任何「计算伤害 / 扣次数 / 写榜」的函数：客户端做这些必然被服务端拒绝。
 import { api } from "./api";
 
@@ -27,7 +27,6 @@ export type BossEntry = {
 export type BossRankRow = {
   rank: number;
   username: string;
-  slot: number;
   damage: number;
   best: number;
   attempts: number;
@@ -96,7 +95,6 @@ function isBossRankRow(v: unknown): v is BossRankRow {
   const r = v as Record<string, unknown>;
   return typeof r.rank === "number" && Number.isInteger(r.rank)
     && typeof r.username === "string" && r.username.length > 0
-    && typeof r.slot === "number"
     && typeof r.damage === "number" && Number.isFinite(r.damage)
     && typeof r.best === "number" && Number.isFinite(r.best)
     && typeof r.attempts === "number" && Number.isFinite(r.attempts)

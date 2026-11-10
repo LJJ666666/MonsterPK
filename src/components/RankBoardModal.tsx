@@ -83,7 +83,7 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
       <div className="w-7 flex-none text-center font-display text-sm text-[color:var(--accent)]">{row.rank}</div>
       <div className="flex-1 min-w-0">
         <div className="text-xs font-semibold text-[color:var(--text)] truncate">
-          {row.username}<span className="text-[color:var(--muted)]">#{row.slot}</span>
+          {row.username}
           {row.isMe && <span className="ml-1 text-[color:var(--accent)]">[我]</span>}
         </div>
         <div className="text-[10px] text-[color:var(--muted)] truncate">{row.detail}</div>
@@ -195,7 +195,7 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
             board?.entries.length === 0
               ? empty("暂无上榜记录，先去野外走走吧。")
               : board?.entries.map((row) =>
-                rowItem(row, `${row.username}#${row.slot}#${row.rank}`, tab))
+                rowItem(row, `${row.username}#${row.rank}`, tab))
           )}
 
           {!loading && !error && view === "periods" && (() => {
@@ -203,7 +203,7 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
             const one = periodBoards?.boards.find((b) => b.boardKey === key);
             if (!one || one.entries.length === 0) return empty("该周期暂无榜单记录");
             return one.entries.map((row) =>
-              rowItem(row, `${selectedPeriod}#${row.username}#${row.slot}`, tab));
+              rowItem(row, `${selectedPeriod}#${row.username}#${row.rank}`, tab));
           })()}
 
           {!loading && !error && view === "rewards" && (
@@ -219,7 +219,7 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
                     <span className="flex-none text-xs font-bold text-[color:var(--accent)]">第 {r.rank} 名</span>
                   </div>
                   <div className="text-[10px] text-[color:var(--muted)] truncate mt-1">
-                    {formatReward(r.reward)} · 服务端发放 · 槽位 {r.slot}
+                    {formatReward(r.reward)} · 服务端发放
                   </div>
                 </div>
               ))

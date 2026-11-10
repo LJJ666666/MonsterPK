@@ -6,7 +6,7 @@
  * 数值全在服务端常量里，后续调数值不改协议、不改存档 schema、不改前端。
  *
  * 发放口径（台账 F02）：结算后由服务端写档，经 commitState()，客户端不得上报领取；
- * 防重复领取靠 RankReward 的 (periodKey, boardKey, userId, slot) 唯一键。
+ * 防重复领取靠 RankReward 的 (periodKey, boardKey, userId) 唯一键。
  */
 import { RANK_TYPES, RANK_META, type RankType } from './rank.js';
 import { BOSSES, BOSS_IDS } from './boss.js';

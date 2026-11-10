@@ -16,7 +16,7 @@ import { runGameOp, type MutationOp } from "@/lib/gameApi";
 async function intent(
   type: string,
   payload: Record<string, unknown>,
-  apply: (result: IntentResult, save: SaveData, slot: number) => void,
+  apply: (result: IntentResult, save: SaveData) => void,
 ): Promise<IntentResult | null> {
   const { runIntent } = await import("@/lib/intents");
   return runIntent(type, payload, apply);
@@ -41,13 +41,12 @@ async function runServerBattleAction(
   if (!battle?.serverId || battle.finished || battle.pending) return;
 
   const battleId = battle.serverId;
-  const slot = state.slot;
   set({ battle: { ...battle, pending: true } });
 
   try {
-    const { view, settled } = await battleApi.action(slot, battleId, action);
+    const { view, settled } = await battleApi.action(battleId, action);
     set({ battle: toBattleState(view) });
-    if (settled) await refreshSaveFromServer(slot);
+    if (settled) await refreshSaveFromServer();
   } catch (e) {
     const f = toFailure(e);
     const cur = get().battle;
@@ -69,16 +68,16 @@ async function runServerBattleAction(
 }
 
 /** 结算后主动拉一次存档（WS 快照的 HTTP 兜底）。失败静默：下一场开局仍以服务端为准。 */
-async function refreshSaveFromServer(slot: number): Promise<void> {
+async function refreshSaveFromServer(): Promise<void> {
   try {
     const [{ api }, { suppressNextUpload }] = await Promise.all([
       import("@/lib/api"),
       import("@/lib/sync"),
     ]);
-    const cloud = await api.getSave(slot);
+    const cloud = await api.getSave();
     if (!cloud?.data) return;
     suppressNextUpload();
-    useGameStore.getState().importSaveJson(cloud.data, slot as 1 | 2 | 3, { keepBattle: true });
+    useGameStore.getState().importSaveJson(cloud.data, { keepBattle: true });
   } catch {
     /* 拉不到就等 WS 快照 */
   }
@@ -91,10 +90,10 @@ async function refreshSaveFromServer(slot: number): Promise<void> {
  * 本地这份只是渲染副本。先 `suppressNextUpload()` 抑制一次自动上传，避免刚写完
  * 又原样传回去（那会多一次 revision 和一次广播）。
  */
-async function applyServerSave(slot: number, data: string): Promise<void> {
+async function applyServerSave(data: string): Promise<void> {
   const { suppressNextUpload } = await import("@/lib/sync");
   suppressNextUpload();
-  useGameStore.getState().importSaveJson(data, slot as 1 | 2 | 3, { keepBattle: true });
+  useGameStore.getState().importSaveJson(data, { keepBattle: true });
 }
 
 /** P3-2：所有「会改存档」的操作统一走这里，失败只回报文，不做任何本地补偿。 */
@@ -104,36 +103,31 @@ async function serverOp(
   body: Record<string, unknown>,
 ): Promise<{ ok: boolean; reason?: string }> {
   const state = get();
-  const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+  const save = state.save;
   if (!save) return { ok: false, reason: "请先创建或导入存档" };
-  const res = await runGameOp(op, { slot: state.slot, ...body });
+  const res = await runGameOp(op, { ...body });
   // strict:false 下判别联合不收窄，用 in 判字段（bug_log §18）。
   if (!res.ok) return { ok: false, reason: "reason" in res ? res.reason : "操作失败" };
-  await applyServerSave(state.slot, res.data);
+  await applyServerSave(res.data);
   return { ok: true };
 }
 
 type GameState = {
-  slot: 1 | 2 | 3;
-  save1: SaveData | null;
-  save2: SaveData | null;
-  save3: SaveData | null;
+  save: SaveData | null;
   battle: BattleState | null;
   
-  setSlot: (slot: 1 | 2 | 3) => void;
   leaveBattle: () => void;
   newGame: (
     playerName: string,
     starterSpecId: (typeof STARTERS)[number],
   ) => Promise<{ ok: boolean; reason?: string }>;
-  resetSave: (slotToReset?: 1 | 2 | 3) => void;
+  resetSave: () => void;
   travelTo: (locationId: LocationId) => Promise<{ ok: boolean; reason?: string }>;
   importSaveJson: (
     json: string,
-    targetSlot?: 1 | 2 | 3,
     opts?: { keepBattle?: boolean },
   ) => { ok: true } | { ok: false; reason: string };
-  exportSaveJson: (targetSlot?: 1 | 2 | 3) => { ok: true; json: string } | { ok: false; reason: string };
+  exportSaveJson: () => { ok: true; json: string } | { ok: false; reason: string };
   
   startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string, wildId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   /**
@@ -234,13 +228,9 @@ const customStorage: StateStorage = {
 export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
-      slot: 1,
-      save1: null,
-      save2: null,
-      save3: null,
+      save: null,
       battle: null,
       
-      setSlot: (slot) => set({ slot }),
       leaveBattle: () => {
         const state = get();
         // P3-1c：战斗没打完就离开 = 放弃这场（不结算奖励）。
@@ -248,8 +238,7 @@ export const useGameStore = create<GameState>()(
         // 期间再开局会被当成「已有战斗」而行为异常。
         const current = state.battle;
         if (current?.serverId && !current.finished) {
-          const slot = state.slot;
-          void battleApi.abandon(slot, current.serverId).catch(() => {
+          void battleApi.abandon(current.serverId).catch(() => {
             /* 已超时/已结束都无所谓，服务端会自己回收 */
           });
         }
@@ -259,24 +248,21 @@ export const useGameStore = create<GameState>()(
       },
 
       newGame: async (playerName, starterSpecId) => {
-        const { slot } = get();
         // P3-2b：整份新档由服务端生成（初始幻兽的个体值、初始背包都在服务端掷），
         // 客户端只提交「名字 + 选哪只御三家」。不再本地 createInstance + rebase。
         const res = await runGameOp("new_game", {
-          slot,
           playerName,
           starterSpecId,
           // 前端在「新建旅程」里已经让玩家确认过覆盖，这里显式授权。
           overwrite: true,
         });
         if (!res.ok) return { ok: false, reason: "reason" in res ? res.reason : "创建存档失败" };
-        await applyServerSave(slot, res.data);
+        await applyServerSave(res.data);
         return { ok: true };
       },
 
-      resetSave: (slotToReset) => {
-        const s = slotToReset ?? get().slot;
-        set({ [`save${s}`]: null, battle: null } as any);
+      resetSave: () => {
+        set({ save: null, battle: null });
       },
 
       travelTo: async (locationId) => {
@@ -284,8 +270,7 @@ export const useGameStore = create<GameState>()(
         return serverOp(get, "travel", { locationId });
       },
 
-      importSaveJson: (json, targetSlot, opts) => {
-        const s = targetSlot ?? get().slot;
+      importSaveJson: (json, opts) => {
         try {
           const parsed = JSON.parse(json) as SaveData;
           if (!parsed || typeof parsed !== "object") return { ok: false, reason: "存档格式不正确" };
@@ -296,31 +281,29 @@ export const useGameStore = create<GameState>()(
           const lastHealLocationId = (parsed.lastHealLocationId ?? locationId) as LocationId;
           const visitedLocationIds = (parsed.visitedLocationIds ?? [locationId]) as LocationId[];
           set({
-            [`save${s}`]: { ...parsed, locationId, lastHealLocationId, visitedLocationIds, lastSavedAt: nowIso() },
+            save: { ...parsed, locationId, lastHealLocationId, visitedLocationIds, lastSavedAt: nowIso() },
             // P3-1c：战斗态不进存档，也不该被存档快照打断。
-            //  - 导入/恢复存档（换档语义）→ 必须清战斗，否则会把旧战斗套到新档上；
+            //  - 导入/恢复存档 → 必须清战斗，否则会把旧战斗套到新档上；
             //  - 服务端权威快照（结算广播 / 别的设备写入）→ 保留战斗，
             //    因为结算时 UI 还要靠 battle 展示「对手倒下 / 捕获成功」，
             //    一旦清空 Arena 会直接跳回「尚未开始遭遇」。
             ...(opts?.keepBattle ? {} : { battle: null }),
-          } as any);
+          });
           return { ok: true };
         } catch {
           return { ok: false, reason: "JSON 解析失败" };
         }
       },
 
-      exportSaveJson: (targetSlot) => {
-        const state = get();
-        const s = targetSlot ?? state.slot;
-        const save = state[`save${s}` as keyof GameState] as SaveData | null;
+      exportSaveJson: () => {
+        const save = get().save;
         if (!save) return { ok: false, reason: "没有可导出的存档" };
         return { ok: true, json: JSON.stringify({ ...save, lastSavedAt: nowIso() }, null, 2) };
       },
 
       startEncounter: async (theme, areaName, levelMin, levelMax, areaId, wildId) => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save) return { ok: false, reason: "请先创建或导入存档" };
         if (save.party.length === 0) return { ok: false, reason: "队伍为空" };
 
@@ -336,7 +319,6 @@ export const useGameStore = create<GameState>()(
         }
         try {
           const view = await battleApi.start({
-            slot: state.slot,
             theme,
             areaName,
             areaId,
@@ -364,12 +346,12 @@ export const useGameStore = create<GameState>()(
 
       startBossBattle: async (bossId) => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save) return { ok: false, reason: "请先创建或导入存档" };
         if (!canUseServerBattle()) return { ok: false, reason: "尚未登录，战斗需要连接服务端" };
         try {
-          // 只传 slot + bossId：Boss 数值、每日次数、敌方选招全由服务端决定。
-          const res = await api.bossStart({ slot: state.slot, bossId });
+          // 只传 bossId：Boss 数值、每日次数、敌方选招全由服务端决定。
+          const res = await api.bossStart({ bossId });
           if (!res?.battle) {
             throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
           }
@@ -390,13 +372,12 @@ export const useGameStore = create<GameState>()(
         const state = get();
         // 本地已有战斗（进行中或正在展示结果）就不覆盖它
         if (state.battle || !canUseServerBattle()) return;
-        const slot = state.slot;
         try {
-          const view = await battleApi.current(slot);
+          const view = await battleApi.current();
           if (!view) return;
           const now = get();
-          // 请求期间可能切了槽位 / 开了新战斗，别把别人的战斗盖上去
-          if (now.battle || now.slot !== slot) return;
+          // 请求期间可能开了新战斗，别把别人的战斗盖上去
+          if (now.battle) return;
           set({ battle: toBattleState(view) } as any);
         } catch {
           /* 取不到就当作没有战斗：下一场开局会重新创建 */
@@ -446,7 +427,7 @@ export const useGameStore = create<GameState>()(
       useItemOutsideBattle: async (itemId, partyIndex) => {
         // P3-2：道具消耗、回复量、解异常、进化石条件与进化后数值全在服务端算。
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         const target = save?.party[partyIndex];
         if (!target) return { ok: false, reason: "找不到这只幻兽" };
         return serverOp(get, "use_item", { itemId, monsterId: target.id });
@@ -454,34 +435,34 @@ export const useGameStore = create<GameState>()(
 
       buyItem: async (itemId, amount) => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save) return;
         // P1-2-c：价格与扣款由服务端裁决，客户端改价 / 白嫖都会被精确增量核对拒绝。
-        await intent("shop_buy", { itemId, amount }, (result, curSave, slot) => {
+        await intent("shop_buy", { itemId, amount }, (result, curSave) => {
           const cost = Number(result.cost ?? 0);
           const qty = Number(result.amount ?? 0);
           if (cost <= 0 || qty <= 0) return;
           set({
-            [`save${slot}`]: {
+            save: {
               ...curSave,
               money: curSave.money - cost,
               inventory: { ...curSave.inventory, [itemId]: (curSave.inventory[itemId] ?? 0) + qty },
               lastSavedAt: nowIso(),
             },
-          } as any);
+          });
         });
       },
 
       startIdle: async (areaId) => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save) return { ok: false, reason: "请先创建存档" };
         if (!save.clearedAreas?.[areaId]) return { ok: false, reason: "该区域尚未首通，无法挂机" };
         if (save.idle) return { ok: false, reason: "已有进行中的挂机派遣" };
         // P1-2-a：区域难度与开始时间都由服务端给出，客户端系统时间不参与结算。
-        const result = await intent("idle_start", { areaId }, (res, curSave, slot) => {
+        const result = await intent("idle_start", { areaId }, (res, curSave) => {
           set({
-            [`save${slot}`]: {
+            save: {
               ...curSave,
               idle: {
                 areaId,
@@ -491,17 +472,17 @@ export const useGameStore = create<GameState>()(
               },
               lastSavedAt: nowIso(),
             },
-          } as any);
+          });
         });
         return result ? { ok: true } : { ok: false, reason: "派遣失败，请检查网络后重试" };
       },
 
       claimIdle: async () => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save?.idle) return null;
         // P1-2-a：收益按服务端时钟 + 服务端 RNG 结算，改系统时间（往前/往后）都不生效。
-        const result = await intent("idle_claim", {}, (res, curSave, slot) => {
+        const result = await intent("idle_claim", {}, (res, curSave) => {
           const money = Number(res.money ?? 0);
           const capsules = (res.capsules ?? {}) as Partial<Record<ItemId, number>>;
           const inventory = { ...curSave.inventory };
@@ -510,14 +491,14 @@ export const useGameStore = create<GameState>()(
             inventory[key] = (inventory[key] ?? 0) + (qty ?? 0);
           }
           set({
-            [`save${slot}`]: {
+            save: {
               ...curSave,
               money: curSave.money + money,
               inventory,
               idle: null,
               lastSavedAt: nowIso(),
             },
-          } as any);
+          });
         });
         if (!result) return null;
         return {
@@ -528,10 +509,10 @@ export const useGameStore = create<GameState>()(
 
       cancelIdle: async () => {
         const state = get();
-        const save = state[`save${state.slot}` as keyof GameState] as SaveData | null;
+        const save = state.save;
         if (!save?.idle) return;
-        await intent("idle_cancel", {}, (_res, curSave, slot) => {
-          set({ [`save${slot}`]: { ...curSave, idle: null, lastSavedAt: nowIso() } } as any);
+        await intent("idle_cancel", {}, (_res, curSave) => {
+          set({ save: { ...curSave, idle: null, lastSavedAt: nowIso() } });
         });
       },
 
@@ -561,24 +542,29 @@ export const useGameStore = create<GameState>()(
       // P1-2-d：测试菜单必须走服务端 admin_test 授权；普通账号即使直接调用也会被拒，
       // 不会在本地凭空加钱 / 加球。管理员身份只由服务端判定。
       addGold: async (amount) => {
-        await intent("admin_test", {}, (_res, save, slot) => {
-          set({ [`save${slot}`]: { ...save, money: Math.min(999999, save.money + amount), lastSavedAt: nowIso() } } as any);
+        await intent("admin_test", {}, (_res, save) => {
+          set({ save: { ...save, money: Math.min(999999, save.money + amount), lastSavedAt: nowIso() } });
         });
       },
       addMasterBalls: async (amount) => {
-        await intent("admin_test", {}, (_res, save, slot) => {
+        await intent("admin_test", {}, (_res, save) => {
           const inventory = { ...save.inventory };
           inventory["capsule_master"] = (inventory["capsule_master"] || 0) + amount;
-          set({ [`save${slot}`]: { ...save, inventory, lastSavedAt: nowIso() } } as any);
+          set({ save: { ...save, inventory, lastSavedAt: nowIso() } });
         });
       }
     }),
     {
       name: "beast-journal-save",
       storage: createJSONStorage(() => customStorage),
-      partialize: (s) => ({ save1: s.save1, save2: s.save2, save3: s.save3, slot: s.slot }),
+      partialize: (s) => ({ save: s.save }),
       version: SCHEMA_VERSION,
       migrate: (persistedState: any, version: number) => migrateSaveState(persistedState, version),
+      // 与 migrateSaveState 的输出形状对齐：无论历史数据带了多少旧字段，只把单档 save 合进当前状态。
+      merge: (persistedState: any, currentState: any) => ({
+        ...currentState,
+        save: persistedState?.save ?? null,
+      }),
     }
   )
 );

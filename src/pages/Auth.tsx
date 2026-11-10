@@ -5,7 +5,6 @@ import BrandMark from "@/components/BrandMark";
 import { api, API_BASE } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { syncOnLogin } from "@/lib/sync";
-import { useGameStore } from "@/stores/useGameStore";
 
 type Mode = "login" | "register";
 type FieldErrors = { username?: string; password?: string; confirm?: string };
@@ -116,7 +115,7 @@ export default function Auth() {
           : await api.register(username.trim(), password);
       setToken(res.token);
       // 登录后按冲突策略自动恢复云端存档（last-write-wins），结果通过同步状态 UI 展示
-      void syncOnLogin(useGameStore.getState().slot);
+      void syncOnLogin();
       if (remember) localStorage.setItem(LAST_USER_KEY, username.trim());
       else localStorage.removeItem(LAST_USER_KEY);
       navigate("/", { replace: true });

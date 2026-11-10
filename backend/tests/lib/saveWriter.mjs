@@ -5,12 +5,12 @@
  * 版本不符一律 409 REVISION_CONFLICT。裸的 `{ data }` 请求现在会被
  * 400 REVISION_REQUIRED 拒掉，所以 E2E 里所有写入都要带 revision。
  *
- * 这里维护「每个 token × 槽位」的当前版本：
- *  · 首次用到时向服务端问一次（该槽位无存档 → 0，正好是新建的合法基线）；
+ * F17 单档化后按 token 跟踪当前版本（一账号一档）：
+ *  · 首次用到时向服务端问一次（该账号无存档 → 0，正好是新建的合法基线）；
  *  · PUT 成功后用响应里的 revision 更新；
  *  · 被拒（400/403/409）时保持不变——服务端没写入，版本自然没变。
  *
- * 需要构造「版本冲突」用例时显式传 `extra.revision`，或先 `set(token, slot, n)`。
+ * 需要构造「版本冲突」用例时显式传 `extra.revision`，或先 `set(token, n)`。
  *
  * @param {(path: string, opts?: object) => Promise<{status:number, data:any}>} request
  *        各套件自己的请求函数（签名统一为 request(path, { method, token, body })）
@@ -18,29 +18,27 @@
  */
 export function makeSaveWriter(request, apiPath = '/api/save') {
   const revs = new Map();
-  const key = (token, slot) => `${token}|${slot}`;
 
-  /** 该 token/槽位的当前版本；没有就向服务端确认一次。 */
-  async function revOf(token, slot = 1) {
+  /** 该 token 的当前版本；没有就向服务端确认一次。 */
+  async function revOf(token) {
     if (!token) return 0; // 无鉴权用例：revision 拦不到它，401 先返回
-    const k = key(token, slot);
-    if (revs.has(k)) return revs.get(k);
-    const cur = await request(`${apiPath}?slot=${slot}`, { token });
+    if (revs.has(token)) return revs.get(token);
+    const cur = await request(apiPath, { token });
     const rev = cur?.status === 200 && typeof cur.data?.revision === 'number' ? cur.data.revision : 0;
-    revs.set(k, rev);
+    revs.set(token, rev);
     return rev;
   }
 
   /** PUT 成功后同步版本号。 */
-  function note(token, slot, res) {
+  function note(token, res) {
     if (res?.status === 200 && typeof res.data?.revision === 'number') {
-      revs.set(key(token, slot), res.data.revision);
+      revs.set(token, res.data.revision);
     }
   }
 
   /** 手工设定版本（用于「其它端已经写过」的场景）。 */
-  function set(token, slot, revision) {
-    revs.set(key(token, slot), revision);
+  function set(token, revision) {
+    revs.set(token, revision);
   }
 
   /**
@@ -48,11 +46,10 @@ export function makeSaveWriter(request, apiPath = '/api/save') {
    * @param {string} token
    * @param {object|string} data 存档对象或 JSON 文本
    * @param {object} extra 附加标记（intentNonce / rebase / 显式 revision）
-   * @param {number} slot
    */
-  async function put(token, data, extra = {}, slot = 1) {
-    const revision = typeof extra.revision === 'number' ? extra.revision : await revOf(token, slot);
-    const res = await request(`${apiPath}?slot=${slot}`, {
+  async function put(token, data, extra = {}) {
+    const revision = typeof extra.revision === 'number' ? extra.revision : await revOf(token);
+    const res = await request(apiPath, {
       method: 'PUT',
       token,
       body: {
@@ -61,7 +58,7 @@ export function makeSaveWriter(request, apiPath = '/api/save') {
         ...extra,
       },
     });
-    note(token, slot, res);
+    note(token, res);
     return res;
   }
 

@@ -37,7 +37,7 @@ function mon(id: string, level: number) {
 
 function battle(levelCap: number | null) {
   return createBattle({
-    id: 'bt_f04', userId: 'u_f04', slot: 1,
+    id: 'bt_f04', userId: 'u_f04',
     theme: 'grass', areaName: '测试草地', areaId: 'wild_starter',
     levelMin: 2, levelMax: 2,
     party: [mon('young', 3), mon('old', 9)],

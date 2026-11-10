@@ -70,18 +70,18 @@ async function request(path, { method = 'GET', token, body } = {}) {
 // 需要构造版本冲突时显式传 { revision: n }。
 const saveWriter = makeSaveWriter(request);
 const put = saveWriter.put;
-const get = (token) => request('/api/save?slot=1', { token });
+const get = (token) => request('/api/save', { token });
 const me = (token) => request('/api/auth/me', { token });
 // P4：意图也要带 revision（CAS）。裁决成功后服务端返回新版本号，这里立刻同步，
 // 否则紧接着的 commitIntent（PUT 带 intentNonce）会拿旧版本撞 409。
 const intent = async (token, type, payload, save, nonce) => {
-  const revision = await saveWriter.revOf(token, 1);
+  const revision = await saveWriter.revOf(token);
   const res = await request(`/api/actions/${type}`, {
     method: 'POST', token,
-    body: { slot: 1, nonce, save: asText(save), payload, revision },
+    body: { nonce, save: asText(save), payload, revision },
   });
   if (res.status === 200 && typeof res.data?.revision === 'number') {
-    saveWriter.set(token, 1, res.data.revision);
+    saveWriter.set(token, res.data.revision);
   }
   return res;
 };

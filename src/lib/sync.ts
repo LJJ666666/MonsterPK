@@ -83,8 +83,8 @@ export function useSyncStatus(): { phase: SyncPhase; info?: string } {
 type UploadExtra = Omit<Partial<PutExtra>, "revision">;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let pending: { slot: number; data: string; extra?: UploadExtra } | null = null;
-const offlineQueue: { slot: number; data: string; extra?: UploadExtra }[] = [];
+let pending: { data: string; extra?: UploadExtra } | null = null;
+const offlineQueue: { data: string; extra?: UploadExtra }[] = [];
 
 // —— P2-2：远端快照写入 store 时抑制一次自动上传 ——
 let suppressUploads = 0;
@@ -104,45 +104,44 @@ function consumeSuppressedUpload(): boolean {
   return true;
 }
 
-// 导出当前槽位的存档 JSON（与手动备份使用的同一个出口，保证落盘格式一致）
-function exportSlot(slot: number): string | null {
-  const r = useGameStore.getState().exportSaveJson(slot as 1 | 2 | 3);
+// 导出当前存档 JSON（与手动备份使用的同一个出口，保证落盘格式一致）
+function exportSave(): string | null {
+  const r = useGameStore.getState().exportSaveJson();
   return r.ok ? r.json : null;
 }
 
 // —— P4：写入基线版本 ——
-// 同一槽位的探测请求合并成一个，避免首次同步时并发打好几次 GET。
-const revisionProbes = new Map<number, Promise<number>>();
+// 探测请求合并成一个，避免首次同步时并发打好几次 GET。
+let revisionProbe: Promise<number> | null = null;
 
 /**
- * 取得该槽位的写入基线版本（CAS 的 compare 部分）。
+ * 取得写入基线版本（CAS 的 compare 部分）。
  * 本地还没有基线时问一次服务端：
  *   · 有存档 → 用它的 revision（说明这一端是「接着别人的版本改」）；
  *   · 404    → 记 0（服务端确实没有存档，本次 PUT 就是新建，基线 0 合法）。
  * 注意这里必须用 setRevision 而不是 noteRevision：换账号后新账号的版本号可能更小。
  */
-async function ensureRevision(slot: number): Promise<number> {
-  const known = getWriteRevision(slot);
+async function ensureRevision(): Promise<number> {
+  const known = getWriteRevision();
   if (known !== null) return known;
-  const inflight = revisionProbes.get(slot);
-  if (inflight) return inflight;
+  if (revisionProbe) return revisionProbe;
   const probe = (async () => {
     try {
-      const cloud = await api.getSave(slot);
+      const cloud = await api.getSave();
       const rev = typeof cloud?.revision === "number" ? cloud.revision : 0;
-      setRevision(slot, rev);
+      setRevision(rev);
       return rev;
     } catch (e: any) {
       if (e?.status === 404) {
-        setRevision(slot, 0);
+        setRevision(0);
         return 0;
       }
       throw e; // 网络 / 鉴权问题交给上层按 transient 处理
     } finally {
-      revisionProbes.delete(slot);
+      revisionProbe = null;
     }
   })();
-  revisionProbes.set(slot, probe);
+  revisionProbe = probe;
   return probe;
 }
 
@@ -150,23 +149,23 @@ async function ensureRevision(slot: number): Promise<number> {
 export const ensureWriteRevision = ensureRevision;
 
 /**
- * P4：版本冲突就地自愈——服务端已经赢了这个槽位，本地切过去。
+ * P4：版本冲突就地自愈——服务端已经赢了，本地切过去。
  * 关键在于「不重试」：带旧 revision 的这份 data 永远不会被接受，
  * 反复重试只会把状态行卡在 error；正确做法是丢掉本地这份快照、应用服务端那份。
  */
-function healFromConflict(slot: number, e: unknown): boolean {
+function healFromConflict(e: unknown): boolean {
   const p = conflictPayloadOf(e);
   if (!p) {
     setPhase("error", "存档版本冲突，请刷新页面后重试");
     return false;
   }
-  setRevision(slot, p.revision);
+  setRevision(p.revision);
   if (p.data) {
     // 与 P2-2 同样的顺序：先抑制回传，再写 store。
     suppressNextUpload();
     const r = useGameStore
       .getState()
-      .importSaveJson(p.data, slot as 1 | 2 | 3, { keepBattle: true });
+      .importSaveJson(p.data, { keepBattle: true });
     setPhase("synced", r.ok ? "其他设备已更新，已切换为服务器版本" : "其他设备已更新，请刷新页面");
     return r.ok;
   }
@@ -177,8 +176,8 @@ function healFromConflict(slot: number, e: unknown): boolean {
 /** 供意图通道复用：意图请求 409 时切到服务端版本，并让调用方把本次操作判为失败。 */
 export const recoverFromConflict = healFromConflict;
 
-async function uploadNow(slot: number, data: string, extra: PutExtra): Promise<any> {
-  return api.putSave(slot, data, getClientId(), extra);
+async function uploadNow(data: string, extra: PutExtra): Promise<any> {
+  return api.putSave(data, getClientId(), extra);
 }
 
 /**
@@ -187,26 +186,25 @@ async function uploadNow(slot: number, data: string, extra: PutExtra): Promise<a
  * P4：先补齐 revision 再发；409 冲突走自愈，既不重试也不入队。
  */
 async function attemptUpload(
-  slot: number,
   data: string,
   extra: UploadExtra = {},
 ): Promise<"conflict" | "permanent" | "transient" | null> {
   let revision: number;
   try {
-    revision = await ensureRevision(slot);
+    revision = await ensureRevision();
   } catch {
     return "transient"; // 连基线版本都拿不到，等于离线
   }
   try {
     setPhase("syncing");
-    const res = await uploadNow(slot, data, { ...extra, revision });
-    if (res && typeof res.revision === "number") noteRevision(slot, res.revision);
+    const res = await uploadNow(data, { ...extra, revision });
+    if (res && typeof res.revision === "number") noteRevision(res.revision);
     setPhase("synced", "已同步到云端");
     return null; // 成功
   } catch (e) {
     const kind = classifyUploadError(e);
     if (kind === "conflict") {
-      healFromConflict(slot, e);
+      healFromConflict(e);
       return "conflict";
     }
     if (kind === "permanent") {
@@ -217,8 +215,8 @@ async function attemptUpload(
   }
 }
 
-export function scheduleUpload(slot: number, data: string, delayMs = 1500, extra?: UploadExtra): void {
-  pending = { slot, data, extra };
+export function scheduleUpload(data: string, delayMs = 1500, extra?: UploadExtra): void {
+  pending = { data, extra };
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     void flush();
@@ -229,7 +227,7 @@ async function flush(): Promise<void> {
   if (!pending) return;
   const job = pending;
   pending = null;
-  const outcome = await attemptUpload(job.slot, job.data, job.extra);
+  const outcome = await attemptUpload(job.data, job.extra);
   if (outcome === "transient") {
     offlineQueue.push(job);
     setPhase("offline", "离线，将在网络恢复后重传");
@@ -239,13 +237,13 @@ async function flush(): Promise<void> {
 /**
  * P1-2：应用服务端裁决结果后**立即**提交，带上 intentNonce 让服务端核对增量。
  */
-export async function commitIntent(slot: number, nonce: string): Promise<boolean> {
+export async function commitIntent(nonce: string): Promise<boolean> {
   cancelPendingUpload();
-  const data = exportSlot(slot);
+  const data = exportSave();
   if (!data) return false;
-  const outcome = await attemptUpload(slot, data, { intentNonce: nonce });
+  const outcome = await attemptUpload(data, { intentNonce: nonce });
   if (outcome === "transient") {
-    offlineQueue.push({ slot, data, extra: { intentNonce: nonce } });
+    offlineQueue.push({ data, extra: { intentNonce: nonce } });
     setPhase("offline", "离线，将在网络恢复后重传");
   }
   return outcome === null;
@@ -257,7 +255,7 @@ function flushQueue(): void {
   const jobs = offlineQueue.splice(0, offlineQueue.length);
   void (async () => {
     for (const job of jobs) {
-      const outcome = await attemptUpload(job.slot, job.data, job.extra);
+      const outcome = await attemptUpload(job.data, job.extra);
       if (outcome === "transient") {
         offlineQueue.push(job);
         setPhase("offline", "离线，将在网络恢复后重传");
@@ -267,16 +265,16 @@ function flushQueue(): void {
 }
 
 // —— 登录后自动恢复（按冲突策略）——
-export async function syncOnLogin(slot: number): Promise<void> {
-  const local = useGameStore.getState()[`save${slot}` as "save1"];
+export async function syncOnLogin(): Promise<void> {
+  const local = useGameStore.getState().save;
   const localExists = !!local;
   const localTime = local?.lastSavedAt ? Date.parse(local.lastSavedAt) : 0;
 
   try {
-    const cloud = await api.getSave(slot);
+    const cloud = await api.getSave();
     // P4：先对齐基线版本。换账号 / 其他设备写过之后本地记录可能过期，
     // 这里用 setRevision 强制覆盖，后续 PUT 才会带对 revision。
-    setRevision(slot, typeof cloud.revision === "number" ? cloud.revision : 0);
+    setRevision(typeof cloud.revision === "number" ? cloud.revision : 0);
     const sameDevice = cloud.clientId === getClientId();
     const cloudTime = cloud.updatedAt ? Date.parse(cloud.updatedAt) : 0;
     const decision = decideSyncAction({ localExists, localTime, cloudExists: true, cloudTime, sameDevice });
@@ -284,16 +282,16 @@ export async function syncOnLogin(slot: number): Promise<void> {
       suppressNextUpload(); // 刚拉下来的云端档不必再原样传回去
       const r = useGameStore
         .getState()
-        .importSaveJson(cloud.data, slot as 1 | 2 | 3) as { ok: boolean; reason?: string };
+        .importSaveJson(cloud.data) as { ok: boolean; reason?: string };
       if (r.ok) setPhase("synced", "已从云端恢复");
       else setPhase("error", r.reason ?? "恢复失败");
     } else if (decision === "upload") {
-      const data = exportSlot(slot);
+      const data = exportSave();
       if (data) {
-        const outcome = await attemptUpload(slot, data);
+        const outcome = await attemptUpload(data);
         if (outcome === null) setPhase("synced", "已将本地进度上传云端");
         else if (outcome === "transient") {
-          offlineQueue.push({ slot, data });
+          offlineQueue.push({ data });
           setPhase("offline", "离线，将在网络恢复后重传");
         }
       } else {
@@ -305,13 +303,13 @@ export async function syncOnLogin(slot: number): Promise<void> {
   } catch (e: any) {
     if (e?.status === 404) {
       // 服务端没有存档：本次上传就是新建，基线版本为 0。
-      setRevision(slot, 0);
-      const data = exportSlot(slot);
+      setRevision(0);
+      const data = exportSave();
       if (data) {
-        const outcome = await attemptUpload(slot, data);
+        const outcome = await attemptUpload(data);
         if (outcome === null) setPhase("synced", "已建立云端存档");
         else if (outcome === "transient") {
-          offlineQueue.push({ slot, data });
+          offlineQueue.push({ data });
           setPhase("offline", "离线，将在网络恢复后重传");
         }
       } else {
@@ -320,15 +318,15 @@ export async function syncOnLogin(slot: number): Promise<void> {
     } else if (classifyUploadError(e) === "permanent") {
       setPhase("error", uploadErrorMessage(e));
     } else {
-      const data = exportSlot(slot);
-      if (data) offlineQueue.push({ slot, data });
+      const data = exportSave();
+      if (data) offlineQueue.push({ data });
       setPhase("offline", "无法连接服务器，稍后重传");
     }
   }
   flushQueue();
 }
 
-// —— 启动自动同步：订阅 store 变更，防抖上传当前槽位；并监听网络恢复 ——
+// —— 启动自动同步：订阅 store 变更，防抖上传当前存档；并监听网络恢复 ——
 let started = false;
 
 /**
@@ -339,22 +337,22 @@ let started = false;
 export function stopAutoSync(): void {
   cancelPendingUpload();
   offlineQueue.length = 0;
-  revisionProbes.clear();
+  revisionProbe = null;
   setPhase("idle");
 }
 
 export function startAutoSync(): void {
   if (started) return;
   started = true;
-  let prev = pickSaves(useGameStore.getState());
+  let prev = pickSave(useGameStore.getState());
   useGameStore.subscribe((state) => {
-    const next = pickSaves(state);
-    if (next.s1 !== prev.s1 || next.s2 !== prev.s2 || next.s3 !== prev.s3) {
+    const next = pickSave(state);
+    if (next !== prev) {
       prev = next;
       // P2-2：这次变更来自服务端权威快照，不再回传，避免多端广播回环。
       if (consumeSuppressedUpload()) return;
-      const data = exportSlot(state.slot);
-      if (data) scheduleUpload(state.slot, data, 1500, takeRebase() ? { rebase: true } : undefined);
+      const data = exportSave();
+      if (data) scheduleUpload(data, 1500, takeRebase() ? { rebase: true } : undefined);
     }
   });
   if (typeof window !== "undefined") {
@@ -362,7 +360,7 @@ export function startAutoSync(): void {
   }
 }
 
-// 取出三个槽位做浅比较，只在存档内容真正变化时触发上传
-function pickSaves(s: any) {
-  return { s1: s.save1, s2: s.save2, s3: s.save3 };
+// 取出单档做浅比较，只在存档内容真正变化时触发上传
+function pickSave(s: any) {
+  return s.save;
 }

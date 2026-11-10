@@ -65,14 +65,12 @@ export type RankMetrics = {
 export type RankSource = {
   userId: string;
   username: string;
-  slot: number;
   metrics: RankMetrics;
 };
 
 export type RankRow = {
   rank: number;
   username: string;
-  slot: number;
   value: number;
   secondary: number;
   detail: string;
@@ -163,7 +161,7 @@ export function detailOf(type: RankType, m: RankMetrics): string {
 }
 
 /**
- * 生成榜单：按主值 → 次值 → 用户名 → 槽位稳定降序，同分也完全可复现。
+ * 生成榜单：按主值 → 次值 → 用户名稳定降序，同分也完全可复现。
  * limit 由调用方钳制；viewerUserId 只用于给前端标「我」，不参与排序。
  */
 export function buildBoard(
@@ -178,7 +176,6 @@ export function buildBoard(
       const { value, secondary } = rankValue(type, s.metrics);
       return {
         username: s.username,
-        slot: Number.isInteger(s.slot) ? s.slot : 1,
         value: clamp(value, 0, 1e12),
         secondary: clamp(secondary, 0, 1e12),
         detail: detailOf(type, s.metrics),
@@ -189,7 +186,6 @@ export function buildBoard(
     b.value - a.value
     || b.secondary - a.secondary
     || a.username.localeCompare(b.username)
-    || a.slot - b.slot
   ));
   return scored.slice(0, clamp(limit, 1, 50)).map((row, i) => ({ rank: i + 1, ...row }));
 }

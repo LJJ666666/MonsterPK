@@ -14,7 +14,6 @@ import {
 } from "@/lib/coop";
 import { newNonce } from "@/lib/pvp";
 import { fetchBossList, type BossEntry } from "@/lib/boss";
-import { useGameStore } from "@/stores/useGameStore";
 import { getMoveMaxPP } from "@/game/rules";
 import { MonsterName } from "@/components/MonsterName";
 
@@ -31,7 +30,6 @@ function roomTone(state: string): string {
 }
 
 export default function CoopModal({ onClose }: { onClose: () => void }) {
-  const { slot } = useGameStore();
   const [phase, setPhase] = useState<Phase>("idle");
   const [room, setRoom] = useState<RoomView | null>(null);
   const [roomId, setRoomId] = useState("");
@@ -81,7 +79,7 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      const res = await api.coopCreate({ slot, bossId });
+      const res = await api.coopCreate({ bossId });
       if (res?.room) {
         setRoom(res.room);
         setRoomId(res.room.roomId ?? "");
@@ -101,7 +99,7 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      const res = await api.coopJoin(roomId.trim(), { slot });
+      const res = await api.coopJoin(roomId.trim());
       if (res?.room) {
         setRoom(res.room);
         setPhase("fighting");

@@ -35,6 +35,7 @@ export interface StoryBeat {
 /**
  * 剧情内容表（正式文案）。
  * 覆盖：7 城到达 intro（on_arrival）+ 7 城演武堂通关贺词（on_gym_clear）+ 7 座地图首领讨伐胜利（on_mapboss_clear）。
+ * 全部为中文文案，物种/首领均用中文名（不夹带英文 id）。
  */
 export const STORY_BEATS: StoryBeat[] = [
   // ───────────────────────── 到达 intro（现已接入） ─────────────────────────
@@ -44,7 +45,7 @@ export const STORY_BEATS: StoryBeat[] = [
     lines: [
       { speaker: "旁白", text: "初心镇被常青的草坡温柔环抱，清晨的露珠在草尖上闪着光。你旅程开始的地方，就藏在这片绿意里。" },
       { speaker: "妈妈", text: "出发前先把背包理好，伤药记得带够。外面的世界很大，但家永远在这儿等你回来。" },
-      { speaker: "旁白", text: "镇口的老橡树下，一只 sprout_owl 歪着头打量你——新的旅途，从这里迈出了第一步。" },
+      { speaker: "旁白", text: "镇口的老橡树下，一只苔羽鸮歪着头打量你——新的旅途，从这里迈出了第一步。" },
     ],
   },
   {
@@ -61,7 +62,7 @@ export const STORY_BEATS: StoryBeat[] = [
     trigger: { type: "on_arrival", locationId: "town_leafy" },
     lines: [
       { speaker: "旁白", text: "绿叶镇的树冠连成一片碧海，阳光被筛成细碎的金斑，落在湿润的泥土上。" },
-      { speaker: "旁白", text: "林间溪水叮咚，tide_newt 在浅滩里甩着尾巴——这里的生灵，似乎都懂得安静地活着。" },
+      { speaker: "旁白", text: "林间溪水叮咚，潮纹螈在浅滩里甩着尾巴——这里的生灵，似乎都懂得安静地活着。" },
     ],
   },
   {
@@ -70,7 +71,7 @@ export const STORY_BEATS: StoryBeat[] = [
     lines: [
       { speaker: "旁白", text: "涌泉市的水道纵横，清泉从城心的石龙口中喷涌，整座城都浸着水汽的凉意。" },
       { speaker: "游泳者", text: "水之石是我们涌泉市的骄傲！带着它，水系的伙伴能焕然一新。" },
-      { speaker: "旁白", text: "倒映着云影的河面上，iron_bird 掠过，翅尖点起一圈圈温柔的涟漪。" },
+      { speaker: "旁白", text: "倒映着云影的河面上，铁翎雀掠过，翅尖点起一圈圈温柔的涟漪。" },
     ],
   },
   {
@@ -86,7 +87,7 @@ export const STORY_BEATS: StoryBeat[] = [
     trigger: { type: "on_arrival", locationId: "city_shadow" },
     lines: [
       { speaker: "旁白", text: "幽影市常年浸在灰蓝的暮色里，霓虹与阴影交织，巷子深处传来辨别不清的低语。" },
-      { speaker: "旁白", text: "shadow_spirit 在墙角的暗处若隐若现，它不伤人，只是好奇地注视着每一个过客。" },
+      { speaker: "旁白", text: "幽影灵在墙角的暗处若隐若现，它不伤人，只是好奇地注视着每一个过客。" },
     ],
   },
   {
@@ -94,7 +95,7 @@ export const STORY_BEATS: StoryBeat[] = [
     trigger: { type: "on_arrival", locationId: "town_winter" },
     lines: [
       { speaker: "旁白", text: "凛冬镇被厚厚的雪盖住，呼出的白气瞬间凝成霜，世界安静得只剩踩雪的咯吱声。" },
-      { speaker: "旁白", text: "远处冰封的湖面下，似乎有 frost_cub 蜷成一团，睡得正沉。" },
+      { speaker: "旁白", text: "远处冰封的湖面下，似乎有冰霜幼崽蜷成一团，睡得正沉。" },
     ],
   },
 

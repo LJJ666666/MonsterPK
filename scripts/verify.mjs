@@ -72,6 +72,8 @@ const STAGES = [
   // F17：单档化闸门（?slot= 400）+ 一账号一档 + 响应/DB 均无 slot。
   { id: 'e2e:f17', name: 'E2E 单档化（F17）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f17'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:f18a', name: 'E2E 地图锁（F18-a）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18a'], need: 'backend', timeout: 300_000 },
+  // F18-b：演武堂挑战（胜发徽章 + 20min 馆主休息 CD + 禁捕获 + 逃跑不发奖）。
+  { id: 'e2e:f18b', name: 'E2E 演武堂挑战（F18-b）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18b'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -92,7 +94,7 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04'],
   docs: ['docs:doc', 'docs:memory'],
 };

@@ -182,6 +182,13 @@ export const api = {
   bossRank: (bossId: string, limit = 20) =>
     request(`/api/boss/${encodeURIComponent(bossId)}/rank?limit=${limit}`),
 
+  // ───────────────────── F18-b 演武堂（胜利发徽章，20min 馆主休息 CD）─────────────────────
+  /** 开一场演武堂挑战：只传 locationId，王牌 / 等级 / 冷却全在服务端。 */
+  gymStart: (body: { locationId: string }) =>
+    request("/api/gym/start", { method: "POST", body: JSON.stringify(body) }),
+  /** 只读概览：7 座演武堂的馆主 / 王牌 / 我的徽章归属 / 冷却到期时间。 */
+  gymOverview: () => request("/api/gym/overview"),
+
   // ───────────────────── P4-2d 玩家对战 1v1（双方意图由服务端裁决）─────────────────────
   /** 房主创建 1v1 房间：队伍 / 胜负 / HP 全在服务端。 */
   pvpCreate: () =>

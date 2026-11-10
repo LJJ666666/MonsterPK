@@ -44,6 +44,8 @@ export type ServerBattleView = {
   bossId?: string | null;
   bossName?: string | null;
   damageDealt?: number;
+  /** F18-b：演武堂挑战标识（服务端累计，客户端只渲染）。 */
+  gymId?: string | null;
 };
 
 /** 战斗接口的业务错误：区分「战斗没了」与「网络不通」，前者不能降级到本地重打。 */
@@ -102,6 +104,7 @@ export function toBattleState(view: ServerBattleView): BattleState {
       bossName: view.bossName ?? undefined,
       damageDealt: typeof view.damageDealt === "number" ? view.damageDealt : 0,
     } : {}),
+    ...(view.gymId ? { gymId: view.gymId } : {}),
   };
 }
 

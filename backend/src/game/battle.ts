@@ -65,6 +65,8 @@ export type BattleState = {
    */
   bossId?: string | null;
   bossName?: string | null;
+  /** F18-b 演武堂挑战：有值即为演武堂战；禁止捕获；胜利经 `grantBadge` 发 `gym:<locationId>` 徽章。 */
+  gymId?: string | null;
   /** 开局时占用的次数键（含日期与账号）。结算/放弃时用它精确释放，跨午夜也不会漏。 */
   bossQuotaKey?: string | null;
   /** 本场对敌方造成的累计伤害（服务端按敌方 HP 差累计，客户端上报无效）。 */
@@ -154,6 +156,11 @@ export function createBattle(params: {
    * 敌方由内容表生成，`areaName` / `theme` 以 Boss 定义为准（路由层不会再传错）。
    */
   boss?: { spec: BossSpec; quotaKey?: string };
+  /**
+   * F18-b：演武堂挑战。给了 gym 就走固定王牌（不随机、不记 areaId），
+   * 敌方由 `createInstance(aceSpeciesId, aceLevel)` 生成，`areaName` 以馆主为准。
+   */
+  gym?: { locationId: string; specId: string; level: number };
   /** F04：由 modules 层读 PlayerProgress 后注入，绝不采信客户端入参。 */
   levelCap?: number | null;
 }): BattleState {
@@ -167,14 +174,16 @@ export function createBattle(params: {
   const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, 60);
   const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, 60);
   const level = levelMin + Math.floor(rng() * (levelMax - levelMin + 1));
-  const { enemy, label } = params.boss
-    ? { enemy: createBossEnemy(params.boss.spec, rng), label: params.boss.spec.name }
-    : params.wild
-      ? {
-          enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
-          label: params.wild.label,
-        }
-      : generateEncounter(params.theme, level, rng, params.themes);
+  const { enemy, label } = params.gym
+    ? { enemy: createInstance(params.gym.specId, params.gym.level, rng), label: '演武堂馆主' }
+    : params.boss
+      ? { enemy: createBossEnemy(params.boss.spec, rng), label: params.boss.spec.name }
+      : params.wild
+        ? {
+            enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
+            label: params.wild.label,
+          }
+        : generateEncounter(params.theme, level, rng, params.themes);
 
   const party = params.party.map((m) => ({ ...m }));
   return {
@@ -182,7 +191,7 @@ export function createBattle(params: {
     userId: params.userId,
     theme: params.boss ? params.boss.spec.theme : params.theme,
     areaName: params.boss ? params.boss.spec.name : params.areaName,
-    areaId: params.boss ? null : (params.areaId ?? null),
+    areaId: params.gym ? null : (params.boss ? null : (params.areaId ?? null)),
     levelMin,
     levelMax,
     turn: 1,
@@ -207,6 +216,7 @@ export function createBattle(params: {
     bossName: params.boss?.spec.name ?? null,
     bossQuotaKey: params.boss?.quotaKey ?? null,
     damageDealt: 0,
+    gymId: params.gym?.locationId ?? null,
   };
 }
 
@@ -388,6 +398,7 @@ function applyBattleActionInner(
 
     if (action.type === 'capture' || item.kind === 'capture') {
       if (s.bossId) throw new BattleError('BOSS_UNCATCHABLE', '讨伐目标无法捕获');
+      if (s.gymId) throw new BattleError('GYM_UNCATCHABLE', '演武堂馆主无法捕获');
       if (item.kind !== 'capture') throw new BattleError('ITEM_NOT_CAPTURE', '该道具不能用于捕获');
       consumeItem(s, itemId, inventory);
       const spec = MONSTER_SPECS[s.enemy.specId];
@@ -665,6 +676,7 @@ export function battleView(s: BattleState) {
     bossId: s.bossId ?? null,
     bossName: s.bossName ?? null,
     damageDealt: s.damageDealt ?? 0,
+    gymId: s.gymId ?? null,
   };
 }
 

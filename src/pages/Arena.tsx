@@ -10,8 +10,11 @@ import { requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 import {
   useWildList, wildStatusText, SHARED_WILD_AREA_ID,
 } from "@/lib/wild";
+import { useStoryTriggers, fireGymClearBeat } from "@/lib/story";
+import type { LocationId } from "@/game/types";
 
 import TypeChartModal from "@/components/TypeChartModal";
+import StoryModal from "@/components/StoryModal";
 import { MonsterName } from "@/components/MonsterName";
 
 function resultText(r: string | undefined) {
@@ -25,6 +28,8 @@ function resultText(r: string | undefined) {
 export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
   const { save, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, resumeBattle } = useGameStore();
+  // F18-b：胜馆主后跨页触发演武堂贺词（getGymClearBeat）；StoryModal 在本页就地渲染。
+  const { activeBeat, dismiss, fire } = useStoryTriggers();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
   // 开局失败（断网 / 未登录 / 队伍全灭）要如实告知：现在没有本地降级，
   // 静默返回会让玩家以为按钮坏了。
@@ -43,6 +48,14 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   useEffect(() => {
     void resumeBattle();
   }, []);
+
+  // F18-b：演武堂胜利（enemy_fainted）时触发对应城镇的贺词弹窗。
+  // firedSession 去重保证同一会话内不会重复弹；逃跑 / 全灭不触发。
+  useEffect(() => {
+    if (battle?.finished && battle.result === "enemy_fainted" && battle.gymId) {
+      fireGymClearBeat(battle.gymId as LocationId, fire);
+    }
+  }, [battle?.finished, battle?.result, battle?.gymId, fire]);
 
   const [playerHit, setPlayerHit] = useState(false);
   const [enemyHit, setEnemyHit] = useState(false);
@@ -411,6 +424,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
           </PixelCard>
         </div>
       </div>
+      {activeBeat && <StoryModal beat={activeBeat} onClose={dismiss} />}
     </div>
   );
 }

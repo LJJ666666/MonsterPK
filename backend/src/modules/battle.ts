@@ -22,6 +22,7 @@ import {
 } from '../game/battle';
 import { LOCATIONS, THEME_TABLE, contentStats } from '../game/content';
 import { bossDailyLimit, dayKeyOf, getBoss } from '../game/boss';
+import { badgeIdForLocation } from '../game/badges';
 import { encodeServerMessage } from '../lib/wsProtocol';
 import { commitState } from './session';
 import { readSave } from './saveRead';
@@ -32,7 +33,7 @@ import { grantBossRewards, type BossRewardResult } from './bossReward';
 import { broadcastToUser, battles, wilds, bossQuota } from './sessionBus';
 import { publishWild, resolveAreaSpec } from './wild';
 // F04：宠物等级帽由服务端进度真值注入；常规战斗首通野区幂等发对应徽章（§31.9）。
-import { readProgress, grantBadgeForAreaClear } from './playerProgress';
+import { readProgress, grantBadgeForAreaClear, grantBadge, grantAchievement } from './playerProgress';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
 const startSchema = z.object({
@@ -198,6 +199,34 @@ async function settleBossRun(
     quota: { limit, used: attempts, remaining: Math.max(0, limit - attempts) },
     reward,
   };
+}
+
+/**
+ * F18-b 演武堂结算：胜利经 `grantBadge` 发 `gym:<locationId>` 徽章（唯一写入口、幂等）
+ * + 首次发 `ach_gym_first`；逃跑 / 全灭不发徽章。
+ * 冷却已在开局时设置（见 `modules/gym.ts::applyGymStart`），此处无需再处理。
+ * 发奖失败只记日志，不阻断战斗结算响应（徽章表无外键、唯一键天然幂等）。
+ */
+async function settleGymRun(req: FastifyRequest, userId: string, state: BattleState) {
+  const locationId = state.gymId as string;
+  if (state.result === 'enemy_fainted') {
+    const badgeId = badgeIdForLocation(locationId);
+    let badgeState: string | null = null;
+    if (badgeId) {
+      try {
+        badgeState = await grantBadge({ userId, badgeId, source: `gym:${locationId}` });
+      } catch (e) {
+        req.log.warn({ userId, locationId, badgeId, err: String(e) }, '演武堂徽章发放失败（不阻断结算）');
+      }
+    }
+    try {
+      await grantAchievement({ userId, achievementId: 'ach_gym_first', source: `gym:${locationId}` });
+    } catch (e) {
+      req.log.warn({ userId, locationId, err: String(e) }, '演武堂成就发放失败（不阻断结算）');
+    }
+    return { gymId: locationId, gymCleared: true, badgeId, badgeState, granted: badgeState === 'granted' };
+  }
+  return { gymId: locationId, gymCleared: false, reason: String(state.result ?? 'unknown') };
 }
 
 export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
@@ -428,6 +457,18 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
             revision: committed.revision,
             settled: true,
             boss,
+          };
+        }
+
+        // F18-b：演武堂分流。gym 与 boss 互斥（都清了 areaId），独立 if 不影响上方 boss 分支。
+        if (next.gymId) {
+          const gym = await settleGymRun(req, userId, next);
+          return {
+            ok: true,
+            battle: battleView(next),
+            revision: committed.revision,
+            settled: true,
+            gym,
           };
         }
 

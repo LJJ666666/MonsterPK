@@ -2080,12 +2080,22 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
 - 验收口径：前端 vitest 129/129、后端 check 0、mapLock 7/7、e2e_f18a 8/8；
   最终全量 `verify --strict` 待后台跑完（本轮不跑）。
 
-### 33.3 F18-b 演武堂（待开工）
+### 33.3 F18-b 演武堂（2026-11-11 已实现收官）
 
-- 每城中式演武堂（取代「道馆」），馆主战胜利发徽章 `gym:<locationId>`，替换 V1 的
-  `cleared:<areaId>`（F18-b 上线后收窄 source，表与 UI 零改动）。
-- 无次数限制，但 **20min 馆主休息 CD**（CD 期间不可再挑战同一馆主）。
-- 徽章 = 徽章正式唯一来源，影响 F04 等级与地图锁解锁链。
+- 每城中式演武堂（取代「道馆」），馆主战胜利经 `modules/playerProgress.grantBadge` 发徽章
+  `gym:<locationId>`，**正式唯一来源**，替换 V1 的 `cleared:<areaId>`（`BADGE_BY_LOCATION` 7 城↔7 徽章映射，
+  `game/badges.ts::badgeIdForLocation`）。
+- 无次数限制，但 **20min「馆主休息」CD**：开局即置（单进程内存 `cooldowns` Map，`game/gyms.ts`），
+  CD 期内再开同一馆主 → 429 `GYM_ON_COOLDOWN` + `retryAfterMs`；战斗进行中再开 → 409 `GYM_BATTLE_IN_PROGRESS`。
+- 战斗复用 `/api/battle/*` 同一套状态机：`BattleState.gymId` 标记（`game/battle.ts`），
+  捕获拦截 `GYM_UNCATCHABLE`（同源 `BOSS_UNCATCHABLE`），结算在 `modules/battle.ts::settleGymRun` 按 `gymId` 分流：
+  胜利→发徽章 + 首通成就 `ach_gym_first`，逃跑/全灭不发（§30 纪律一致）。
+- 前端：`GymModal` 只读概览（馆主/王牌/我的徽章归属/CD 倒计时），`Camp.tsx` 顶部「演武堂」入口；
+  胜馆主后 `Arena.tsx` 跨页 `fire(getGymClearBeat)` 触发贺词（`StoryModal`）。
+- **实现记录（2026-11-11）**：`game/gyms.ts` 内容表（7 馆主+王牌种/等级/CD）+ `modules/gym.ts`（`/api/gym/start`+`/api/gym/overview`，
+  `withSlotLock` 串行开局）+ `GymModal.tsx` + `lib/gym.ts`；`e2e_f18b` **17/17**、`verify` 全绿（P3-1c 为已知
+  `--virtual-time-budget` flake，重跑即过）。
+- **债务**：演武堂贺词仍为 F18-d 占位文案；真剧情补全只改 `story.ts` 内容表，不动触发器/弹窗。
 
 ### 33.4 F18-c 地图 Boss（待开工）
 

@@ -83,6 +83,8 @@ export type PutExtra = { revision: number; intentNonce?: string; rebase?: boolea
 
 export const api = {
   health: () => request("/api/health"),
+  /** F04：徽章 / 成就 / 人物等级只读投影，客户端无任何写入口。 */
+  playerProgress: () => request("/api/player/progress"),
   me: () => request("/api/auth/me"),
   register: (username: string, password: string) =>
     request("/api/auth/register", {

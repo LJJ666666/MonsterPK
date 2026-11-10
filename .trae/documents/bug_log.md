@@ -1024,3 +1024,58 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   （未误封）」继续钉住账号可用性，断言强度不降低。
 - **教训**：测「服务端提前拒收大 body」这类用例，不能假设一定能读到 HTTP 状态码；
   断言要覆盖「连接被提前重置」这一合法结果，否则全量验收会偶发假红。
+
+## 38. F04 等级帽接入与收官（2026-11-10）
+
+### 38.1 Boss E2E 偶发 `PARTY_FAINTED`（全量 42/44，单跑 44/44）
+- **现象**：F04 首轮全量 `verify --strict` 报 35/36，唯一红灯 `e2e:p42c`：
+  「次数用完 → 429」与「其它 Boss 次数独立」两条拿到
+  `400 {"code":"PARTY_FAINTED","error":"队伍中没有可战斗的幻兽"}`；
+  单独重跑该套件立刻 44/44。
+- **根因**：`e2e_p42c_boss.mjs::strongSave()` 仍是旧版 `maxHp/hp = 420`，
+  而同一账号要连打多场 + 跨槽位。敌方 `elite(+2)` 与 `rare(+3)` 是两次独立 roll
+  可叠加（§37.1 已记录），偶发高强度下 420 会被打全灭；战斗结算把残血写回存档，
+  下一场 `createBattle()` 的 `findFirstAliveIndex()` 直接抛 `PARTY_FAINTED`。
+  **F14 早已把同类强档提到 8000，p42c 没同步**。
+- **修法（只改测试侧）**：p42c 的 `strongSave()` 改 `maxHp/hp = 8000`
+  （远低于 `saveValidator STAT_MAX`），与 F14 对齐，产品逻辑零改动。
+
+### 38.2 占位派生下线后，等级榜断言要换真值来源
+- `game/rank.ts::summonerLevelOf()` 删除后，`deriveMetrics()` 只给基础 Lv.5 占位；
+  真值由 `modules/rank.ts::loadRankSources()` 一次查 `BadgeGrant` 分组覆盖。
+- `e2e_p42a_rank.mjs` 原断言「high > low」依赖「首通数 / 队伍等级 / 图鉴」，
+  改口径后三个账号都是 Lv.5，必然假红。改为**给 high 账号直接写一枚 Grant**
+  （等价服务端唯一写入口已发奖），断言 `high=10 > low=5=mid`；
+  finally 里显式 `badgeGrant.deleteMany`（表无外键，`cleanupAccounts` 不级联）。
+
+### 38.3 整包 PUT 伪字段闸门必须放在 CAS 之前
+- `digestOf()` 只覆盖 money / inventory / levelExp / 持有数 / 首通 / 挂机，
+  **不覆盖任意新增字段**。若把 `playerLevel` 塞进存档，客户端能直接改等级而绕过
+  权威摘要 —— 这比 `SCHEMA_VERSION` 三处联动更严重。
+- 闸门放在 `putSchema.safeParse()` 之后、CAS / `validateSaveData` / 风控之前：
+  否则「缺 revision」会被 `REVISION_REQUIRED` 抢先返回，伪上报测试拿不到
+  `SAVE_INPUT_FORBIDDEN`，也浪费一次 DB 读。
+
+### 38.4 房间锁 / 槽位锁 / 首通徽章
+- `grantBadgeForAreaClear()` 在战斗结算的 `slotLock` 内被调用，
+  因此 `modules/playerProgress.ts` **不取应用层锁**，只靠 `@@unique` + P2002 幂等
+  （与 F14 同锁重入死锁 §36 同源）。发徽章失败只记日志，不阻断结算响应。
+- 客户端开局故意传 `levelCap: 999` 不能影响服务端：帽只能由 `readProgress(userId)`
+  注入 `createBattle()`；`battleView()` 下发只读值供 UI 展示。
+
+**验收**：`f04Cap.test.ts` + `settlement.test.ts` + `rank.test.ts` 合计 **22/22**、
+后端全量单测 **389/389**、`e2e:f04` **25/25**；15 组 E2E 逐套件回归全绿；
+最终 `npm run verify -- --strict` 全绿证据见任务表进度记录。
+
+### 38.5 全服榜 limit=50 截断导致等级榜断言假红（§28 老坑复发）
+- **现象**：最终 `npm run verify -- --strict` 报 35/36，`e2e:p42a` **38/39**，
+  失败信息 `granted=true ["p42hi_...:10","p42lo_...:5"]` —— 三个测试账号只回显两个；
+  单独跑该套件连续 3 次均 `E2E_P42A_OK`。
+- **根因**：改口径后 high=Lv.10、low/mid=Lv.5，全服榜按主值降序 + `limit=50`。
+  全量验收跑到第 12 组时，前面 7 组 E2E 留下的账号还在库里（清理在**最后**一步），
+  榜单超过 50 行，Lv.5 的 mid 被截断 → `inLevel.length === 3` 假红。
+  **不是产品逻辑问题**，与 §28「0 分被 limit 截断」同源。
+- **修法（只改测试侧）**：断言不再要求「三个账号都必须出现在全服子集里」。
+  high 那行必须 10；low/mid 的「基础 Lv.5」改查 `GET /api/player/progress`
+  （账号级只读真值，不受榜单分页影响）；若 low 恰好在榜内，再校验它排在 high 之后。
+  单独连跑 3 次全绿，最终全量验收全绿证据见任务表进度记录。

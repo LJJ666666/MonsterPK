@@ -68,6 +68,7 @@ const STAGES = [
   { id: 'e2e:f14', name: 'E2E Boss 双档奖励（F14）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f14'], need: 'backend', timeout: 300_000 },
   // F16：六房副本 E2E（全清发奖 / 最低贡献门槛 / 幂等 / 每日 3 次上限）。
   { id: 'e2e:f16', name: 'E2E 六房副本发奖（F16）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f16'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:f04', name: 'E2E 徽章 / 成就 / 等级（F04）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f04'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -79,6 +80,7 @@ const STAGES = [
   { id: 'smoke:f01f02', name: '375px 周期榜与奖励 UI（F01/F02）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f01f02.mjs'], need: 'both', timeout: 300_000 },
   // F16：六房地图四态 + 进房按钮 + 375px 无横向溢出。
   { id: 'smoke:f16', name: '375px 六房副本 UI（F16）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f16.mjs'], need: 'both', timeout: 300_000 },
+  { id: 'smoke:f04', name: '375px 徽章 / 成就 UI（F04）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f04.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -87,8 +89,8 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04'],
   docs: ['docs:doc', 'docs:memory'],
 };
 

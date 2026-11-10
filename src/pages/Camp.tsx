@@ -12,6 +12,7 @@ import { useIsAdmin } from "@/lib/admin";
 
 import TypeChartModal from "@/components/TypeChartModal";
 import RankBoardModal from "@/components/RankBoardModal";
+import BadgeModal from "@/components/BadgeModal";
 import BossBoardModal from "@/components/BossBoardModal";
 import PvpModal from "@/components/PvpModal";
 import CoopModal from "@/components/CoopModal";
@@ -150,6 +151,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [bagFilter, setBagFilter] = useState<"all" | "heal" | "item" | "skill" | "quest">("all");
   const [showTypeChart, setShowTypeChart] = useState(false);
   const [showRank, setShowRank] = useState(false);
+  const [showBadge, setShowBadge] = useState(false);
   const [showBoss, setShowBoss] = useState(false);
   const [showPvp, setShowPvp] = useState(false);
   const [showCoop, setShowCoop] = useState(false);
@@ -1094,6 +1096,9 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             <button className="text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
               榜单
             </button>
+            <button className="text-[color:var(--accent)] underline" onClick={() => setShowBadge(true)}>
+              徽章
+            </button>
           </div>
         </div>
       </div>
@@ -1101,6 +1106,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
       {showRank && <RankBoardModal onClose={() => setShowRank(false)} />}
+      {showBadge && <BadgeModal onClose={() => setShowBadge(false)} />}
       {showPvp && <PvpModal onClose={() => setShowPvp(false)} />}
       {showCoop && <CoopModal onClose={() => setShowCoop(false)} />}
       {showBoss && (

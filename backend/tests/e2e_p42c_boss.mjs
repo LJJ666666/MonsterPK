@@ -27,14 +27,18 @@ const mk = async (prefix) => {
   return acc;
 };
 
-/** 强档：Lv.40 / 高攻，保证几回合内打死 Lv.12 的 Boss，E2E 不必跑几十轮。 */
+/** 强档：Lv.40 / 高攻，保证几回合内打死 Lv.12 的 Boss，E2E 不必跑几十轮。
+ * HP 与 F14 一致给到 8000：同一账号要连打多场 + 多槽位，结算会把队伍 HP 写回存档，
+ * 420 在敌方 elite/rare 叠加的偶发高强度下会被打全灭，下一场开局直接 PARTY_FAINTED。
+ * 8000 远低于 saveValidator STAT_MAX，纯用例确定性，产品逻辑零改动（bug_log §38）。
+ */
 function strongSave() {
   const base = validSave();
   return {
     ...base,
     money: 5000,
     party: base.party.map((m) => ({
-      ...m, level: 40, maxHp: 420, hp: 420,
+      ...m, level: 40, maxHp: 8000, hp: 8000,
       atk: 320, def: 220, spAtk: 320, spDef: 220, spd: 240,
       moveIds: ['tackle', 'wood_strike'],
     })),

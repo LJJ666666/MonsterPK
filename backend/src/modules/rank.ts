@@ -19,6 +19,7 @@ import {
   type RankSource, type RankType,
 } from '../game/rank';
 import { POWER_DISCLAIMER } from '../game/power';
+import { playerLevelOf } from '../game/playerLevel';
 
 export const RANK_INPUT_FORBIDDEN_CODE = 'RANK_INPUT_FORBIDDEN';
 export const RANK_TYPE_UNKNOWN_CODE = 'RANK_TYPE_UNKNOWN';
@@ -73,6 +74,19 @@ export async function loadRankSources(): Promise<{
     },
   });
 
+  // F04 §31：召唤师等级真值在 BadgeGrant，不在存档 JSON。
+  // 一次查全表按 userId 分组，避免每个存档再查一次（榜单是实时派生的读模型）。
+  // 老账号无 Grant 记录 → playerLevelOf([]) 返回基础 Lv.5，不会显示 0 级。
+  const grants = await prisma.badgeGrant.findMany({
+    select: { userId: true, badgeId: true },
+  });
+  const badgesByUser = new Map<string, string[]>();
+  for (const g of grants) {
+    const list = badgesByUser.get(g.userId) ?? [];
+    list.push(g.badgeId);
+    badgesByUser.set(g.userId, list);
+  }
+
   const sources: RankSource[] = [];
   let skipped = 0;
   for (const row of rows) {
@@ -93,6 +107,8 @@ export async function loadRankSources(): Promise<{
       skipped += 1;
       continue;
     }
+    // 覆盖纯函数层的占位值：存档里塞 playerLevel / badges 一律不影响榜单。
+    metrics.summonerLevel = playerLevelOf(badgesByUser.get(row.userId) ?? []);
     sources.push({
       userId: row.userId,
       username: row.user.username,

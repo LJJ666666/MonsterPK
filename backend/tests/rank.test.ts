@@ -4,10 +4,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  RANK_TYPES, RANK_META, parseRankType, deriveMetrics, summonerLevelOf,
+  RANK_TYPES, RANK_META, parseRankType, deriveMetrics,
   rankValue, buildBoard, type RankSource,
 } from '../src/game/rank.ts';
 import { POWER_DISCLAIMER } from '../src/game/power.ts';
+import { BASE_PLAYER_LEVEL } from '../src/game/playerLevel.ts';
 
 const mon = (over: Record<string, unknown> = {}) => ({
   id: 'm1', specId: 'sprout_owl', level: 9,
@@ -60,22 +61,21 @@ test('客户端伪造 power / playerLevel / rankScore / clearedAreas 上报一�
   }))!;
   assert.equal(forged.teamPower, 468);
   assert.equal(forged.monsterPower, 468);
-  assert.equal(forged.summonerLevel, 1);
+  assert.equal(forged.summonerLevel, BASE_PLAYER_LEVEL);
 });
 
-test('召唤师等级 = 1 + 首通×2 + floor(队伍等级/10) + 图鉴捕获数', () => {
-  assert.equal(summonerLevelOf({ clearedCount: 0, partyLevelSum: 0, dexCaptured: 0 }), 1);
+test('F04：召唤师等级占位派生已下线，存档字段影响不了榜单', () => {
   const m = deriveMetrics(mkSave({
     party: [mon({ level: 25 }), mon({ level: 15 })],
     clearedAreas: { a: { level: 5 }, b: { level: 12 } },
-    collection: { x: { captured: true }, y: { seen: true, captured: false }, z: { timesCaptured: 2 } },
+    collection: { x: { captured: true }, z: { timesCaptured: 2 } },
+    playerLevel: 999, badges: ['badge_flame'], achievements: ['ach_veteran'],
   }))!;
   assert.equal(m.clearedCount, 2);
   assert.equal(m.maxClearedLevel, 12);
   assert.equal(m.dexCaptured, 2);
   assert.equal(m.partyLevelSum, 40);
-  assert.equal(m.summonerLevel, 1 + 4 + 4 + 2);
-  assert.equal(summonerLevelOf({ clearedCount: 1e9, partyLevelSum: 1e9, dexCaptured: 1e9 }), 9999);
+  assert.equal(m.summonerLevel, BASE_PLAYER_LEVEL, '真值由 modules/rank.ts 读 Grant 表覆盖');
 });
 
 test('脏档 / 非对象返回 null，不进榜', () => {

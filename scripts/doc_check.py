@@ -237,17 +237,41 @@ checks = [
      future_path.exists()
      and all(f"F{n:02d}" in future_text for n in range(1, 16))
      and "最终是要设计偿还的" in future_text and "不阻塞" in future_text),
-    ("台账 F04：账号等级 + 宠物等级帽 + 当前为占位偏差",
+    ("台账 F04 已按 11-10 口径修订（不本地存储 / 徽章 / 成就 / F17 / F18）",
      all(x in future_text for x in [
-         "账号等级", "人物", "宠物等级上限", "N+5", "占位", "playerLevel",
-         "SCHEMA_VERSION", "不得声称"])),
+         "F04 召唤师等级 / 徽章 / 成就", "不写 `SaveData`", "演武堂",
+         "超帽不降级", "F17 单档化", "F18 地图内容", "规范 §31"])),
+    ("后端规范含 §31 F04 工程契约与实现记录",
+     "## 31." in spec_text and "不本地存储" in spec_text
+     and "演武堂" in spec_text and "PLAYER_LEVEL_CAP_BONUS" in spec_text
+     and "94 个文件" in spec_text and "不钳等级" in spec_text
+     and "### 31.10" in spec_text and "F04-3 已实现" in spec_text),
+    ("F04 已偿还：台账 ✅ / 任务表进度 / 规范实现记录",
+     "✅ 已偿还 2026-11-10" in future_text
+     and "F04 召唤师等级" in task_text
+     and "SAVE_INPUT_FORBIDDEN" in spec_text),
+    ("F04 等级帽链路：注入 / 冻结 / 捕获不钳 / 伪字段闸门 / 首通发徽章",
+     "levelCap" in text(ROOT / "backend" / "src" / "game" / "battle.ts")
+     and "expGrantAllowed" in text(ROOT / "backend" / "src" / "game" / "playerLevel.ts")
+     and "capturedLevelOf" in text(ROOT / "backend" / "src" / "game" / "settlement.ts")
+     and "FORBIDDEN_PROGRESS_SAVE_FIELDS" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
+     and "grantBadgeForAreaClear" in text(ROOT / "backend" / "src" / "modules" / "battle.ts")),
+    ("F04 E2E / 冒烟接入 verify 且 STAGES + GROUPS 两处齐全",
+     text(ROOT / "scripts" / "verify.mjs").count("e2e:f04") >= 2
+     and text(ROOT / "scripts" / "verify.mjs").count("smoke:f04") >= 2),
+    ("HANDOFF / 任务表 / MEMORY 记 F04 不动 SCHEMA_VERSION 与 F17 单档化",
+     "不动 `SCHEMA_VERSION`" in handoff_text and "F17 单档化" in handoff_text
+     and "旧口径作废" in task_text and "不写 `SaveData`" in memory_text
+     and "F17 单档化" in memory_text),
     ("台账 F01/F02/F03 登记周期结算 / 榜单奖励 / 单机隔离版",
      all(x in future_text for x in ["周期结算", "榜单奖励", "单机隔离版", "现在先不用纠结"])),
-    ("契约 §4 标召唤师等级为占位、非产品口径",
-     "⚠️ 占位派生" in plan_text and "已知偏差" in plan_text
+    ("F04 收官：契约 §4 召唤师等级已改读服务端 BadgeGrant 真值",
+     "已实现" in plan_text and "BadgeGrant" in plan_text
      and "账号等级决定宠物等级帽" in plan_text),
-    ("后端榜单描述已标占位，避免误导玩家",
-     "占位派生" in text(ROOT / "backend" / "src" / "game" / "rank.ts")),
+    ("F04 收官：占位派生已删除，榜单真值来自 Grant 表",
+     "占位派生已下线" in text(ROOT / "backend" / "src" / "game" / "rank.ts")
+     and "badgeGrant.findMany" in text(ROOT / "backend" / "src" / "modules" / "rank.ts")
+     and "summonerLevelOf" not in text(ROOT / "backend" / "src" / "game" / "rank.ts")),
     ("任务表 P4-2a 行标注已知偏差并指向 F04",
      "已知偏差" in task_text and "F04" in task_text),
     ("台账 F12 已标偿还、F14 登记 Boss 产出规则",

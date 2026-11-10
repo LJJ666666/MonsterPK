@@ -112,3 +112,17 @@ test('脏档拒绝：非法 JSON / 数组结构', () => {
   assert.throws(() => applySettlementToSave('[]', makeState()),
     (e: unknown) => e instanceof BattleError && e.code === 'SAVE_UNREADABLE');
 });
+
+// ───────────────── F04-3：捕获高等级幻兽不按等级帽钳制 ─────────────────
+test('F04：人物 5 级抓到 Lv.50 幻兽 → 原样 50 级入队（不降级、不钳到帽）', () => {
+  const caught = mon('caught_high', 50, 200, 200);
+  const raw = applySettlementToSave(baseSave(), makeState({
+    result: 'captured', captured: caught,
+  }));
+  const next = JSON.parse(raw);
+  assert.equal(next.party.length, 2);
+  assert.equal(next.party[1].level, 50, '等级原样保留，地图锁才是门槛');
+  assert.equal(next.party[1].id, 'caught_high');
+  assert.equal(next.collection.spark_mouse.captured, true);
+  assert.equal(next.collection.spark_mouse.timesCaptured, 1);
+});

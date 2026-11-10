@@ -12,6 +12,7 @@
 import {
   POWER_DISCLAIMER, monsterPower, partyPower, bestMonsterPower,
 } from './power';
+import { BASE_PLAYER_LEVEL } from './playerLevel.js';
 
 export const RANK_TYPES = [
   'monster_power', 'team_power', 'summoner_level', 'progress',
@@ -39,8 +40,8 @@ export const RANK_META: Record<RankType, RankMeta> = {
   },
   summoner_level: {
     type: 'summoner_level', label: '召唤师等级', unit: '级',
-    description: '占位派生（首通数/队伍等级/图鉴），非产品口径；账号等级与宠物等级帽待设计（台账 F04）',
-    disclaimer: '等级为只读派生值，不代表剧情进度',
+    description: '服务端徽章真值：基础 Lv.5 + 每枚徽章等级加成；账号等级与宠物等级帽见规范 §31',
+    disclaimer: '等级来自服务端徽章发放记录，客户端上报无效',
   },
   progress: {
     type: 'progress', label: '推图', unit: '区',
@@ -94,20 +95,6 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /**
- * 召唤师等级（派生，不持久化）：
- *   1 + 首通区域数 × 2 + floor(队伍等级总和 / 10) + 图鉴已捕获物种数
- * 三个输入都在存档里且都经过服务端存档校验；上限 9999 防脏档溢出。
- */
-export function summonerLevelOf(m: {
-  clearedCount: number; partyLevelSum: number; dexCaptured: number;
-}): number {
-  return clamp(
-    1 + m.clearedCount * 2 + Math.floor(m.partyLevelSum / 10) + m.dexCaptured,
-    1, 9999,
-  );
-}
-
-/**
  * 从已解析的存档对象派生榜单指标。
  * 非对象返回 null（脏档不上榜）；字段缺失按 0 处理，绝不采信额外上报字段。
  */
@@ -142,7 +129,9 @@ export function deriveMetrics(save: unknown): RankMetrics | null {
   return {
     monsterPower: bestMonsterPower(party as any[], box as any[]),
     teamPower: partyPower(party as any[]),
-    summonerLevel: summonerLevelOf({ clearedCount, partyLevelSum, dexCaptured }),
+    // F04：占位派生已下线。纯函数层只给基础等级，真值由 modules/rank.ts
+    // 用服务端 BadgeGrant 覆盖（存档里的任何等级字段都影响不了榜单）。
+    summonerLevel: BASE_PLAYER_LEVEL,
     clearedCount,
     maxClearedLevel,
     dexCaptured,
@@ -167,7 +156,7 @@ export function detailOf(type: RankType, m: RankMetrics): string {
     case 'monster_power': return `队伍/箱子最强一只 · 全队 ${m.teamPower}`;
     case 'team_power': return `出战 ${m.partySize} 只六维总和`;
     case 'summoner_level':
-      return `首通 ${m.clearedCount} 区 · 队伍等级 ${m.partyLevelSum} · 图鉴 ${m.dexCaptured}`;
+      return `徽章真值 · 首通 ${m.clearedCount} 区 · 图鉴 ${m.dexCaptured}`;
     case 'progress': return `最高区域 Lv.${m.maxClearedLevel} · 图鉴 ${m.dexCaptured}`;
     default: return '';
   }

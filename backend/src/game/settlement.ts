@@ -11,6 +11,7 @@
  */
 import type { BattleState } from './battle.js';
 import { BattleError } from './battle.js';
+import { capturedLevelOf } from './playerLevel.js';
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
@@ -63,10 +64,14 @@ export function applySettlementToSave(raw: string, state: BattleState): string {
   };
 
   if (state.captured) {
+    // F04 §31：捕获到的高等级幻兽**原样入队，不按人物等级帽钳制**。
+    // 地图锁才是门槛；它之后只是因超帽而获取不到经验（不降级、只冻结）。
+    // capturedLevelOf 只做 1..LEVEL_MAX 合法性钳制，绝不写 cap 值。
+    const caught = { ...state.captured, level: capturedLevelOf(state.captured.level) };
     const party = Array.isArray(next.party) ? next.party.slice() : [];
     const box = Array.isArray(next.box) ? next.box.slice() : [];
-    if (party.length < 6) party.push(state.captured);
-    else box.push(state.captured);
+    if (party.length < 6) party.push(caught);
+    else box.push(caught);
     next.party = party;
     next.box = box;
     const prev = next.collection[seenId] ?? {};

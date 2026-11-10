@@ -21,6 +21,7 @@ import {
   type Rng,
 } from './rules.js';
 import { createBossEnemy, type BossSpec } from './boss.js';
+import { expGrantAllowed } from './playerLevel.js';
 
 export type BattleResult = 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted';
 
@@ -47,6 +48,8 @@ export type BattleState = {
   finished: boolean;
   result: BattleResult | null;
   rewards: { expGain: number; moneyGain: number } | null;
+  /** F04：服务端在开局时注入的宠物等级帽；null = 不限制（Boss / 单测构造态）。 */
+  levelCap?: number | null;
   /** 捕获成功时的幻兽个体（结算时入队/入箱）。 */
   captured: ServerMonster | null;
   /** 已接受的客户端动作数，用于限流与排查。 */
@@ -153,6 +156,8 @@ export function createBattle(params: {
    * 敌方由内容表生成，`areaName` / `theme` 以 Boss 定义为准（路由层不会再传错）。
    */
   boss?: { spec: BossSpec; quotaKey?: string };
+  /** F04：由 modules 层读 PlayerProgress 后注入，绝不采信客户端入参。 */
+  levelCap?: number | null;
 }): BattleState {
   const { rng, now } = params;
   if (!Array.isArray(params.party) || params.party.length === 0) {
@@ -195,6 +200,7 @@ export function createBattle(params: {
     finished: false,
     result: null,
     rewards: null,
+    levelCap: params.levelCap ?? null,
     captured: null,
     actions: 0,
     startedAt: now,
@@ -297,20 +303,29 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
     }
     const { expGain, moneyGain, hasExpShare } = computeRewards(s.enemy.level, inventory);
     const party = s.party.map((m) => ({ ...m }));
+    // F04 §31：达到 / 超过等级帽的宠物**不降级、只冻结升级**（不再获得经验）。
+    // 捕获到的高等级怪原样入队，之后同样因超帽而拿不到经验；帽由服务端注入。
+    const capped = s.levelCap != null;
+    let frozen = 0;
+    const grant = (m: ServerMonster) => {
+      if (capped && !expGrantAllowed(m.level, s.levelCap!)) { frozen += 1; return m; }
+      return gainExp(m, expGain).monster;
+    };
     if (hasExpShare) {
       for (let i = 0; i < party.length; i++) {
         if (!alive(party[i])) continue;
-        party[i] = gainExp(party[i], expGain).monster;
+        party[i] = grant(party[i]);
       }
     } else {
       const idx = s.playerActiveIndex;
-      if (party[idx]) party[idx] = gainExp(party[idx], expGain).monster;
+      if (party[idx]) party[idx] = grant(party[idx]);
     }
     s.party = party;
     s.rewards = { expGain, moneyGain };
     pushLog(s, [
       `${MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId} 倒下了。`,
       `获得经验 ${expGain}，金钱 ¥${moneyGain}。`,
+      ...(frozen > 0 ? [`${frozen} 只伙伴已达等级帽 Lv.${s.levelCap}，本次不获得经验。`] : []),
     ]);
   }
   if (result === 'fled') pushLog(s, ['你成功撤离了训练场。']);
@@ -642,6 +657,7 @@ export function battleView(s: BattleState) {
     party: s.party,
     ppByMonster: s.ppByMonster,
     rewards: s.rewards,
+    levelCap: s.levelCap ?? null,
     captured: s.captured,
     consumed: s.consumed,
     actions: s.actions,

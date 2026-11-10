@@ -36,6 +36,16 @@ const getQuerySchema = z.object({
 });
 
 /**
+ * F04 §31.5：人物等级 / 徽章 / 成就的真值在服务端独立表，存档 JSON 里根本不该有这些键。
+ * `digestOf()` 不覆盖任意新增字段，若不显式拒绝，整包 PUT 夹带 `playerLevel: 999`
+ * 会绕过权威摘要比对 —— 这是比 SCHEMA_VERSION 联动更严重的越权口子。
+ */
+export const FORBIDDEN_PROGRESS_SAVE_FIELDS = [
+  'playerLevel', 'playerExp', 'levelCap', 'badgeBonus', 'badgeCount',
+  'badges', 'achievements', 'bonuses', 'progress',
+] as const;
+
+/**
  * 存档读写（P0-2 结构校验 → P1-1/P1-1b 三层风控 → P1-2 权威摘要 → P2-2 在线权威态）。
  * 路由只负责组装响应与日志，判定逻辑都在 lib 下的纯函数里；
  * 落库统一走 commitState()，保证内存会话态与 DB 同步、并把快照广播给所有在线连接。
@@ -87,6 +97,24 @@ export async function saveRoutes(fastify: FastifyInstance) {
   async function handlePut(req: any, reply: any, userId: string, slot: number) {
     const parsed = putSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: '存档数据格式不正确或过大' });
+
+    // —— F04：进度真值伪字段闸门，必须放在 CAS / 风控之前 ——
+    // 服务端真值不接受任何形式的客户端上报，也不给「合法消耗」留下夹带空间。
+    let incoming: unknown = null;
+    try { incoming = JSON.parse(parsed.data.data); } catch { /* 结构校验会拒绝坏 JSON */ }
+    if (incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+      const bad = FORBIDDEN_PROGRESS_SAVE_FIELDS.find(
+        (k) => k in (incoming as Record<string, unknown>),
+      );
+      if (bad) {
+        req.log.warn({ userId, slot, kind: 'progress_field_forged', field: bad }, '存档内夹带服务端进度真值字段，已拒绝');
+        return reply.code(400).send({
+          error: '等级 / 徽章 / 成就为服务端只读真值，不接受存档内上报',
+          code: 'SAVE_INPUT_FORBIDDEN',
+          field: bad,
+        });
+      }
+    }
 
     // —— P4 前置：CAS 版本校验，必须放在风控之前 ——
     // 并发写冲突不是作弊，先判版本能省掉一次全量结构校验，

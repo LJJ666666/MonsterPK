@@ -16,6 +16,7 @@ import { roomRoutes, roomStats } from './modules/room';
 import { bossRoutes, bossHealthStats } from './modules/boss';
 import { pvpRoutes } from './modules/pvp';
 import { coopRoutes } from './modules/coop';
+import { playerProgressRoutes, progressStats } from './modules/playerProgress';
 import { contentStats } from './game/content';
 import { getSessionStats, battles, wilds } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
@@ -85,6 +86,8 @@ fastify.get('/api/health', async () => ({
   // P4-2c：Boss 讨伐（内容表 + 在途次数），不查库。
   boss: bossHealthStats(),
   content: contentStats(),
+  // F04：等级 / 徽章 / 成就是服务端只读真值，health 只报来源，不查库。
+  progress: progressStats(),
 }));
 
 fastify.register(authRoutes);
@@ -100,6 +103,7 @@ fastify.register(roomRoutes);
 fastify.register(bossRoutes);
 fastify.register(pvpRoutes);
 fastify.register(coopRoutes);
+fastify.register(playerProgressRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 registerRealtime(fastify);

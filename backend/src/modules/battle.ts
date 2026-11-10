@@ -31,6 +31,8 @@ import { applySettlementToSave } from '../game/settlement';
 import { grantBossRewards, type BossRewardResult } from './bossReward';
 import { broadcastToUser, battles, wilds, bossQuota } from './sessionBus';
 import { publishWild, resolveAreaSpec } from './wild';
+// F04：宠物等级帽由服务端进度真值注入；常规战斗首通野区幂等发对应徽章（§31.9）。
+import { readProgress, grantBadgeForAreaClear } from './playerProgress';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
 const slotSchema = z.coerce.number().int().min(1).max(3).default(1);
@@ -291,8 +293,10 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     try {
+      const levelCap = (await readProgress(userId)).cap;
       const state = createBattle({
         id: battleId,
+        levelCap,
         userId,
         slot,
         theme: finalTheme,
@@ -410,6 +414,17 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           source: 'battle',
         });
         battles.drop(userId, slot);
+
+        // F04 §31.9：常规战斗首通野区 → 幂等发对应徽章（V1 过渡口径）。
+        // 只认服务端结算出的 areaId / result；Boss 战 areaId 为 null 不参与。
+        // 发奖失败只记日志，不阻断战斗结算响应（徽章表无外键、唯一键天然幂等）。
+        if (!next.bossId && next.areaId
+          && (next.result === 'enemy_fainted' || next.result === 'captured')) {
+          try { await grantBadgeForAreaClear(userId, next.areaId); }
+          catch (e) {
+            req.log.warn({ userId, areaId: next.areaId, err: String(e) }, '首通徽章发放失败（不阻断结算）');
+          }
+        }
 
         // P4-2c：Boss 战分流。Boss 战没有 wildId，两者互斥；用 if/else 而不是并列，
         // 避免以后加玩法时漏判「两个结算都跑了」。

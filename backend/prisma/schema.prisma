@@ -184,3 +184,31 @@ model CoopRewardGrant {
   @@unique([roomId, userId, slot])
   @@index([userId, slot, periodKey])
 }
+
+// F04 召唤师等级 / 徽章 / 成就（2026-11-10，规范 §31.5）。
+// **按 userId 账号级**，不按 slot（F17 单档化铺路）；不写 SaveData、不动 SCHEMA_VERSION。
+// 等级完全由「基础 5 + Σ徽章加成」只读派生，没有 PlayerProgress 宽表、无需老档回填。
+// @@unique 保证重复发放 / 重复首通幂等（P2002 兜底），**不取应用层锁**：
+// 调用链可能在战斗结算的 slotLock 内，重演 F14 同锁重入死锁（bug_log §36）。
+// 不建 User 关联，与 BossRewardGrant / CoopRewardGrant 同风格；按 userId 过滤。
+model BadgeGrant {
+  id        String   @id @default(cuid())
+  userId    String
+  badgeId   String
+  source    String
+  grantedAt DateTime @default(now())
+
+  @@unique([userId, badgeId])
+  @@index([userId, grantedAt])
+}
+
+model AchievementGrant {
+  id             String   @id @default(cuid())
+  userId         String
+  achievementId  String
+  source         String
+  grantedAt      DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([userId, grantedAt])
+}

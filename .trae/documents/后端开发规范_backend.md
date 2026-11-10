@@ -1081,7 +1081,7 @@ P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 
 2. 多实例部署时 DB 是共享真值，读模型天然可用；但排行榜规模上来后要换周期快照，别在每请求扫全表。
 3. 战力公式、装备加成口径、榜单周期与分组、剧情解锁点仍是待定项，不影响本阶段接口。
 4. **本阶段没有改 `SCHEMA_VERSION` / Prisma schema / 迁移**。
-5. **召唤师等级是占位派生，不是产品口径**：杰哥 11-07 修正为「人物/账号等级 + 宠物等级帽」，见 `未来规划与技术债_2026-11-07.md` **F04**；偿还前不得声称已实现。
+5. **召唤师等级当时是占位派生，不是产品口径**：杰哥 11-07 修正为「人物/账号等级 + 宠物等级帽」，见 `未来规划与技术债_2026-11-07.md` **F04**；**F04 已于 2026-11-10 偿还**，占位派生删除、榜单改读 `BadgeGrant` 真值，现行契约见 §31（本条为 P4-2a 阶段留档）。
 
 ## 24. P4-2b 房间内核（第四个状态域）
 
@@ -1738,3 +1738,239 @@ defeated --任一成员 enter--> fighting     （敌人 HP 重置满，contribut
 Boss 伤害榜 / `rules.ts` 战斗公式 / 1v1（F15 冻结）/ P4-3。
 **收官两个测试侧红灯**（等级上界 `levelMax + 6` 漏算 `elite`+`rare` 叠加、
 视图字段由 `turn` 改为 `occupantSeat`）见 bug_log §37，只改断言，产品逻辑零改动。
+
+---
+
+## 31. F04 召唤师等级 / 徽章 / 成就（2026-11-10 已实现并收官）
+
+> **状态：已实现并收官（2026-11-10，§31.7 五步全部完成）。** 本节**取代**台账 F04 在 11-07 写下的旧设定。
+> 杰哥 11-10 口径：「原来的台账只是一个设定，实施方案当初也是 AI 初步定的，
+> 所以发现有问题，修正就好」「方向肯定不会在本地存储的了，那都是旧方案留下来的尾巴」。
+> 实现前逐条核对 §31.1 / §31.2；**不要再按「`SaveData` 加 `playerLevel`」的旧思路动手**。
+
+### 31.1 产品口径（杰哥 11-10 拍板，钉死）
+
+1. **不本地存储**：`SaveData` **不加** `playerLevel` / `playerExp` / `badges` / `achievements`
+   任何字段。`SCHEMA_VERSION`(=10)、`EXPECTED_SAVE_VERSION`(=10)、前端 persist migrate
+   **一律不动**。旧台账「必须联动三处」是初版方案残留，作废；等级真值全部在服务端独立表。
+2. **人物等级来源不是打怪经验**，而是 `基础等级 + 徽章等级加成总和`。
+   11-07 旧设想的「账号经验 / 升级公式 / 同源同额」取消。
+3. **徽章获取**：每个城镇一座中式挑战场所，**不叫「道馆」**，定名「**演武堂**」；
+   挑战胜利才拿对应徽章。演武堂玩法本身、地图锁、剧情、地图 Boss 属后续阶段（§31.8），
+   **本轮不实现**，只把内容数据与领取口留好。
+4. **成就系统**：成就给**属性加成**（如全体物攻 +5、火属性速度 +1）；
+   与徽章共用**一个弹出页面、两个 Tab**（徽章 / 成就）。
+5. **一账号一档**：删三档、直接进游戏不选档（F17 独立阶段，§31.8）。
+   **F04 所有新表按 `userId` 唯一**（账号级），不按 `userId+slot`，为单档化铺路。
+6. **宠物等级帽**：`cap = playerLevel + PLAYER_LEVEL_CAP_BONUS`（默认 `0`，服务端可配；
+   未来 N+5 只改这一个常量）。
+7. **超帽：不降级、只冻结升级** —— `level >= cap` 的宠物**不再获得经验**，
+   但等级原样保留。杰哥明确「我的目的不是卡大家等级」，驱动成长的是徽章挑战。
+8. **捕获高等级怪：不钳等级** —— 「人物 5 级抓了 50 级宠，那就 50 级不变，
+   仅仅获取不到经验就好」。地图锁理论上杜绝跨越地图（后续阶段），本轮不做钳制。
+9. **宠物经验只来自常规战斗**（现有 `game/rules.ts::gainExp()`），
+   **不新增账号经验、不做账号与宠物同步升级**；「大概率会溢出（帽）」是预期。
+   Boss / 副本 / 1v1 **不给账号经验**，F14 双档 / F16 通关奖 / F15 零产出三条契约不动。
+10. **老档**：无徽章即基础等级；老宠超帽不降级，只冻结，登录即平滑过渡、无需刷数据。
+
+### 31.2 默认取值（杰哥「按默认开工」）
+
+| # | 项 | 默认值 | 理由 |
+|---|---|---|---|
+| 1 | 基础等级 | **5** | 对齐服务端 `createNewSave()` 御三家 Lv.5 |
+| 2 | 徽章数量 | **7** | 对齐 `LOCATIONS` 七个城镇 |
+| 3 | 每徽章等级加成 | **+5** | 对齐杰哥举例「火焰徽章 丨 5」；满徽章总加成 35 → 人物 Lv.40 |
+| 4 | 等级帽加成 | **0** | `PLAYER_LEVEL_CAP_BONUS` 常量，N+5 只改一处 |
+| 5 | 挑战场所名 | **演武堂** | 中式命名，不用「道馆」 |
+| 6 | 冻结判定 | `level >= cap` | 不降级、不给经验，等级与已存 exp 都不动 |
+| 7 | 等级上限 | **1000** | 与 `saveValidator.LEVEL_MAX` 一致，防脏档溢出 |
+| 8 | 成就属性加成 | **V1 只读展示 + 纯函数聚合** | 战斗数值接入随 F06 装备统一走 `effectiveStats`，避免两套加成 |
+| 9 | 徽章 V1 发放 | **服务端数据驱动，客户端零领取口** | 见 §31.9 过渡口径 |
+| 10 | 榜单次值 | 同等级比 `badgeCount`（徽章数） | 替换现在派生榜的 `dexCaptured` 次值 |
+
+### 31.3 七个徽章（内容数据，`game/badges.ts` 单一真源）
+
+`badgeId → locationId` 绑定，为未来「演武堂挑战胜利发徽章」预留映射。
+
+| badgeId | 名称 | 对应城镇 | 等级加成 |
+|---|---|---|---|
+| `badge_sprout` | 青苗徽章 | 初心镇 `town_starter` | +5 |
+| `badge_stone` | 磐石徽章 | 坚石市 `city_pebble` | +5 |
+| `badge_leaf` | 翠羽徽章 | 绿叶镇 `town_leafy` | +5 |
+| `badge_spring` | 流泉徽章 | 涌泉市 `city_spring` | +5 |
+| `badge_flame` | 赤焰徽章 | 烈阳镇 `town_sun` | +5 |
+| `badge_shadow` | 幽玄徽章 | 幽影市 `city_shadow` | +5 |
+| `badge_frost` | 霜华徽章 | 凛冬镇 `town_winter` | +5 |
+
+> 「赤焰徽章」即杰哥举例的「火焰徽章」，命名统一走项目古风。
+> 弹窗每行格式 `赤焰徽章 丨 5`，顶部显示 `总等级加成 +N`。
+
+### 31.4 成就与属性加成（V1 内容数据）
+
+加成结构统一为 `{ scope: 'all' | 'element', element?: ElementId, stat: StatKey, amount: number }`，
+纯函数 `aggregateAchievementBonuses(grants)` 聚合并合并同类项（同 scope+element+stat 求和）。
+
+| achievementId | 名称 | 属性加成 |
+|---|---|---|
+| `ach_first_catch` | 初入兽域 | 全体物攻 +1 |
+| `ach_veteran` | 百战之姿 | 全体物攻 +5 |
+| `ach_dex_10` | 图鉴初成 | 全体速度 +1 |
+| `ach_flame_runner` | 炎行千里 | 火属性速度 +1 |
+| `ach_gym_first` | 破阵者 | 全体物防 +2 |
+
+> 成就**解锁条件 V1 不接判定**（条件本身依赖后续统计真值），只做内容表 + 服务端发放 +
+> 只读展示。解锁自动化与战斗数值生效归 §31.8 后续阶段。
+
+### 31.5 数据模型与风控
+
+```prisma
+model BadgeGrant {
+  id        String   @id @default(cuid())
+  userId    String          // 账号级，不按 slot（F17 单档化铺路）
+  badgeId   String
+  source    String          // gym:<locationId> / cleared:<areaId> / admin
+  grantedAt DateTime @default(now())
+  @@unique([userId, badgeId])
+  @@index([userId, grantedAt])
+}
+model AchievementGrant {
+  id             String   @id @default(cuid())
+  userId         String
+  achievementId  String
+  source         String
+  grantedAt      DateTime @default(now())
+  @@unique([userId, achievementId])
+  @@index([userId, grantedAt])
+}
+```
+
+- 不建 `User` 关联，与 `BossRewardGrant` / `CoopRewardGrant` 同风格；按 userId 过滤。
+- `@@unique` 天然幂等（P2002 兜底），**不需要** `PlayerProgress` 宽表：等级完全由
+  `BASE_LEVEL + Σ徽章加成` 只读派生，无第二份真值、无需停机回填。
+- 唯一写入口 `modules/playerProgress.ts::grantBadge()` / `grantAchievement()`，
+  **不取应用层锁**：单条 `create` + `@@unique` P2002 幂等即可，调用链可能在战斗结算的
+  `slotLock` 内（F14 同锁重入死锁，bug_log §36）；F17 单档化也无需改动。
+  **客户端没有任何写入 / 领取 / 上报接口**。
+- 整包 `PUT /api/save` 出现 `playerLevel` / `playerExp` / `badges` / `achievements` /
+  `levelBonus` → 400 `SAVE_INPUT_FORBIDDEN`；`GET /api/player/progress` 只读投影
+  `{ level, cap, badgeBonus, badgeCount, badges[], achievements[], bonuses[] }`。
+- `GET /api/rank/summoner_level` 改读服务端真值，**删掉** `rank.ts::summonerLevelOf()`
+  占位派生公式；无徽章记录显示 Lv.5 而不是 0 级。
+
+### 31.6 等级帽必须覆盖的写入口（全部服务端）
+
+| 入口 | 处理 |
+|---|---|
+| `game/rules.ts::gainExp()` | 新增可选 `cap`；`level >= cap` 时**跳过经验**，不改 `exp` / `level` |
+| `game/battle.ts` 常规战斗结算 | 传 `cap`，每场只结算一次（现有 `battles.drop()` + 槽位锁保证） |
+| `game/settlement.ts::applySettlementToSave()` | 捕获入队**等级原样写入、不钳制** |
+| `game/mutations.ts::createNewSave()` | 御三家 Lv.5 不动（基础等级同源） |
+| 进化 / 学技能 / 经验道具 | 不动等级，但不得绕过 `cap` 间接升级 |
+| 整包 `PUT /api/save` | §31.5 伪字段闸门；客户端上报等级一律无效 |
+
+**敌方等级不受帽限制**：野怪 / Boss / 副本敌人是服务端生成的内容，不是玩家资产。
+
+### 31.7 分步实施（每步测通再下一步，沿用 F16 节奏）
+
+1. `game/playerLevel.ts` + `game/badges.ts` 纯函数与内容数据 + `playerLevel.test.ts`
+2. 第 10 条迁移加两张表 + `modules/playerProgress.ts` + 只读 API + 单测
+3. 经验冻结 / 捕获不钳 / PUT 伪字段闸门 / 榜单真值 + `e2e:f04`
+4. 徽章 / 成就双 Tab 弹窗 + 营地入口 + `ui_smoke_f04` 375px
+5. 规范补实现记录 / 台账 F04 → ✅ / 任务表 / HANDOFF / 记忆 / `doc_check` 防回退断言
+   + `verify --strict` 全绿 + tag / 提交 / 推送
+
+> ⚠️ 新增阶段必须**同时**改 `scripts/verify.mjs` 的 `STAGES` 与 `GROUPS`（§32 老坑）。
+> 改 schema 前先停 :3001 释放 Prisma DLL（`HANDOFF.md` §B）。
+
+### 31.8 边界与后续阶段（本轮不做）
+
+- **F17 单档化**：杰哥 11-10「把三个档的设定删除，一个账号就一档，直接进去不需要选择」。
+  实测 **94 个文件**横切 `slot`（后端 27 模块 / 前端 20+ / E2E 与冒烟 30+），
+  **必须与 F04 拆开**，否则缺陷耦合。F04 新表已按 userId 设计，单档化时无需改。
+- **F18 地图内容**：地图锁（实力不够去不了下一张图）、剧情、地图 Boss、
+  **演武堂挑战玩法**（徽章的唯一正式来源）。地图锁上线前不靠钳等级兜底。
+- **F06 装备**：成就属性加成与装备统一进 `effectiveStats` 时再接战斗数值。
+- **冻结不变量**：F15 1v1 零产出、F14 Boss 双档、F16 六房通关奖、P4-3 交易冻结，
+  四条口径一律不动；P5-1 前野怪 / 房间 / 锁仍是单进程内存态。
+
+### 31.9 V1 徽章发放的过渡口径（工程默认，需留意）
+
+⚠️ **风险**：V1 若完全没有发放途径，所有账号恒为 `level=5 / cap=5`，
+老宠与常规战斗经验会被**整片冻结**，游戏实际玩不下去。演武堂挑战玩法属 F18。
+
+**默认解法**：V1 复用服务端已有的 `clearedAreas` 首通真值 ——
+某城镇任一野区首通时，在战斗结算链路里幂等发放该城镇徽章（`source=cleared:<areaId>`）。
+这是**过渡口径**，不新增客户端领取入口，也不改 `SaveData`；
+演武堂上线后把 `source` 收窄为 `gym:<locationId>` 即可替换，两张表与 UI 零改动。
+
+### 31.10 实现记录（2026-11-10，F04-1 ~ F04-5 全部完成）
+
+**口径修正先行**：先把台账 / HANDOFF / 任务表 / 排期 / MEMORY 里 11-07 写的
+「`SaveData` 加 `playerLevel` → 联动 `SCHEMA_VERSION` 三处」「下一步 F04 要动版本号」
+等旧陈述清干净（12 处精确替换），并登记 **F17 单档化** / **F18 地图内容**为独立阶段
+（实测 94 个文件横切 `slot`，不能与 F04 混做）。
+
+**F04-1 纯函数层**：`game/badges.ts`（7 徽章对齐 `LOCATIONS` 七城镇、`badgeIdForWildArea`
+野区映射、5 条成就与 `aggregateAchievementBonuses` 同维度合并、中文加成文案）
++ `game/playerLevel.ts`（`BASE_PLAYER_LEVEL=5` / `PLAYER_LEVEL_CAP_BONUS=0` /
+`levelCapOf` / `isLevelFrozen` / `expGrantAllowed` / **不钳等级的 `capturedLevelOf`** /
+`buildPlayerProgress` 只读投影）。`playerLevel.test.ts` **11 例**、
+`playerProgress.test.ts` **4 例**；后端全量单测 **389/389**。
+
+**F04-2 数据层**：第 10 条迁移 `20261110103000_add_badge_achievement_grant`
+新增 `BadgeGrant` / `AchievementGrant`（`@@unique([userId, *Id])` 幂等、按 **userId 账号级**、
+不按 slot）；`modules/playerProgress.ts` 是唯一写入口，**不取应用层锁**
+（调用链可能在战斗结算的 `slotLock` 内，避免 §36 同锁重入死锁）；
+`GET /api/player/progress` 只读投影 + `catalog` 七行清单，
+显式带 `playerLevel` / `badges` / `cap` 等真值字段 → 400 `PROGRESS_INPUT_FORBIDDEN`。
+`e2e:f04` **15/15**；`f04_` 清理前缀、`STAGES` + `GROUPS` 两处接线完成。
+
+**F04-4 UI**：`src/lib/playerProgress.ts`（防御性解析、零计算）+
+`src/components/BadgeModal.tsx` **一个弹窗两个 Tab**：徽章 Tab 每行
+`赤焰徽章 丨 5` 含已获得/未挑战灰态，顶部 `人物等级 Lv.N · 宠物等级帽 N · 总等级加成 +N`；
+成就 Tab 显示 `全体物攻 +5` / `火属性速度 +1` 等属性加成。
+营地加「徽章」入口；`ui_smoke_f04.mjs` **15/15 `UI_SMOKE_F04_OK`**（真实账号 + 真实 Grant 表，
+**不注入假状态**，两 Tab 375px 均无横向溢出）。
+
+**F04-3 已实现（等级帽接入 + 榜单真值 + 伪字段闸门）**：
+
+1. `game/battle.ts` 的 `BattleState` 新增可选 `levelCap`，`createBattle()` 只接受
+   **服务端注入**（`modules/battle.ts` 开局时 `readProgress(userId).cap`）；
+   `finish()` 分配经验前用 `expGrantAllowed(m.level, cap)` 判定，**达到 / 超过帽的宠
+   exp 与 level 一律不动**，未超帽的照常获经验，日志写明「已达等级帽」。
+   `battleView()` 只读下发 `levelCap`；客户端开局传 `levelCap=999` 无效（E2E 已断言）。
+   不注入帽（Boss / 历史调用点）行为与旧版完全一致，单测双路对照。
+2. `game/settlement.ts` 捕获入队用 `capturedLevelOf()` **只做 1..LEVEL_MAX 合法性钳制**，
+   绝不按帽压等级：人物 5 级抓到 Lv.50 就原样 50 级入队，之后因超帽拿不到经验。
+3. `modules/save.ts` 新增 `FORBIDDEN_PROGRESS_SAVE_FIELDS`，整包 `PUT /api/save`
+   夹带 `playerLevel` / `playerExp` / `levelCap` / `badges` / `achievements` / `bonuses`
+   等真值字段 → **400 `SAVE_INPUT_FORBIDDEN`**，闸门在 CAS / 风控**之前**。
+   原因：`digestOf()` 不覆盖任意新增字段，不显式拒绝等于绕过整个权威摘要。
+4. `game/rank.ts` **删除占位派生 `summonerLevelOf()`**，`deriveMetrics()` 只给基础
+   Lv.5 占位；`modules/rank.ts::loadRankSources()` 一次查全 `BadgeGrant` 按 userId
+   分组，用 `playerLevelOf(ids)` **覆盖主值**（无记录 = 基础 Lv.5，不显示 0 级）。
+   存档里塞 `playerLevel` / `badges` 一律影响不了榜单。
+5. 常规战斗首通野区 → `modules/battle.ts` 结算调 `grantBadgeForAreaClear()`
+   幂等发对应徽章（§31.9 过渡口径）；只认服务端 `areaId` / `result`，
+   发奖失败只记日志、不阻断结算响应。
+6. 单测 `f04Cap.test.ts`（帽注入 / 冻结 / 无帽回归 / 边界）与 `settlement.test.ts`
+   补「捕获 Lv.50 原样入队」；`e2e_f04.mjs` 扩到 **25/25**（伪字段 4 例、榜单真值、
+   帽下发、首通发徽章闭环）；`e2e_p42a_rank.mjs` 等级榜断言改读 Grant 真值。
+7. 顺手修 `e2e_p42c_boss.mjs` 强档 HP 420 → **8000**（与 F14 对齐）：
+   敌方 elite/rare 叠加时 420 会偶发全灭，下一场开局 `PARTY_FAINTED`，
+   全量验收曾出现 42/44 红灯；纯用例确定性，产品逻辑零改动（bug_log §38）。
+
+**边界**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 存档结构 / 前端 persist migrate
+**依然零改动**；`gainExp()` 本身不改（只在调用侧判定），Boss / 副本 / 1v1 的
+F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **不回溯补发徽章**：
+徽章正式来源是演武堂挑战（F18），旧版首通不等于打赢演武堂，不白送等级。
+
+### 31.11 收官验收（2026-11-10，最终工作树）
+
+`npm run verify -- --strict` **36/36 `VERIFY_OK`**，0 失败 / 0 跳过，合计 292.8s：
+前端类型检查 / 129 项 vitest / 前端构建，后端类型检查 / **394 项 node:test** /
+服务端内容表一致性，17 组 E2E（含 `e2e:f04` **25/25**、`e2e:p42a` **39/39**、
+`e2e:p42c` **44/44**、对抗套件 **115/115**），10 组 375px 浏览器冒烟
+（含 `ui_smoke_f04` **15/15**），文档一致性自检 **144 项 `DOC_CHECK_OK`**，
+记忆镜像 `sha256=e3d356899ffc` 一致，`git diff --check` 干净。
+机器无关证据：`.verify-report.json`；回滚点 `rollback-20261110-pre/post-f04`。

@@ -52,6 +52,23 @@ const board = (token, type, limit = 50) =>
 /** 只在榜单里挑出本套件造的账号，避免受残留测试账号影响。 */
 const mine = (res, names) => (res.data?.entries ?? []).filter((e) => names.includes(e.username));
 
+/** F04：直接写 Grant 表等价于「服务端唯一写入口刚发过徽章」，客户端无领取口。 */
+async function grantBadgeFor(username, badgeId) {
+  loadBackendEnv();
+  const { PrismaClient } = await import('@prisma/client');
+  const prisma = new PrismaClient();
+  try {
+    const u = await prisma.user.findUnique({ where: { username }, select: { id: true } });
+    if (!u) return false;
+    await prisma.badgeGrant.create({ data: { userId: u.id, badgeId, source: 'e2e:p42a' } });
+    return true;
+  } catch (e) {
+    return e?.code === 'P2002';
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function banByUsername(username) {
   loadBackendEnv();
   const { PrismaClient } = await import('@prisma/client');
@@ -130,6 +147,8 @@ async function main() {
     maxHp: 6000, partyCount: 2, level: 30,
     clearedAreas: { wild_starter: area(5), a2: area(18) }, dex: 2,
   }));
+  // F04：等级榜真值改读服务端 BadgeGrant，给 high 发一枚赤焰徽章拉开差距。
+  const badgeGranted = await grantBadgeFor(accHigh.username, 'badge_flame');
   const names = [accLow.username, accMid.username, accHigh.username];
   suite.check('三个不同数值的测试账号建档成功', names.every(Boolean) && new Set(names).size === 3,
     names.join(','));
@@ -165,11 +184,20 @@ async function main() {
     JSON.stringify(inMonster.map((e) => `${e.username}:${e.value}`)));
 
   const inLevel = mine(boards.summoner_level, names);
-  suite.check('召唤师等级由首通 / 队伍等级 / 图鉴派生，high > low',
-    inLevel.length === 3
-    && inLevel.find((e) => e.username === accHigh.username)?.value
-      > inLevel.find((e) => e.username === accLow.username)?.value,
-    JSON.stringify(inLevel.map((e) => `${e.username}:${e.value}`)));
+  // 全量 verify 时前面套件会留下大量账号，全服榜 limit=50 会把低等级的 low/mid 截断
+  // （§28 老坑）。因此「未发徽章恒为 Lv.5」直接查只读进度接口，不依赖全服子集完整性。
+  const progLow = await api('/api/player/progress', { token: accLow.token });
+  const progMid = await api('/api/player/progress', { token: accMid.token });
+  const hiRow = inLevel.find((e) => e.username === accHigh.username);
+  const loRow = inLevel.find((e) => e.username === accLow.username);
+  suite.check('F04 召唤师等级读服务端徽章真值：high（+5）=10，未发徽章恒为基础 Lv.5',
+    badgeGranted === true && hiRow?.value === 10
+    && progLow.data?.progress?.level === 5 && progMid.data?.progress?.level === 5
+    && (!loRow || loRow.value < hiRow.value || loRow.rank > hiRow.rank)
+    && inLevel.every((e) => e.username === accHigh.username || e.value === 5),
+    `granted=${badgeGranted} hi=${hiRow?.value} lo=${loRow?.value} `
+    + `progLow=${progLow.data?.progress?.level} progMid=${progMid.data?.progress?.level} `
+    + JSON.stringify(inLevel.map((e) => `${e.username}:${e.value}`)));
   suite.check('召唤师等级行说明不含客户端字段',
     inLevel.every((e) => /首通 \d+ 区/.test(e.detail)),
     JSON.stringify(inLevel[0] ?? null));
@@ -286,5 +314,18 @@ main().then(() => {
   suite.check('E2E 未抛未捕获异常', false, String(e?.message ?? e));
   suite.done();
 }).finally(async () => {
+  // Grant 表无外键，删账号不会级联，必须显式清（否则污染后续全服榜断言）。
+  try {
+    loadBackendEnv();
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+    const ids = await prisma.user.findMany({
+      where: { username: { in: created } }, select: { id: true },
+    });
+    if (ids.length) {
+      await prisma.badgeGrant.deleteMany({ where: { userId: { in: ids.map((u) => u.id) } } });
+    }
+    await prisma.$disconnect();
+  } catch (e) { console.warn('[WARN] Grant 清理失败', e?.message); }
   try { await cleanupAccounts(created); } catch (e) { console.warn('[WARN] 清理失败', e?.message); }
 });

@@ -14,6 +14,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
+import { LOCATIONS } from '../game/content';
+import { readBadgeIds } from './playerProgress';
+import { isLocationUnlocked, requiredBadgeFor } from '../game/mapLock';
 import { parseAuthority, digestOf, freshAuthority, type AuthorityState } from '../lib/authority';
 import { MUTATION_OPS, applyMutation, createNewSave, MutationError, type MutationOp } from '../game/mutations';
 import { EXPECTED_SAVE_VERSION } from '../lib/saveValidator';
@@ -133,6 +136,23 @@ async function handleGameOp(
 
     const row = await readSave(userId);
     if (!row) return reply.code(404).send({ error: '还没有存档，请先开始游戏', code: 'SAVE_NOT_FOUND' });
+
+    // F18-a 地图锁：travel 前置校验（服务端权威，基于 BadgeGrant 真值派生解锁集合）。
+    // 未知地点交下游 applyMutation 抛 LOCATION_UNKNOWN；这里只拦「已知但未解锁」的跳转。
+    if (opRaw === 'travel') {
+      const target = String(body.locationId ?? '');
+      if (LOCATIONS[target]) {
+        const badgeIds = await readBadgeIds(userId);
+        if (!isLocationUnlocked(target, badgeIds)) {
+          return reply.code(400).send({
+            error: '该地区尚未解锁',
+            code: 'LOCATION_LOCKED',
+            locationId: target,
+            requiredBadge: requiredBadgeFor(target),
+          });
+        }
+      }
+    }
 
     let save: any;
     try {

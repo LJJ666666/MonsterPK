@@ -41,6 +41,8 @@ export type PlayerProgressResponse = {
   progress: PlayerProgress;
   /** 全部徽章清单（含未获得灰态），由服务端下发，前端不硬编码内容表。 */
   catalog: BadgeCatalogItem[];
+  /** F18-a 地图锁：服务端权威下发的已解锁城镇 id 集合，前端仅用于灰显，最终以服务端 travel 校验为准。 */
+  unlockedLocations: string[];
 };
 
 export const PROGRESS_DISCLAIMER =
@@ -100,7 +102,8 @@ export function parsePlayerProgress(raw: unknown): PlayerProgressResponse | null
       desc: String(b.desc ?? ""), owned: b.owned === true,
     };
   });
-  return { ok: r.ok === true, readonly: true, progress, catalog };
+  const unlockedLocations = arr(r.unlockedLocations).map(String);
+  return { ok: r.ok === true, readonly: true, progress, catalog, unlockedLocations };
 }
 
 export async function fetchPlayerProgress(): Promise<PlayerProgressResponse> {

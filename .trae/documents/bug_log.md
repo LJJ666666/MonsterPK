@@ -1107,3 +1107,18 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 
 - `e2e:f17` 同时写进 `verify.mjs` 的 `STAGES` 与 `GROUPS`（漏 `GROUPS` 静默少跑，§32.5），
   另补 `backend/package.json` 与 `clean-test-data.mjs` 的 `f17_` 清理前缀。
+
+## 40. F18-a 地图锁收官（2026-11-10）
+
+### 40.1 服务端权威解锁，门槛=持有上一相邻城镇徽章
+- 新建 `backend/src/game/mapLock.ts`：`LOCATION_ORDER`（7 城线性顺序）、`requiredBadgeFor`（每城需上一城徽章，首城 `town_starter` 返回 null 恒解锁）、`unlockedLocations`/`isLocationUnlocked`（基于 `BadgeGrant` 真值派生，零 IO）。
+- `travel` mutation（`modules/game.ts`）与整包 PUT（`modules/save.ts`）两处共用 `mapLock`，双点校验：未解锁返回 **`LOCATION_LOCKED`**（带 `requiredBadge` 字段）。这是服务端权威解锁，客户端不上报、不决定。
+- `GET /api/player/progress` 返回新增 `unlockedLocations`，前端 `Camp.tsx` 地图列表灰显未解锁城 + 文案「需获得「XX徽章」解锁」。
+
+### 40.2 无新迁移 / 不改版本号（与 F04/F17 一致）
+- 等级真值仍在 `BadgeGrant`，地图锁只派生，不新增持久化字段；**未动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**。
+- 徽章来源仍走 V1 首通口径 `cleared:<areaId>`，**F18-b 演武堂上线后收窄为 `gym:<locationId>`**，mapLock 只认 `BadgeGrant` 不关心来源。
+
+### 40.3 验收与回归
+- 纯函数 `mapLock.test.ts` **7/7**、`e2e_f18a.mjs` **8/8**（travel 锁/未知/PUT 伪造跳关/解锁后放行/线性不越级）；`verify.mjs` 两处注册 `e2e:f18a`、`package.json` 加脚本、`clean-test-data.mjs` 补 `f18_` 前缀。
+- **回归**：`e2e_p32_mutations.mjs` 原「移动到合法地点」travel 到 `city_pebble`，无徽章被 `LOCATION_LOCKED` 拦截导致后续 `travelData.money` 抛错（400 无 `.data`）。改为 travel 到恒解锁的 `town_starter`，仍验证 travel 写操作 + 访问记录追加；「解锁后放行到第二城」语义由 `e2e_f18a` 专测。重跑 P3-2 通过。

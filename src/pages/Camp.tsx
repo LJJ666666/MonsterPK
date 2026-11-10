@@ -130,6 +130,7 @@ function TestMenuModal({ onClose }: { onClose: () => void }) {
 }
 
 import { Info } from "lucide-react";
+import { fetchPlayerProgress, type BadgeCatalogItem } from "@/lib/playerProgress";
 
 export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
@@ -160,6 +161,17 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [dexSearchQuery, setDexSearchQuery] = useState("");
   /** P3-2：服务端拒绝写操作时的提示（治疗/道具/进化/队伍整理都可能是 400）。 */
   const [notice, setNotice] = useState<string | null>(null);
+
+  /** F18-a 地图锁：服务端下发的已解锁城镇集合（权威真值，仅用于前端灰显；最终以服务端 travel 校验为准）。 */
+  const [unlockedLocations, setUnlockedLocations] = useState<string[] | null>(null);
+  const [badgeCatalog, setBadgeCatalog] = useState<BadgeCatalogItem[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchPlayerProgress()
+      .then((d) => { if (!cancelled) { setUnlockedLocations(d.unlockedLocations); setBadgeCatalog(d.catalog); } })
+      .catch(() => { if (!cancelled) setUnlockedLocations(null); });
+    return () => { cancelled = true; };
+  }, []);
 
   /**
    * 统一处理服务端写操作的结果：成功就清提示，失败把服务端中文原因显示在顶部。
@@ -458,21 +470,35 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       return (
         <PixelCard title="地区列表">
           <div className="grid gap-2">
-            {(Object.values(LOCATIONS) as typeof LOCATIONS[LocationId][]).map((loc) => (
+            {(Object.values(LOCATIONS) as typeof LOCATIONS[LocationId][]).map((loc) => {
+              const locked = unlockedLocations ? !unlockedLocations.includes(loc.id) : false;
+              const reqBadge = badgeCatalog.find((b) => b.locationName === loc.name)?.name ?? "上一级徽章";
+              return (
               <button
                 key={loc.id}
+                disabled={locked}
                 onClick={async () => {
+                  if (locked) return;
                   if (await runOp(() => travelTo(loc.id))) setMapView("detail");
                 }}
-                className={`border-2 p-3 text-left flex justify-between items-center ${loc.id === currentLocation.id ? "border-[color:var(--accent)] bg-[color:var(--panel2)]" : "border-[color:var(--stroke)] bg-[color:var(--bg2)]"}`}
+                className={`border-2 p-3 text-left flex justify-between items-center ${
+                  locked
+                    ? "border-[color:var(--stroke)] bg-[color:var(--bg2)] opacity-50 cursor-not-allowed"
+                    : loc.id === currentLocation.id
+                    ? "border-[color:var(--accent)] bg-[color:var(--panel2)]"
+                    : "border-[color:var(--stroke)] bg-[color:var(--bg2)]"
+                }`}
               >
                 <div>
                   <div className="text-sm font-semibold text-[color:var(--text)]">{loc.name} {loc.id === currentLocation.id && "(当前)"}</div>
-                  <div className="mt-1 text-[10px] text-[color:var(--muted)]">{loc.desc}</div>
+                  <div className="mt-1 text-[10px] text-[color:var(--muted)]">{locked ? `需获得「${reqBadge}」解锁` : loc.desc}</div>
                 </div>
-                <div className="text-xs text-[color:var(--accent)]">进入</div>
+                <div className={`text-xs ${locked ? "text-[color:var(--muted)]" : "text-[color:var(--accent)]"}`}>
+                  {locked ? "未解锁" : "进入"}
+                </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         </PixelCard>
       );

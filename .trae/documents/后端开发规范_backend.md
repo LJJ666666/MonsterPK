@@ -2034,3 +2034,65 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   10 组 375px 冒烟、文档自检 `DOC_CHECK_OK`、记忆镜像一致、`git diff --check` 干净。
   证据 `.verify-report.json`；回滚点 `rollback-20261110-pre/post-f17`。
 - 踩坑见 `bug_log §39`。
+
+## 33. F18 地图内容（2026-11-10 设计定稿 → a 子阶段实现收官）
+
+- 杰哥 11-10 拍板：F18「地图内容」大包拆成 **a→d 四子阶段依次做**，不做并行：
+  **a 地图锁 / b 演武堂 / c 地图 Boss / d 剧情**。本次（2026-11-10）只做并偿还了 **a 地图锁**。
+- 产品口径（11-10 定）：① 地图锁门槛 = **持有上一相邻城镇徽章**（town_starter 无前置）；
+  ② 演武堂无次数限制 + 20min 馆主休息 CD；③ 剧情轻量对话 + 触发播片，不持久化。
+- 与 F04/F17 一致：**不新增 Prisma 迁移、不动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**，
+  等级真值仍在 `BadgeGrant`，地图锁只是派生视图。
+
+### 33.1 产品口径
+
+- 杰哥 11-10：「F18 按 a→d 全拆依次做，别一起上」。四子阶段：
+  - **a 地图锁**：按线性顺序解锁，门槛 = **持有上一相邻城镇徽章**，实力不够去不了下一张图。
+  - **b 演武堂**：每城中式演武堂（取代「道馆」），馆主战胜利发徽章 = 徽章正式唯一来源；
+    **无次数限制，但 20min 馆主休息 CD**。
+  - **c 地图 Boss**：Boss 按区域归属 + `unlockAreaId` 判定。
+  - **d 剧情**：轻量对话 + 触发播片，**不持久化**。
+- 徽章来源过渡：演武堂上线前复用 V1 的 `cleared:<areaId>` 首通真值（见 §31.9），
+  F18-b 上线后把 source 收窄为 `gym:<locationId>`，表与 UI 零改动。
+
+### 33.2 F18-a 地图锁实现记录（2026-11-10 收官）
+
+- **纯函数** `backend/src/game/mapLock.ts`：
+  - `LOCATION_ORDER`：7 城线性顺序 `town_starter → city_pebble → town_leafy →
+    city_spring → town_sun → city_shadow → town_winter`。
+  - `requiredBadgeFor(locationId)`：每城需持有上一相邻城镇徽章；`town_starter` 返回 `null`。
+  - `unlockedLocations(badgeIds)` / `isLocationUnlocked(badgeIds, locationId)`：
+    基于 `BadgeGrant` 真值派生解锁集合。
+- **`backend/src/modules/game.ts`** 的 `handleGameOp`：`op === 'travel'` 前置查 `readBadgeIds`
+  校验解锁，未解锁返回 **400 `LOCATION_LOCKED`**（响应体带 `requiredBadge` 字段）。
+- **`backend/src/modules/save.ts`** 的 PUT 路径：整包上传落库前校验 `locationId ∈ 已解锁集合`
+  （非 admin），否则 **400 `LOCATION_LOCKED`**（防伪造跳关）。
+- **`backend/src/modules/playerProgress.ts`** 的 `GET /api/player/progress` 返回新增
+  `unlockedLocations` 字段。
+- **前端** `src/pages/Camp.tsx` 地图列表：未解锁城镇灰显 `disabled` + 文案
+  「需获得「XX徽章」解锁」；`src/lib/playerProgress.ts` 类型加 `unlockedLocations`。
+- 测试：`backend/tests/mapLock.test.ts` **7/7** 通过；`backend/tests/e2e_f18a.mjs` **8/8**
+  通过（travel 锁 / 未知 / PUT 伪造 / 解锁后放行 / 线性不越级）；`scripts/verify.mjs`
+  已注册 `e2e:f18a` 两处（`STAGES` + `GROUPS`）、`backend/package.json` 已有 `"e2e:f18a"`、
+  `backend/scripts/clean-test-data.mjs` 已有 `f18_` 前缀。
+- **未新增 Prisma 迁移、未动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**，与 F04/F17 一致，
+  等级真值仍在 `BadgeGrant`。
+- 验收口径：前端 vitest 129/129、后端 check 0、mapLock 7/7、e2e_f18a 8/8；
+  最终全量 `verify --strict` 待后台跑完（本轮不跑）。
+
+### 33.3 F18-b 演武堂（待开工）
+
+- 每城中式演武堂（取代「道馆」），馆主战胜利发徽章 `gym:<locationId>`，替换 V1 的
+  `cleared:<areaId>`（F18-b 上线后收窄 source，表与 UI 零改动）。
+- 无次数限制，但 **20min 馆主休息 CD**（CD 期间不可再挑战同一馆主）。
+- 徽章 = 徽章正式唯一来源，影响 F04 等级与地图锁解锁链。
+
+### 33.4 F18-c 地图 Boss（待开工）
+
+- Boss 按区域归属 + `unlockAreaId` 判定；与 §25 / §30 的 Boss 讨伐 / 共斗结算纪律保持一致，
+  不发奖励、禁捕获、逃跑不上榜等口径延续。
+
+### 33.5 F18-d 剧情（待开工）
+
+- 轻量对话 + 触发播片，**不持久化**（不新增存档字段、不动 `SCHEMA_VERSION`）。
+- 触发条件与播片资源由内容表或静态配置驱动，跑完即释放，状态不入档。

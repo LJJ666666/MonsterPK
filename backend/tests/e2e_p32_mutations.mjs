@@ -12,6 +12,7 @@
  */
 import WebSocket from 'ws';
 import { makeSaveWriter } from './lib/saveWriter.mjs';
+import { loadBackendEnv } from './lib/harness.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
@@ -197,12 +198,28 @@ async function main() {
   check('治疗更新 lastHealLocationId', persistedData?.lastHealLocationId === 'town_starter',
     String(persistedData?.lastHealLocationId));
 
-  // 非法地点
-  await put(token, { ...persistedData, locationId: 'nowhere', lastHealLocationId: 'nowhere' });
-  const healBad = await op(token, 'heal');
-  check('不在恢复中心时治疗被拒', healBad.status === 400 && healBad.data?.code === 'NO_HEAL_CENTER',
-    `${healBad.status} ${asText(healBad.data)}`);
-  await put(token, { ...persistedData, locationId: 'town_starter', lastHealLocationId: 'town_starter' });
+  // 地图锁（F18-a）：客户端不能再 PUT 伪造 locationId 跳关（含非法地点 nowhere，该路径已被
+  // LOCATION_LOCKED/UNKNOWN 拦截，到不了 heal 阶段）。全部 7 城镇均 hasCenter=true，正常流程里
+  // 不存在「非恢复中心」的可达地点，故 NO_HEAL_CENTER 在合法玩法下不可触发；这里验证持徽章后
+  // 可合法 travel 到 city_pebble，并在恢复中心正常 heal（与上方 heal1 同源服务端回满）。
+  const meRes = await request('/api/auth/me', { token });
+  const meName = meRes.data?.username;
+  loadBackendEnv();
+  const { PrismaClient: PC1 } = await import('@prisma/client');
+  const prismaP32 = new PC1();
+  try {
+    const u = await prismaP32.user.findUnique({ where: { username: meName }, select: { id: true } });
+    await prismaP32.badgeGrant.create({ data: { userId: u.id, badgeId: 'badge_sprout', source: 'test:e2e:p32' } });
+  } finally { await prismaP32.$disconnect(); }
+  const travelToCity = await op(token, 'travel', { locationId: 'city_pebble' });
+  check('持徽章后 travel 到 city_pebble（已解锁）→ 200', travelToCity.status === 200,
+    `${travelToCity.status} ${asText(travelToCity.data).slice(0, 160)}`);
+  const healInCity = await op(token, 'heal');
+  check('在恢复中心治疗成功 200（heal 由服务端回满）', healInCity.status === 200,
+    `${healInCity.status} ${asText(healInCity.data).slice(0, 160)}`);
+  const backHome = await op(token, 'travel', { locationId: 'town_starter' });
+  check('可 travel 回 town_starter → 200', backHome.status === 200,
+    `${backHome.status} ${asText(backHome.data).slice(0, 160)}`);
 
   // —— 战斗外道具 ——
   const cur = (await getSave(token)).data?.data ? JSON.parse((await getSave(token)).data.data) : null;
@@ -324,6 +341,9 @@ async function main() {
   const travelBad = await op(token, 'travel', { locationId: 'atlantis' });
   check('未知地点被拒', travelBad.status === 400 && travelBad.data?.code === 'LOCATION_UNKNOWN',
     `${travelBad.status} ${asText(travelBad.data)}`);
+  // 地图锁（F18-a）：主账号已在上方通过直写 BadgeGrant 持有 town_starter 徽章（badge_sprout），
+  // 故 city_pebble 已解锁，可合法 travel；「未解锁被 LOCATION_LOCKED 拒」与「PUT 伪造 locationId 被拦」
+  // 由 e2e_f18a 专测。这里验证 travel 写操作本身 + 访问记录追加 + 后续权威收口。
   const travelOk = await op(token, 'travel', { locationId: 'city_pebble' });
   const travelData = parseData(travelOk);
   check('移动到合法地点', travelOk.status === 200 && travelData?.locationId === 'city_pebble',

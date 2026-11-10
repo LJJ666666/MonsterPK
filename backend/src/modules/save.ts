@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { validateSaveData } from '../lib/saveValidator';
 import { decideSaveAction } from '../lib/antiCheat';
+import { readBadgeIds } from './playerProgress';
+import { isLocationUnlocked, requiredBadgeFor } from '../game/mapLock';
 import { clampSaveTimestamps } from '../lib/serverClock';
 import { banAccount, BAN_CODE } from '../lib/account';
 import {
@@ -160,6 +162,26 @@ export async function saveRoutes(fastify: FastifyInstance) {
       req.log.info({ userId, kind: 'save_clock_clamped', adjusted: clamp.adjusted }, '客户端时间戳已钳制为服务端时间（改系统时间不生效，不封号）');
     }
     const dataToStore = clamp.data;
+
+    // F18-a 地图锁：整包 PUT 不得伪造 locationId 跳关（服务端权威解锁）。
+    // 已解锁集合基于服务端 BadgeGrant 真值派生；新号恒为 town_starter（已解锁）。
+    // 管理员测试档由 action.adminOverride 放行（见下方分支），此处不拦。
+    if (!isAdmin) {
+      let loc = '';
+      try { loc = (JSON.parse(dataToStore) as any)?.locationId ?? ''; } catch { /* 下游 JSON 校验会拦 */ }
+      if (loc) {
+        const badgeIds = await readBadgeIds(userId);
+        if (!isLocationUnlocked(loc, badgeIds)) {
+          return reply.code(400).send({
+            error: '该地区尚未解锁，无法前往',
+            code: 'LOCATION_LOCKED',
+            locationId: loc,
+            requiredBadge: requiredBadgeFor(loc),
+          });
+        }
+      }
+    }
+
     const actual = digestOf(dataToStore);
 
     const rec = await prisma.save.findUnique({ where: { userId } });

@@ -529,6 +529,21 @@ checks = [
      and "F17 单档化已实现并偿还" in memory_text
      and "F17 单档化" in log_text and "## 39." in bug_text),
     ("bug_log 含 §39 F17 踩坑", "## 39." in bug_text and "admin.ts" in bug_text),
+    # ——— F18-a 地图锁 ———
+    ("规范含 §33 F18 契约", "## 33." in spec_text and "LOCATION_LOCKED" in spec_text and "mapLock" in spec_text),
+    ("F18-a 双点闸门：game.ts+save.ts LOCATION_LOCKED + mapLock.ts 存在",
+     "LOCATION_LOCKED" in text(ROOT / "backend" / "src" / "modules" / "game.ts")
+     and "LOCATION_LOCKED" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
+     and (ROOT / "backend" / "src" / "game" / "mapLock.ts").exists()),
+    ("F18-a E2E 接入 verify 两处且清理前缀含 f18_",
+     verify_text.count("e2e:f18a") >= 2 and '"e2e:f18a"' in pkg_text
+     and "f18_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")
+     and (ROOT / "backend" / "tests" / "e2e_f18a.mjs").exists()),
+    ("F18 进度：台账/任务表/HANDOFF/MEMORY/bug_log",
+     "F18-a 地图锁 ✅ 已偿还" in future_text
+     and "F18-a 地图锁已实现并偿还" in task_text
+     and "F18-b" in handoff_text and "F18-a" in memory_text and "## 40." in bug_text),
+    ("bug_log 含 §40 F18-a 收官", "## 40." in bug_text and "LOCATION_LOCKED" in bug_text),
 ]
 
 for name, ok, *detail in checks:

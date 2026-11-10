@@ -13,6 +13,7 @@ import { prisma } from '../lib/prisma';
 import { LOCATIONS } from '../game/content';
 import { BADGE_BY_ID, ACHIEVEMENT_BY_ID, badgeIdForWildArea } from '../game/badges';
 import { buildPlayerProgress, allBadgeViews, type PlayerProgressView } from '../game/playerLevel';
+import { unlockedLocations } from '../game/mapLock';
 
 export const PROGRESS_INPUT_FORBIDDEN_CODE = 'PROGRESS_INPUT_FORBIDDEN';
 
@@ -121,9 +122,11 @@ export async function playerProgressRoutes(fastify: FastifyInstance): Promise<vo
     }
     const userId = (req.user as any)?.userId as string | undefined;
     if (!userId) return reply.code(401).send({ error: '未登录或登录已过期' });
+    const badgeIds = await readBadgeIds(userId);
     const progress = await readProgress(userId);
     const owned = new Set(progress.badges.map((b) => b.id));
     const catalog = allBadgeViews().map((b) => ({ ...b, owned: owned.has(b.id) }));
-    return { ok: true, readonly: true, progress, catalog };
+    const unlockedLocationsList = [...unlockedLocations(badgeIds)];
+    return { ok: true, readonly: true, progress, catalog, unlockedLocations: unlockedLocationsList };
   });
 }

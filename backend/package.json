@@ -37,6 +37,7 @@
     "e2e:f17": "node tests/e2e_f17.mjs",
     "e2e:f18a": "node tests/e2e_f18a.mjs",
     "e2e:f18b": "node tests/e2e_f18b.mjs",
+    "e2e:f18c": "node tests/e2e_f18c.mjs",
     "e2e:f04": "node tests/e2e_f04.mjs"
   },
   "dependencies": {

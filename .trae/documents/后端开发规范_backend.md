@@ -2097,10 +2097,30 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   `--virtual-time-budget` flake，重跑即过）。
 - **债务**：演武堂贺词仍为 F18-d 占位文案；真剧情补全只改 `story.ts` 内容表，不动触发器/弹窗。
 
-### 33.4 F18-c 地图 Boss（待开工）
+### 33.4 F18-c 地图 Boss（2026-11-10 已实现收官）
 
-- Boss 按区域归属 + `unlockAreaId` 判定；与 §25 / §30 的 Boss 讨伐 / 共斗结算纪律保持一致，
-  不发奖励、禁捕获、逃跑不上榜等口径延续。
+- **产品口径（杰哥 2026-11-10 拍板）**：地图 Boss **不上任何排行榜**；胜利只给「更好的资源」
+  （稀有材料 / 特殊道具掉落）。与 P4-2c 每日 Boss（带伤害榜 + F14 双档奖励）**完全独立**，不共享任何链路
+  （榜单 / 奖励 / 次数表 / 战斗态标记都分表分字段）。
+- **解锁门槛**：每城一座地图首领，`locationId` 必须已在 `unlockedLocations`（F18-a 持上一城徽章派生）；
+  未解锁 → 403 `MAPBOSS_LOCKED`；未知 id → 400 `MAPBOSS_UNKNOWN`。
+- **每日次数**：账号 + 自然日上限（`game/mapBosses.ts` 内容表 `dailyLimit`，env `MAPBOSS_DAILY_LIMIT`
+  只能下调）；真值记 `BossDamageEvent`（bossId=mapBossId）行数，内存 `bossQuota` 只记在途 hold，
+  进程重启不重置次数（与 §25 同范式，零迁移、不动 `SCHEMA_VERSION`/`EXPECTED_SAVE_VERSION`）；
+  用满 → 429 `MAPBOSS_QUOTA_EXHAUSTED`。
+- **战斗与结算**：复用 `/api/battle/*` 同一套状态机，`BattleState.mapBossId` 标记（`game/battle.ts`）：
+  捕获拦截 `MAPBOSS_UNCATCHABLE`；`finish()` 抑制常规经验/金钱（与 boss 同口径，避免成刷钱口子）；
+  结算在 `modules/battle.ts::settleMapBossRun` 按 `mapBossId` 分流：`fled` → 释放 hold 不插事件不计数不发放；
+  否则插 `BossDamageEvent`（计次数）+ 提交 hold + `enemy_fainted` 经 `applyPlayReward` 发掉落
+  （复用 `bossRewardGrant` 唯一键 `mapboss:run:${battleId}` 幂等，`readSave→applyPlayReward→authority.expected
+  同步→commitState` 写档顺序与 F02/F14 一致，不可颠倒）。
+- **前端**：`MapBossModal` 列 7 首领（王牌名/Lv/每日余量/掉落预览/解锁态，顶部提示「不上排行榜、每日有次数上限」）；
+  `Camp.tsx` 顶部「地图首领」入口；`Arena.tsx` 据 `battle.mapBossId` 显「首领」标题、禁捕获道具、再战文案「再战首领」。
+- **drop 暂定方案**：杰哥「先支撑，后续想到再补充」；数值只改 `game/mapBosses.ts` 内容表，不动协议/存档/前端。
+- **实现记录（2026-11-10）**：`game/mapBosses.ts`（内容表+纯逻辑） + `modules/mapBoss.ts`（开局/概览/掉落/结算/路由）
+  + 战斗态接入（`BattleState.mapBossId`、`createBattle` 敌方/主题/次数键分支、`finish()` 抑常规奖励）
+  + 前端入口；`e2e_f18c` **30/30**、`verify` 全绿（`VERIFY_OK`）。
+- **债务**：① drop 数值为暂定（杰哥待补）；② 首领强度仅 HP 倍率抬血、未调攻击，数值待平衡。
 
 ### 33.5 F18-d 剧情（2026-11-10 骨架已实现）
 

@@ -27,7 +27,7 @@ function resultText(r: string | undefined) {
 
 export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
-  const { save, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, resumeBattle } = useGameStore();
+  const { save, battle, useMove, useItem, switchTo, flee, leaveBattle, startEncounter, startBossBattle, startMapBossBattle, resumeBattle } = useGameStore();
   // F18-b：胜馆主后跨页触发演武堂贺词（getGymClearBeat）；StoryModal 在本页就地渲染。
   const { activeBeat, dismiss, fire } = useStoryTriggers();
   const [panel, setPanel] = useState<"moves" | "items" | "switch">("moves");
@@ -223,9 +223,9 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
         </div>
         <div className="mt-1 text-xs text-[color:var(--muted)]">
           回合 {battle.turn} · {battle.theme.toUpperCase()}
-          {battle.bossId && (
+          {(battle.bossId || battle.mapBossId) && (
             <span className="ml-2 text-[color:var(--accent)]">
-              讨伐 · 本场伤害 {battle.damageDealt ?? 0}
+              {battle.bossId ? "讨伐" : "首领"} · 本场伤害 {battle.damageDealt ?? 0}
             </span>
           )}
           {battle.serverId ? (
@@ -347,7 +347,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       <PixelButton
                         key={x.id}
                         tone={x.spec.kind === "capture" ? "primary" : "muted"}
-                        disabled={battle.finished || battle.pending || x.qty <= 0}
+                        disabled={battle.finished || battle.pending || x.qty <= 0 || !!(x.spec.kind === "capture" && (battle.bossId || battle.mapBossId))}
                         onClick={() => useItem(x.id)}
                       >
                         {x.spec.name} <span className="ml-1 text-xs opacity-70">x{x.qty}</span>
@@ -403,16 +403,18 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       tone="primary"
                       onClick={async () => {
                         setStartError(null);
-                        // 讨伐战要回到同一条 Boss 链路：用普通开局会把 Boss 名当成区域名，
-                        // 结果变成一场野生遭遇（theme 也还是 Boss 的主题）。
+                        // 讨伐 / 地图首领要回到同一条链路：用普通开局会把首领名当成区域名，
+                        // 结果变成一场野生遭遇（theme 也还是首领的主题）。
                         const res = battle.bossId
                           ? await startBossBattle(battle.bossId)
-                          : await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
+                          : battle.mapBossId
+                            ? await startMapBossBattle(battle.mapBossId)
+                            : await startEncounter(battle.theme, battle.areaName, battle.levelMin, battle.levelMax, battle.areaId);
                         if (res.ok) setPanel("moves");
                         else setStartError((res as { reason?: string }).reason ?? "无法开始战斗");
                       }}
                     >
-                      {battle.bossId ? "再次讨伐" : "继续探索"}
+                      {battle.bossId ? "再次讨伐" : battle.mapBossId ? "再战首领" : "继续探索"}
                     </PixelButton>
                     {startError ? (
                       <div className="w-full text-xs text-[color:var(--danger)]">{startError}</div>

@@ -141,6 +141,7 @@ type GameState = {
    * 前端拿到的只是一份战斗视图（和 Boss 讨伐同一套渲染与动作入口）。
    */
   startGymBattle: (locationId: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  startMapBossBattle: (mapBossId: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   useMove: (moveId: MoveId) => Promise<void>;
   useItem: (itemId: ItemId) => Promise<void>;
   switchTo: (partyIndex: number) => void;
@@ -381,6 +382,30 @@ export const useGameStore = create<GameState>()(
         try {
           // 只传 locationId：王牌 / 等级 / 馆主休息冷却全由服务端决定。
           const res = await api.gymStart({ locationId });
+          if (!res?.battle) {
+            throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
+          }
+          set({ battle: toBattleState(res.battle as ServerBattleView) } as any);
+          return { ok: true };
+        } catch (e) {
+          const f = toFailure(e);
+          return {
+            ok: false,
+            reason: f.transient
+              ? "网络中断，战斗需要连接服务端。请检查网络后重试。"
+              : f.message,
+          };
+        }
+      },
+
+      startMapBossBattle: async (mapBossId) => {
+        const state = get();
+        const save = state.save;
+        if (!save) return { ok: false, reason: "请先创建或导入存档" };
+        if (!canUseServerBattle()) return { ok: false, reason: "尚未登录，战斗需要连接服务端" };
+        try {
+          // 只传 mapBossId：王牌 / 等级 / 次数 / 解锁全由服务端决定。
+          const res = await api.mapBossStart({ mapBossId });
           if (!res?.battle) {
             throw Object.assign(new Error("服务端没有返回战斗"), { code: "BATTLE_VIEW_MISSING" });
           }

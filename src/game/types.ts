@@ -307,6 +307,8 @@ export type BattleState = {
   bossId?: string;
   /** F18-b 演武堂挑战标识（禁止捕获、胜利发徽章）。展示用，客户端不据其判定。 */
   gymId?: string;
+  /** F18-c 地图首领标识（禁止捕获、胜利发掉落、不上榜）。展示用，客户端不据其判定。 */
+  mapBossId?: string;
   bossName?: string;
   /** 本场对 Boss 造成的累计伤害（服务端累计后下发，客户端只渲染）。 */
   damageDealt?: number;

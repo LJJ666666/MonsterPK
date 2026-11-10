@@ -18,6 +18,7 @@ import PvpModal from "@/components/PvpModal";
 import CoopModal from "@/components/CoopModal";
 import StoryModal from "@/components/StoryModal";
 import GymModal from "@/components/GymModal";
+import MapBossModal from "@/components/MapBossModal";
 import { useStoryTriggers } from "@/lib/story";
 
 import { MonsterName } from "@/components/MonsterName";
@@ -141,7 +142,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   // 测试菜单仅管理员可见（服务端判定）。普通账号即使改前端也只是看到按钮，
   // 真正写入异常存档仍会被后端风控封号。
   const isAdmin = useIsAdmin();
-  const { save, startEncounter, startBossBattle, startGymBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
+  const { save, startEncounter, startBossBattle, startGymBattle, startMapBossBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
   const [selected, setSelected] = useState<number | null>(null);
   const [boxSelected, setBoxSelected] = useState<number | null>(null);
@@ -160,6 +161,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [showPvp, setShowPvp] = useState(false);
   const [showCoop, setShowCoop] = useState(false);
   const [showGym, setShowGym] = useState(false);
+  const [showMapBoss, setShowMapBoss] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
 
   // F18-d 剧情薄触发器：监听 locationId 变化自动播放到达 intro；
@@ -1127,6 +1129,9 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             <button className="text-[color:var(--accent)] underline" onClick={() => setShowGym(true)}>
               演武堂
             </button>
+            <button className="text-[color:var(--accent)] underline" onClick={() => setShowMapBoss(true)}>
+              地图首领
+            </button>
             <button className="text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
               榜单
             </button>
@@ -1167,6 +1172,21 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             const res = await startGymBattle(locationId);
             if (res.ok) {
               setShowGym(false);
+              navigate("/arena");
+            }
+            return res;
+          }}
+        />
+      )}
+
+      {showMapBoss && (
+        <MapBossModal
+          onClose={() => setShowMapBoss(false)}
+          onFight={async (mapBossId) => {
+            // 开局成功才关弹窗并跳到战斗界面；失败（区域未解锁 / 次数用完 / 队伍全灭）留在原地看原因。
+            const res = await startMapBossBattle(mapBossId);
+            if (res.ok) {
+              setShowMapBoss(false);
               navigate("/arena");
             }
             return res;

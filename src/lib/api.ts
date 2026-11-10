@@ -189,6 +189,13 @@ export const api = {
   /** 只读概览：7 座演武堂的馆主 / 王牌 / 我的徽章归属 / 冷却到期时间。 */
   gymOverview: () => request("/api/gym/overview"),
 
+  // ───────────────────── F18-c 地图首领（解锁靠持上一城徽章；胜利发掉落，不上榜）─────────────────────
+  /** 只读总览：每座地图首领的解锁态 / 每日余量 / 掉落预览。 */
+  mapBossList: () => request("/api/mapboss"),
+  /** 开一场地图首领挑战：只传 mapBossId，王牌 / 等级 / 次数全在服务端。 */
+  mapBossStart: (body: { mapBossId: string }) =>
+    request("/api/mapboss/start", { method: "POST", body: JSON.stringify(body) }),
+
   // ───────────────────── P4-2d 玩家对战 1v1（双方意图由服务端裁决）─────────────────────
   /** 房主创建 1v1 房间：队伍 / 胜负 / HP 全在服务端。 */
   pvpCreate: () =>

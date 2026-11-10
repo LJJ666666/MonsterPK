@@ -21,6 +21,7 @@ import {
   type Rng,
 } from './rules.js';
 import { createBossEnemy, type BossSpec } from './boss.js';
+import { createMapBossEnemy, type MapBossSpec } from './mapBosses.js';
 import { expGrantAllowed } from './playerLevel.js';
 
 export type BattleResult = 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted';
@@ -67,6 +68,8 @@ export type BattleState = {
   bossName?: string | null;
   /** F18-b 演武堂挑战：有值即为演武堂战；禁止捕获；胜利经 `grantBadge` 发 `gym:<locationId>` 徽章。 */
   gymId?: string | null;
+  /** F18-c 地图首领：有值即为地图首领战；禁止捕获；胜利经 `applyPlayReward` 发掉落（不上榜）。 */
+  mapBossId?: string | null;
   /** 开局时占用的次数键（含日期与账号）。结算/放弃时用它精确释放，跨午夜也不会漏。 */
   bossQuotaKey?: string | null;
   /** 本场对敌方造成的累计伤害（服务端按敌方 HP 差累计，客户端上报无效）。 */
@@ -161,6 +164,11 @@ export function createBattle(params: {
    * 敌方由 `createInstance(aceSpeciesId, aceLevel)` 生成，`areaName` 以馆主为准。
    */
   gym?: { locationId: string; specId: string; level: number };
+  /**
+   * F18-c：地图首领。给了 mapBoss 就走固定王牌（不随机、不记 areaId），
+   * 敌方由 `createMapBossEnemy(spec)` 生成，`areaName` 以首领为准。
+   */
+  mapBoss?: { spec: MapBossSpec; quotaKey?: string };
   /** F04：由 modules 层读 PlayerProgress 后注入，绝不采信客户端入参。 */
   levelCap?: number | null;
 }): BattleState {
@@ -174,24 +182,26 @@ export function createBattle(params: {
   const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, 60);
   const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, 60);
   const level = levelMin + Math.floor(rng() * (levelMax - levelMin + 1));
-  const { enemy, label } = params.gym
-    ? { enemy: createInstance(params.gym.specId, params.gym.level, rng), label: '演武堂馆主' }
-    : params.boss
-      ? { enemy: createBossEnemy(params.boss.spec, rng), label: params.boss.spec.name }
-      : params.wild
-        ? {
-            enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
-            label: params.wild.label,
-          }
-        : generateEncounter(params.theme, level, rng, params.themes);
+  const { enemy, label } = params.mapBoss
+    ? { enemy: createMapBossEnemy(params.mapBoss.spec, rng), label: params.mapBoss.spec.name }
+    : params.gym
+      ? { enemy: createInstance(params.gym.specId, params.gym.level, rng), label: '演武堂馆主' }
+      : params.boss
+        ? { enemy: createBossEnemy(params.boss.spec, rng), label: params.boss.spec.name }
+        : params.wild
+          ? {
+              enemy: createInstance(params.wild.speciesId, params.wild.level, rng),
+              label: params.wild.label,
+            }
+          : generateEncounter(params.theme, level, rng, params.themes);
 
   const party = params.party.map((m) => ({ ...m }));
   return {
     id: params.id,
     userId: params.userId,
-    theme: params.boss ? params.boss.spec.theme : params.theme,
-    areaName: params.boss ? params.boss.spec.name : params.areaName,
-    areaId: params.gym ? null : (params.boss ? null : (params.areaId ?? null)),
+    theme: params.mapBoss ? params.mapBoss.spec.theme : (params.boss ? params.boss.spec.theme : params.theme),
+    areaName: params.mapBoss ? params.mapBoss.spec.name : (params.boss ? params.boss.spec.name : params.areaName),
+    areaId: (params.gym || params.mapBoss || params.boss) ? null : (params.areaId ?? null),
     levelMin,
     levelMax,
     turn: 1,
@@ -214,9 +224,11 @@ export function createBattle(params: {
     wildId: params.wild?.wildId ?? null,
     bossId: params.boss?.spec.bossId ?? null,
     bossName: params.boss?.spec.name ?? null,
-    bossQuotaKey: params.boss?.quotaKey ?? null,
+    // F18-c：地图首领的次数键同样要落到战斗态，结算/逃跑时才能精确释放在途名额。
+    bossQuotaKey: params.boss?.quotaKey ?? params.mapBoss?.quotaKey ?? null,
     damageDealt: 0,
     gymId: params.gym?.locationId ?? null,
+    mapBossId: params.mapBoss?.spec.mapBossId ?? null,
   };
 }
 
@@ -306,6 +318,15 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
       const bossName = MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId;
       s.rewards = null;
       pushLog(s, [`${bossName} 倒下了。`, '讨伐完成，本次伤害已记入伤害榜。']);
+      return s;
+    }
+    // F18-c：地图首领是独立玩法层（与 boss 同口径，不上榜），胜利只发「掉落」
+    // （见 modules/mapBoss.ts 的 grantMapBossDrop）。不发常规战斗经验 / 金钱，
+    // 否则它会成为隐形的刷钱 / 刷经验口子，与「只是能获取更好的资源」的定位相悖。
+    if (s.mapBossId) {
+      const bossName = MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId;
+      s.rewards = null;
+      pushLog(s, [`${bossName} 倒下了。`, '首领讨伐完成，获得的资源已记入背包。']);
       return s;
     }
     const { expGain, moneyGain, hasExpShare } = computeRewards(s.enemy.level, inventory);
@@ -398,6 +419,7 @@ function applyBattleActionInner(
 
     if (action.type === 'capture' || item.kind === 'capture') {
       if (s.bossId) throw new BattleError('BOSS_UNCATCHABLE', '讨伐目标无法捕获');
+      if (s.mapBossId) throw new BattleError('MAPBOSS_UNCATCHABLE', '地图首领无法捕获');
       if (s.gymId) throw new BattleError('GYM_UNCATCHABLE', '演武堂馆主无法捕获');
       if (item.kind !== 'capture') throw new BattleError('ITEM_NOT_CAPTURE', '该道具不能用于捕获');
       consumeItem(s, itemId, inventory);
@@ -677,6 +699,7 @@ export function battleView(s: BattleState) {
     bossName: s.bossName ?? null,
     damageDealt: s.damageDealt ?? 0,
     gymId: s.gymId ?? null,
+    mapBossId: s.mapBossId ?? null,
   };
 }
 

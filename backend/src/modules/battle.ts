@@ -34,6 +34,8 @@ import { broadcastToUser, battles, wilds, bossQuota } from './sessionBus';
 import { publishWild, resolveAreaSpec } from './wild';
 // F04：宠物等级帽由服务端进度真值注入；常规战斗首通野区幂等发对应徽章（§31.9）。
 import { readProgress, grantBadgeForAreaClear, grantBadge, grantAchievement } from './playerProgress';
+// F18-c：地图首领结算分流（胜利发掉落 / 逃跑不发奖，不上榜）。
+import { settleMapBossRun } from './mapBoss';
 import type { WildAreaSpec, WildInstance } from '../lib/wildRegistry';
 
 const startSchema = z.object({
@@ -248,10 +250,10 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     if (!THEME_TABLE[theme]) return reply.code(400).send({ error: '该区域没有可遭遇的幻兽' });
 
     // P4-2c：Boss 战未结束时不允许用它顶掉 —— 否则这次「在途次数」会一直挂到 TTL。
-    // 普通战斗之间仍然允许覆盖（历史行为，E2E 依赖），只拦 Boss。
+    // 普通战斗之间仍然允许覆盖（历史行为，E2E 依赖），只拦 Boss / 地图首领。
     const existing = battles.current(userId);
-    if (existing?.bossId) {
-      return reply.code(409).send({ error: '讨伐尚未结束，请先完成或放弃', code: 'BOSS_IN_PROGRESS' });
+    if (existing?.bossId || existing?.mapBossId) {
+      return reply.code(409).send({ error: '战斗尚未结束，请先完成或放弃', code: 'BOSS_IN_PROGRESS' });
     }
 
     const row = await readSave(userId);
@@ -469,6 +471,19 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
             revision: committed.revision,
             settled: true,
             gym,
+          };
+        }
+
+        // F18-c：地图首领分流。mapBoss 与 boss / gym 互斥（都清了 areaId），独立 if。
+        // 胜利发掉落、逃跑不发奖；不上任何榜单。
+        if (next.mapBossId) {
+          const mb = await settleMapBossRun(req, userId, next);
+          return {
+            ok: true,
+            battle: battleView(next),
+            revision: committed.revision,
+            settled: true,
+            mapBoss: mb,
           };
         }
 

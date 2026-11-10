@@ -2099,9 +2099,9 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
 
 ### 33.4 F18-c 地图 Boss（2026-11-10 已实现收官）
 
-- **产品口径（杰哥 2026-11-10 拍板）**：地图 Boss **不上任何排行榜**；胜利只给「更好的资源」
-  （稀有材料 / 特殊道具掉落）。与 P4-2c 每日 Boss（带伤害榜 + F14 双档奖励）**完全独立**，不共享任何链路
-  （榜单 / 奖励 / 次数表 / 战斗态标记都分表分字段）。
+- **产品口径（杰哥 2026-11-10 拍板，2026-11-10 修订）**：地图 Boss **不上任何排行榜**；胜利给「更好的资源」
+  （稀有材料 / 特殊道具掉落）**外加** 3 倍经验 / 5 倍金钱（比普通野怪多，限次数故更慷慨）。与 P4-2c 每日 Boss
+  （带伤害榜 + F14 双档奖励）**完全独立**，不共享任何链路（榜单 / 奖励 / 次数表 / 战斗态标记都分表分字段）。
 - **解锁门槛**：每城一座地图首领，`locationId` 必须已在 `unlockedLocations`（F18-a 持上一城徽章派生）；
   未解锁 → 403 `MAPBOSS_LOCKED`；未知 id → 400 `MAPBOSS_UNKNOWN`。
 - **每日次数**：账号 + 自然日上限（`game/mapBosses.ts` 内容表 `dailyLimit`，env `MAPBOSS_DAILY_LIMIT`
@@ -2109,17 +2109,18 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   进程重启不重置次数（与 §25 同范式，零迁移、不动 `SCHEMA_VERSION`/`EXPECTED_SAVE_VERSION`）；
   用满 → 429 `MAPBOSS_QUOTA_EXHAUSTED`。
 - **战斗与结算**：复用 `/api/battle/*` 同一套状态机，`BattleState.mapBossId` 标记（`game/battle.ts`）：
-  捕获拦截 `MAPBOSS_UNCATCHABLE`；`finish()` 抑制常规经验/金钱（与 boss 同口径，避免成刷钱口子）；
-  结算在 `modules/battle.ts::settleMapBossRun` 按 `mapBossId` 分流：`fled` → 释放 hold 不插事件不计数不发放；
+  捕获拦截 `MAPBOSS_UNCATCHABLE`；`finish()` 对地图首领按 3×经验/5×金钱给 `s.party`+`s.rewards`
+  （`expGain=3*(10+lv*6)`、`moneyGain=5*((50+lv*10)*(amulet?2:1))`，与野怪同公式、走 `applySettlementToSave`
+  落库）；结算在 `modules/battle.ts::settleMapBossRun` 按 `mapBossId` 分流：`fled` → 释放 hold 不插事件不计数不发放；
   否则插 `BossDamageEvent`（计次数）+ 提交 hold + `enemy_fainted` 经 `applyPlayReward` 发掉落
   （复用 `bossRewardGrant` 唯一键 `mapboss:run:${battleId}` 幂等，`readSave→applyPlayReward→authority.expected
-  同步→commitState` 写档顺序与 F02/F14 一致，不可颠倒）。
+  同步→commitState` 写档顺序与 F02/F14 一致，不可颠倒）。两者叠加，均经服务端结算。
 - **前端**：`MapBossModal` 列 7 首领（王牌名/Lv/每日余量/掉落预览/解锁态，顶部提示「不上排行榜、每日有次数上限」）；
   `Camp.tsx` 顶部「地图首领」入口；`Arena.tsx` 据 `battle.mapBossId` 显「首领」标题、禁捕获道具、再战文案「再战首领」。
 - **drop 暂定方案**：杰哥「先支撑，后续想到再补充」；数值只改 `game/mapBosses.ts` 内容表，不动协议/存档/前端。
-- **实现记录（2026-11-10）**：`game/mapBosses.ts`（内容表+纯逻辑） + `modules/mapBoss.ts`（开局/概览/掉落/结算/路由）
-  + 战斗态接入（`BattleState.mapBossId`、`createBattle` 敌方/主题/次数键分支、`finish()` 抑常规奖励）
-  + 前端入口；`e2e_f18c` **30/30**、`verify` 全绿（`VERIFY_OK`）。
+- **实现记录（2026-11-10，2026-11-10 修订奖励）**：`game/mapBosses.ts`（内容表+纯逻辑） + `modules/mapBoss.ts`（开局/概览/掉落/结算/路由）
+  + 战斗态接入（`BattleState.mapBossId`、`createBattle` 敌方/主题/次数键分支、`finish()` 给 3×经验/5×金钱）
+  + 前端入口；`e2e_f18c` **33/33**、`verify` 全绿（`VERIFY_OK`）。
 - **债务**：① drop 数值为暂定（杰哥待补）；② 首领强度仅 HP 倍率抬血、未调攻击，数值待平衡。
 
 ### 33.5 F18-d 剧情（2026-11-10 骨架已实现）

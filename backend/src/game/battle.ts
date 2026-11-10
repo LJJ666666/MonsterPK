@@ -320,13 +320,38 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
       pushLog(s, [`${bossName} 倒下了。`, '讨伐完成，本次伤害已记入伤害榜。']);
       return s;
     }
-    // F18-c：地图首领是独立玩法层（与 boss 同口径，不上榜），胜利只发「掉落」
-    // （见 modules/mapBoss.ts 的 grantMapBossDrop）。不发常规战斗经验 / 金钱，
-    // 否则它会成为隐形的刷钱 / 刷经验口子，与「只是能获取更好的资源」的定位相悖。
+    // F18-c（2026-11-10 杰哥口径）：地图首领限次数，胜利**额外**给 3 倍经验 / 5 倍金钱
+    // （比普通野怪多），掉落（稀有材料 / 道具）由 modules/mapBoss.ts 的 grantMapBossDrop 另发。
+    // 不上任何榜单；禁捕获、逃跑不上榜也不发奖。
     if (s.mapBossId) {
       const bossName = MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId;
-      s.rewards = null;
-      pushLog(s, [`${bossName} 倒下了。`, '首领讨伐完成，获得的资源已记入背包。']);
+      const base = computeRewards(s.enemy.level, inventory);
+      const expGain = base.expGain * 3;
+      const moneyGain = base.moneyGain * 5;
+      const party = s.party.map((m) => ({ ...m }));
+      // F04 §31：达到 / 超过等级帽的宠物只冻结升级（不再获得经验）。
+      const capped = s.levelCap != null;
+      let frozen = 0;
+      const grant = (m: ServerMonster) => {
+        if (capped && !expGrantAllowed(m.level, s.levelCap!)) { frozen += 1; return m; }
+        return gainExp(m, expGain).monster;
+      };
+      if (base.hasExpShare) {
+        for (let i = 0; i < party.length; i++) {
+          if (!alive(party[i])) continue;
+          party[i] = grant(party[i]);
+        }
+      } else {
+        const idx = s.playerActiveIndex;
+        if (party[idx]) party[idx] = grant(party[idx]);
+      }
+      s.party = party;
+      s.rewards = { expGain, moneyGain };
+      pushLog(s, [
+        `${bossName} 倒下了。`,
+        `获得经验 ${expGain}（3 倍），金钱 ¥${moneyGain}（5 倍）。`,
+        ...(frozen > 0 ? [`${frozen} 只伙伴已达等级帽 Lv.${s.levelCap}，本次不获得经验。`] : []),
+      ]);
       return s;
     }
     const { expGain, moneyGain, hasExpShare } = computeRewards(s.enemy.level, inventory);

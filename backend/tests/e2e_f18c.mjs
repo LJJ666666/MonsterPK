@@ -9,7 +9,8 @@
  *  - 有每日次数上限（账号 + 自然日，真值记在 BossDamageEvent 行数）；内存只记在途 hold，
  *    进程重启不重置。town_starter dailyLimit=3。
  *  - 禁捕获（MAPBOSS_UNCATCHABLE）、逃跑不上榜也不发奖（不插事件、不计数）。
- *  - 胜利只发掉落，不发常规战斗经验 / 金钱（与 boss 同口径，避免成刷钱 / 刷经验口子）。
+ *  - 胜利**额外**给 3 倍经验 / 5 倍金钱（比普通野怪多，限次数故更慷慨），掉落（稀有材料 / 道具）
+ *    由 modules/mapBoss.ts 的 grantMapBossDrop 另发；两者叠加，均经服务端结算落库。
  *
  * 运行：cd backend && npm run e2e:f18c（需要 :3001 后端在线）
  * 也可经 npm run verify 自动纳入（见 scripts/verify.mjs 的 e2e 分组）。
@@ -132,13 +133,17 @@ async function main() {
     cap.status === 400 && cap.data?.code === 'MAPBOSS_UNCATCHABLE',
     `${cap.status} ${asText(cap.data).slice(0, 160)}`);
 
-  // —— 5) 打到胜利，校验掉落（money+物品，且不含常规战斗经验/金钱）——
+  // —— 5) 打到胜利，校验掉落 + 3×经验/5×金钱（两者叠加，均落库）——
   const before = saveDataOf(await save.get(token));
   const beforeMoney = before?.money ?? 0;
+  const beforeExp = before?.party?.[0]?.exp ?? 0;
+  const enemyLv = start.data?.battle?.enemy?.level ?? 0;
   const { st, mbResult, rounds } = await playToEnd(token, battleId);
   s.check('地图首领战斗推进到结束', !!st && st.finished, `finished=${st?.finished} result=${st?.result} rounds=${rounds}`);
   s.check('胜利结果为 enemy_fainted', st?.result === 'enemy_fainted', `result=${st?.result}`);
   s.check('结算返回 mapBoss 结果', !!mbResult, asText(mbResult));
+
+  // 掉落（资源）：money=50 + 物品
   s.check('胜利发放掉落（money=50）',
     mbResult?.drop?.money === 50, `drop=${asText(mbResult?.drop)}`);
   s.check('胜利发放掉落（stone_leaf:1 / berry_sitrus:1）',
@@ -147,10 +152,24 @@ async function main() {
       mbResult.drop.items.some((i) => i.itemId === 'berry_sitrus' && i.count === 1),
     `drop=${asText(mbResult?.drop)}`);
 
+  // 3×经验 / 5×金钱：与普通野怪公式对齐（computeRewards = 10+lv*6 经验, (50+lv*10) 金钱，无幸运币）
+  const baseExp = 10 + enemyLv * 6;
+  const baseMoney = 50 + enemyLv * 10;
+  s.check('地图首领经验 = 3×普通野怪', st?.rewards?.expGain === baseExp * 3,
+    `exp=${st?.rewards?.expGain} expect=${baseExp * 3}`);
+  s.check('地图首领金钱 = 5×普通野怪', st?.rewards?.moneyGain === baseMoney * 5,
+    `money=${st?.rewards?.moneyGain} expect=${baseMoney * 5}`);
+
   const after = saveDataOf(await save.get(token));
   const afterMoney = after?.money ?? 0;
-  s.check('存档金钱精确增加 50（无常规战斗金钱）', afterMoney === beforeMoney + 50,
-    `before=${beforeMoney} after=${afterMoney}`);
+  const afterExp = after?.party?.[0]?.exp ?? 0;
+  // 总金钱增量 = 掉落(50) + 战斗奖励(5×)；经验增量 = 战斗奖励(3×)
+  s.check('存档金钱精确增加 50(掉落) + 5×战斗金钱',
+    afterMoney === beforeMoney + 50 + (st?.rewards?.moneyGain ?? 0),
+    `before=${beforeMoney} after=${afterMoney} reward=${st?.rewards?.moneyGain}`);
+  s.check('存档经验精确增加 3×战斗经验',
+    afterExp === beforeExp + (st?.rewards?.expGain ?? 0),
+    `before=${beforeExp} after=${afterExp} reward=${st?.rewards?.expGain}`);
   s.check('存档背包获得 stone_leaf ≥1', (after?.inventory?.stone_leaf ?? 0) >= 1,
     `inv=${asText(after?.inventory)}`);
   s.check('存档背包获得 berry_sitrus ≥1', (after?.inventory?.berry_sitrus ?? 0) >= 1,

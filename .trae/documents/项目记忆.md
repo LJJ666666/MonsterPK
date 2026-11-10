@@ -6,7 +6,7 @@
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
 - 进度：P0~P4-2e 全 ✅。台账 F01/F02/F12/F14/F16/F04/F17 已偿还；F15 1v1 零产出冻结；F17 单档化（`SCHEMA_VERSION` 10→11，`Save.userId @unique`）。
-- F18：a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** / d 剧情骨架 ✅（占位文案债务，政策先支撑后补）。P4-3 交易/赠送阶段冻结。
+- F18：a 地图锁 ✅ / b 演武堂 ✅ / **c 地图首领 ✅（2026-11-10：独立层、不上榜、胜发掉落+3×经验/5×金钱、每日上限 `BossDamageEvent` 计真值、禁捕获 `MAPBOSS_UNCATCHABLE`、逃跑不发奖）** / d 剧情骨架 ✅（占位文案债务，政策先支撑后补）。P4-3 交易/赠送阶段冻结。
 
 ## 2. 技术栈 / 入口 / 测试
 - React18+TS+Vite6+Tailwind3+zustand5+react-router7；路由 `/` `/camp` `/arena` `/auth`。内容唯一源 `src/game/data.ts`；全局状态 `src/stores/useGameStore.ts`（单档，`SCHEMA_VERSION`=11，migrate 1→11）；**BattleState 不进存档**。
@@ -30,7 +30,7 @@
 ## 5. 后端架构快照
 - 存档三层：`saveValidator`→`antiCheat`(`CHEAT_CODES`)→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前 400 拦整包 PUT 夹带真值。
 - P1-2 意图 nonce；P2-2 `commitState()` 唯一写入口、revision 单调。P3-1/2 服务端战斗 `game/battle.ts`+`battleSession.ts`。P4-0 PUT/意图带 `revision`（缺 400/过期 409），`slotLock` 按 `userId` 串行。P4-1 顶号+共享野怪(`WildRegistry`每区3只，`claim()`无await)。
-- P4-2a 只读派生榜；P4-2b 房间 `roomId`+`withRoomLock`；P4-2c Boss 伤害=敌方HP差+`BossDamageEvent`+F14双档；P4-2d 1v1/`pvpViewFor`+`pvpSettled`幂等；P4-2e/F16 共斗 `RoomState.coop`+`withRoomLock(roomId)`+最低贡献+每日3次；F18-b 演武堂 `settleGymRun`发 `gym:<loc>` 徽章；**F18-c 地图首领 `game/mapBosses.ts`+`modules/mapBoss.ts`+`settleMapBossRun`**。
+- P4-2a 只读派生榜；P4-2b 房间 `roomId`+`withRoomLock`；P4-2c Boss 伤害=敌方HP差+`BossDamageEvent`+F14双档；P4-2d 1v1/`pvpViewFor`+`pvpSettled`幂等；P4-2e/F16 共斗 `RoomState.coop`+`withRoomLock(roomId)`+最低贡献+每日3次；F18-b 演武堂 `settleGymRun`发 `gym:<loc>` 徽章；**F18-c 地图首领 `game/mapBosses.ts`+`modules/mapBoss.ts`+`settleMapBossRun`（`finish()` 给 3×经验/5×金钱）**。
 - 能力边界：已挡改档/伪造捕获/白嫖购买/重复领奖/改时间/测试菜单越权/WS或房间上行伪造/越权battleId/GG改内存/旧意图刷奖/CAS旧覆盖/顶号后续写/抢野怪/伪造榜/Boss/1v1/共斗字段；未挡 加速器改节奏、改本地展示态。管理员只在服务端判定。
 
 ## 6. 已修坑 / 交接（详 `.trae/documents/bug_log.md`）

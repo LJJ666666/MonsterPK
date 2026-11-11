@@ -1185,3 +1185,15 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 ### 43.6 验收
 - 聚焦 `npm run verify -- --only=e2e:content_matrix,smoke:ux,docs:doc,docs:memory` → **4/4 `VERIFY_OK`**（矩阵 47 项 + UX 26 项 + 文档 154 项 + 镜像一致，7.6s）。
 - 全量 `npm run verify -- --strict` **47/47 `VERIFY_OK`**（0 失败 / 0 跳过，158.8s）：前端 133 单测 + 后端 401 单测 + 前端构建 + **25 组 E2E**（含新增矩阵 47 项）+ **15 组 375px 冒烟**（含新增 UX 26 项）+ 文档自检 **160 项** + 记忆镜像一致；原 45 阶段零回归。
+
+## 44. P5-1 评估初稿 12 处结论被专家复核修正（2026-11-11，文档级，非代码 bug）
+
+- **触发**：杰哥拍板选型 B 并要求「按建议 + 加专家修正」六个耦合点。请三组独立后端架构专家（并发一致性/CAS、分布式状态机/存储、实时系统/可运维性）并行只读复核，三组一致判定初稿「需修正后可用」；逐条 `file:line` 抽查后固化到 `.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`，评估稿降为初稿并在头部挂 12 处勘误指针。**本轮未改任何产品代码。**
+- **最硬的一条（会直接改排期）**：`backend/prisma/migrations/migration_lock.toml:3` 锁 `provider = "sqlite"`，11 条 `migration.sql` 全是 SQLite 方言（`AUTOINCREMENT` / `DROP COLUMN` / `DATETIME`），而 `backend/prisma/schema.prisma:2` 注释却写「迁移到 Postgres 只需把 datasource.provider 改成 postgresql 并改 DATABASE_URL」——照做 `migrate deploy` 必失败。因此**不存在「第 12 条迁移」**，正确做法是归档旧链、重置 lock、生成一条 PG 基线 init，`Save.revision Int` 随 init 建列。评估稿 §5 的 1.0 与 §6 风险表「11 条→12 条」口径作废。
+- **CAS 口径**：`session.ts:112` 的 `commitState()` 是 `prisma.save.upsert` 带 create 分支（:114），409 只能由 `updateMany ... WHERE revision=?` 的 `count` 裁决，create 分支并发靠 `userId @unique` 的 P2002→409；`save.ts:124` 仍取内存基线会提前误判，条件失败还会继续 apply 内存态 + `broadcastToUser`（`session.ts:134`）。另：单调 revision 本身即天然 fence，存档写路径**不需要**额外 fencing token。
+- **quota / 状态机**：`roomRegistry.ts:36,40,47,193-211` 的 `committed` 是纯内存 Map、无 DB 事件支撑（评估稿「commit 由 DB 事件体现」覆盖是错的）；`coop.ts:96-97` 的 `coopQuotaKey` 用 `userId.slice(-8)` 会碰撞；release 分支实为 10 处而非 2 处；`room.ts:125,129,140,143` 四处 `pvpSettled/coopSettled` 只改引用不写回、`roomRegistry.ts:270` 的 `create()` 未初始化 `pvpSettled`；`RoomState` 另有 `contributions` 数字 key 反序列化变 string、optional 字段判定两处障碍。CAS 应定 PG 行版本 + 事务（Lua 跨不过 Postgres），Lua 只用于 quota INCR / wild claim。
+- **广播 / 顶号**：现有只有 `broadcastAll` + `broadcastToUser`，`broadcastToMany`（`sessionBus.ts:41`）全 src 无调用点是死代码，评估稿「四频道」映射不成立；room 频道若发全量 RoomState 会泄露 `pvp/coop` 隐藏态（`room.ts:44-48`），须只发 `roomId` + 各实例本地裁剪；`realtime.ts:185-186` 心跳只查 `bannedAt`、**不查 `sessionVersion`**，旧 WS 只要回 pong 可无限存活，评估稿「残留到心跳扫到」是错的；三种 state 已自带单调 revision（`wsProtocol.ts:117,146,171`），pub/sub 兜底直接做跳号回源，不用新造 stateVersion。
+- **定时器**：`realtime.ts:154` 心跳是「本地 + 全局」混合体（6 件事里 4 件必须全局只跑一次），不能整体各跑各的；`room.ts:97-105,392` 的 `tickRoom` 是 REST 读触发的第二推进入口，选主挡不住，须一并 CAS。
+- **验收**：`harness.mjs:24-26` 的 `BASE/WS_HOST/ORIGIN` 可用环境变量覆盖，但 `api()`/`openWs()` 共用模块级单 target，同一进程内无法把两条 WS 分连 A/B；定稿 §5 补齐 5 项改造 + 4 条故障注入 + barrier 注入的确定性单测。
+- **唯一键归属订正**：`@@unique([roomId,userId])` 属 `CoopRewardGrant`（`schema.prisma:174`），`BossRewardGrant` 只有 `grantKey @unique`（:145）。评估稿 §2 混同，已在定稿 §2.2 分开。
+- **结论**：设计定稿与 W0~W9 工单已交付；W0（接口抽象 + 单实例零行为变更）无需任何外部资源、可立即开工，W2 完成前不开第二实例。验收数字见本轮提交末尾。

@@ -584,6 +584,33 @@ checks = [
      "P5-1 / F10 共享存储迁移评估" in memory_text
      and "P5-1 / F10 共享存储迁移评估" in log_text
      and "不改任何产品代码" in log_text),
+    ("实施设计定稿含选型 B / W0~W9 / 12 处勘误",
+     "实施设计定稿" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "选型定稿：B" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "专家复核勘误（12 处" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W0" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W9" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")),
+    ("评估初稿已挂定稿取代与 12 处勘误指针",
+     "本稿已被定稿取代" in text(DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md")
+     and "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md" in text(DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md")
+     and "12 处结论" in text(DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md")),
+    ("F10 台账与 HANDOFF 均指向定稿且标注选型 B 已拍板",
+     "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md" in text(DOCS / "未来规划与技术债_2026-11-07.md")
+     and "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md" in text(ROOT / "HANDOFF.md")
+     and "选型 B" in text(ROOT / "HANDOFF.md")
+     and "W0" in text(ROOT / "HANDOFF.md")),
+    ("定稿钉住 PG 基线重置与 Redis 不存权益真值",
+     "一条 PG 基线 init" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "schema.prisma:2" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "Redis 不存任何影响玩家权益的真值" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")),
+    ("MEMORY 与日志均记实施设计定稿且未改产品代码",
+     "实施设计定稿" in memory_text
+     and "实施设计定稿" in log_text
+     and "不改任何产品代码" in log_text
+     and "W0" in memory_text),
+    ("bug_log §44 记录专家复核勘误",
+     "## 44." in bug_text
+     and "三组独立后端架构专家" in bug_text),
 ]
 
 for name, ok, *detail in checks:

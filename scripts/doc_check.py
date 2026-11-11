@@ -622,6 +622,20 @@ checks = [
     ("A6 可玩性补全文档挂台账指针",
      "F19" in text(DOCS / "游戏设计分析_可玩性补全.md")
      and "服务端权威" in text(DOCS / "游戏设计分析_可玩性补全.md")),
+    ("性能基线 §6 四项真机补测已回填",
+     all(k in text(DOCS / "性能基线_web.md") for k in
+         ("- [x] APK 冷启动到首帧", "- [x] WebView 内实际 FPS", "- [x] JS 堆峰值",
+          "- [x] 后台切回", "12/12 全绿"))
+     and (DOCS / "性能基线_adb_真机数据_2026-11-11.json").exists()
+     and "scripts/perf-adb.mjs" in text(DOCS / "性能基线_web.md")),
+    ("bug_log §45 记录构建链与补测",
+     "## 45." in bug_text
+     and "vite-plugin-trae-solo-badge" in bug_text
+     and "JDK 21" in bug_text),
+    ("生产包不再含 Trae 外链角标插件",
+     "vite-plugin-trae-solo-badge" not in root_pkg_text
+     and "traeBadgePlugin" not in text(ROOT / "vite.config.ts")
+     and "补测执行结果（2026-11-11，12/12 全绿）" in text(DOCS / "雷电模拟器_adb操作规范_2026-11-11.md")),
 ]
 
 for name, ok, *detail in checks:

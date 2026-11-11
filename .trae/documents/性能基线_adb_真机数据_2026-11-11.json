@@ -1,0 +1,138 @@
+{
+  "collectedAt": "2026-11-11T10:27:43.581Z",
+  "device": "emulator-5558",
+  "pkg": "com.monster.game",
+  "environment": {
+    "model": "25060RK16C",
+    "android": "14",
+    "sdk": "34",
+    "screen": "Physical size: 1260x2800",
+    "density": "Physical density: 560"
+  },
+  "coldStart": [
+    {
+      "run": 1,
+      "thisTime": null,
+      "totalTime": 1177,
+      "waitTime": 1192,
+      "focusOk": true,
+      "firstFrameNodes": true,
+      "raw": "Starting: Intent { cmp=com.monster.game/.MainActivity }\r | Status: ok\r | Activity: com.monster.game/.MainActivity\r | TotalTime: 1177\r | WaitTime: 1192\r"
+    },
+    {
+      "run": 2,
+      "thisTime": null,
+      "totalTime": 1145,
+      "waitTime": 1224,
+      "focusOk": true,
+      "firstFrameNodes": true,
+      "raw": "Starting: Intent { cmp=com.monster.game/.MainActivity }\r | Status: ok\r | Activity: com.monster.game/.MainActivity\r | TotalTime: 1145\r | WaitTime: 1224\r"
+    },
+    {
+      "run": 3,
+      "thisTime": null,
+      "totalTime": 1130,
+      "waitTime": 1201,
+      "focusOk": true,
+      "firstFrameNodes": true,
+      "raw": "Starting: Intent { cmp=com.monster.game/.MainActivity }\r | Status: ok\r | Activity: com.monster.game/.MainActivity\r | TotalTime: 1130\r | WaitTime: 1201\r"
+    }
+  ],
+  "gfx": {
+    "idleFrames": 0,
+    "sampleWindow": "冷启动渲染窗口（force-stop → am start -W → 3s）",
+    "windowStartTotalTime": 1163,
+    "focusOkAfterWindow": true,
+    "framesRendered": 35,
+    "jankyFrames": 3,
+    "jankyPercent": 8.57,
+    "percentile50": 5,
+    "percentile90": 125,
+    "percentile95": 450,
+    "percentile99": 450,
+    "missedVsync": 3,
+    "slowUI": 2,
+    "rawTail": "0,867573,9229668874836,9229668874836,0,9229669037865,9229669050386,9229669068481,9229669230509,9229684541502,9229669024274,8411202,9229669737659,9229669822653,9229669851397,9229671829807,9229672222568,11399,91227,9229671829807,9229672222568,-1,9229671829807,\r\n0,867581,9229677286038,9229677286038,0,9229678153541,9229678168350,9229678188380,9229678328273,9229692952704,9229678138100,8411202,9229678835266,9229678934736,9229678967704,9229680970122,9229681400867,11430,107361,9229680970122,9229681400867,-1,9229680970122,\r\n0,867589,9229685697240,9229685697240,0,9229686175956,9229686189007,9229686207233,9229686407452,9229701363906,9229686157571,8411202,9229687124689,9229687204447,9229687242949,9229689490500,9229689984336,11049,116148,9229689490500,9229689984336,-1,9229689490500,\r\n0,867597,9229694108442,9229694108442,0,9229694475148,9229694487849,9229694505494,9229694627107,9229709775108,9229694462607,8411202,9229695167695,9229695247810,9229695276915,9229697107688,9229697483807,10629,85862,9229697107688,9229697483807,-1,9229697107688,\r\n0,867605,9229702519644,9229702519644,0,9229702699063,9229702711804,9229702729659,9229702855155,9229718186310,9229702684991,8411202,9229703361834,9229703448883,9229703478118,9229705336466,9229705702806,10288,84242,9229705336466,9229705702806,-1,9229705336466,\r\n0,867613,9229710930846,9229710930846,0,9229711283443,9229711296083,9229711314059,9229711446682,9229726597512,9229711269661,8411202,9229711987940,9229712060937,9229712090231,9229713558167,9229713954861,11460,90877,9229713558167,9229713954861,-1,9229713558167,\r\n0,867621,9229719342048,9229719342048,0,9229719993051,9229720005461,9229720023166,9229720146580,9229735008714,9229719979309,8411202,9229720657159,9229720757617,9229720788714,9229722584261,9229722973181,10489,87273,9229722584261,9229722973181,-1,9229722584261,\r\n0,867629,9229727753250,9229727753250,0,9229728130301,9229728142802,9229728160677,9229728285222,9229743419916,9229728116560,8411202,9229728783559,9229728904621,9229728935278,9229730848117,9229731242501,10750,85883,9229730848117,9229731242501,-1,9229730848117,\r\n0,867637,9229736164452,9229736164452,0,9229736543918,9229736556719,9229736574864,9229736700770,9229751831118,9229736530076,8411202,9229737222722,9229737296217,9229737327083,9229739642054,9229740020045,11369,86433,9229739642054,9229740020045,-1,9229739642054,\r\n0,867645,9229744575654,9229744575654,0,9229744642410,9229744655291,9229744673016,9229744791246,9229760242320,9229744629369,8411202,9229745277468,9229745372943,9229745404340,9229747229733,9229747600776,10519,83501,9229747229733,9229747600776,-1,9229747229733,\r\n0,867653,9229752986856,9229752986856,0,9229754105692,9229754118012,9229754136168,9229754264786,9229768653522,9229754090379,8411202,9229754793574,9229754890499,9229754921565,9229756710385,9229757097783,10268,88416,9229756710385,9229757097783,-1,9229756710385,\r\n0,867661,9229761398058,9229761398058,0,9229762108457,9229762125397,9229762146461,9229762302131,9229777064724,9229762087910,8411202,9229762837030,9229762904697,9229762935173,9229764990492,9229765393110,10749,90446,9229764990492,9229765393110,-1,9229764990492,\r\n0,867669,9229769809260,9229769809260,0,9229770176956,9229770190238,9229770208584,9229770334260,9229785475926,9229770162895,8411202,9229770827587,9229770938495,9229770967970,9229772867430,9229773244129,10589,84141,9229772867430,9229773244129,0,9229772867430,\r\n0,867677,9229778161232,9229778161232,0,9229778320326,9229778332887,9229778351072,9229778473457,9229793887128,9229778306975,8411202,9229778996391,9229779154536,9229779209054,9229781162275,9229781564067,11440,90457,9229781162275,9229781564067,0,9229781162275,\r\n0,867685,9229786631664,9229786631664,0,9229788203351,9229788215681,9229788233316,9229788364638,9229802298330,9229788189549,8411202,9229788860892,9229788966866,9229788995190,9229790843401,9229791218929,10278,85052,9229790843401,9229791218929,0,9229790843401,\r\n0,867693,9229795042866,9229795042866,0,9229796227999,9229796246114,9229796264780,9229796439008,9229810709532,9229796210084,8411202,9229796751872,9229796824333,9229796858752,9229799340037,9229799790371,11049,100927,9229799340037,9229799790371,0,9229799340037,\r\n---PROFILEDATA---\r\n\r\n\r\nView hierarchy:\r\n\r\n  com.monster.game/com.monster.game.MainActivity/android.view.ViewRootImpl@fbce0c\r\n  10 views, 18.60 kB of render nodes\r\n\r\n\r\nTotal ViewRootImpl   : 1\r\nTotal attached Views : 10\r\nTotal RenderNode     : 18.60 kB (used) / 58.55 kB (capacity)",
+    "sample": "Applications Graphics Acceleration Info:\r\nUptime: 9231595 Realtime: 9231595\r\n\r\n** Graphics info for pid 4416 [com.monster.game] **\r\n\r\nStats since: 9227563753792ns\r\nTotal frames rendered: 35\r\nJanky frames: 3 (8.57%)\r\nJanky frames (legacy): 4 (11.43%)\r\n50th percentile: 5ms\r\n90th percentile: 125ms\r\n95th percentile: 450ms\r\n99th percentile: 450ms\r\nNumber Missed Vsync: 3\r\nNumber High input latency: 2\r\nNumber Slow UI thread: 2\r\nNumber Slow bitmap uploads: 0\r\nNumber Slow issue draw commands: 3\r\nNumber Frame deadline missed: 3\r\nNumber Frame deadline missed (legacy): 3\r\nHISTOGRAM: 5ms=31 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 "
+  },
+  "memory": {
+    "totalPss": 123611,
+    "dalvikHeap": 0,
+    "nativeHeap": 0,
+    "views": "10",
+    "activities": "1",
+    "raw": "Applications Memory Usage (in Kilobytes):\r\nUptime: 9231847 Realtime: 9231847\r\n\r\n** MEMINFO in pid 4416 [com.monster.game] **\r\n                   Pss  Private  Private     Swap      Rss     Heap     Heap     Heap\r\n                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free\r\n                ------   ------   ------   ------   ------   ------   ------   ------\r\n  Native Heap        0        0        0        0        0    23136    21804     1331\r\n  Dalvik Heap        0        0        0        0        0     6339     4145     2194\r\n Dalvik Other       24        0        0        0       48                           \r\n        Stack      112      112        0        0      124                           \r\n       Ashmem      348      184        0        0     1072                           \r\n    Other dev      307      292       12        0      636                           \r\n     .so mmap    13147     1100     8156        0    37492                           \r\n    .jar mmap    16743        0     9480        0    34928                           \r\n    .apk mmap    41371      624    20252        0    62856                           \r\n    .dex mmap      236        0      140        0      788                           \r\n    .oat mmap      233        0       92        0     1284                           \r\n   Other mmap     2240        8      600        0     47",
+    "oomSignals": []
+  },
+  "resume": {
+    "thisTime": null,
+    "totalTime": 48,
+    "waitTime": 50,
+    "homeTookBackground": true,
+    "focusAfterResume": true,
+    "raw": "Starting: Intent { cmp=com.monster.game/.MainActivity }\r | Warning: Activity not started, its current task has been brought to the front\r | Status: ok\r | Activity: com.monster.game/.MainActivity\r | TotalTime: 48\r | WaitTime: 50\r"
+  },
+  "consoleErrors": [],
+  "checks": [
+    {
+      "name": "设备在线",
+      "ok": true,
+      "evidence": "emulator-5558          device product:25060RK16C model:25060RK16C device:graceltexx transport_id:2"
+    },
+    {
+      "name": "APK 已安装",
+      "ok": true,
+      "evidence": "package:com.monster.game"
+    },
+    {
+      "name": "设备可直连宿主机后端",
+      "ok": true,
+      "evidence": "{\"ok\":true,\"ts\":1794392864617,\"ws\":{\"connections\":1,\"users\":1},\"sessions\":{\"users\":1,\"slots\":1,\"online\":1,\"connections\":"
+    },
+    {
+      "name": "冷启动 x3 均成功且前台正确",
+      "ok": true,
+      "evidence": "[1177,1145,1130]"
+    },
+    {
+      "name": "WebView 首帧已渲染（控件树含应用文案）",
+      "ok": true,
+      "evidence": "[true,true,true]"
+    },
+    {
+      "name": "静置对照：静态页面无持续重绘（idle 0 帧）",
+      "ok": true,
+      "evidence": "idleFrames=0"
+    },
+    {
+      "name": "冷启动渲染窗口采到帧数据",
+      "ok": true,
+      "evidence": "{\"frames\":35,\"janky\":3,\"p90\":125}"
+    },
+    {
+      "name": "帧采样时前台仍是本应用",
+      "ok": true,
+      "evidence": "focus=true"
+    },
+    {
+      "name": "无 OOM / 崩溃 / ANR 信号",
+      "ok": true,
+      "evidence": "clean"
+    },
+    {
+      "name": "内存采样有效",
+      "ok": true,
+      "evidence": "{\"pss\":123611,\"dalvik\":0}"
+    },
+    {
+      "name": "HOME 后确实进入后台",
+      "ok": true,
+      "evidence": "focusAfterHome=false"
+    },
+    {
+      "name": "后台恢复成功且前台正确",
+      "ok": true,
+      "evidence": "{\"totalTime\":48,\"waitTime\":50,\"focus\":true,\"thisTime\":\"雷电不输出\"}"
+    }
+  ]
+}

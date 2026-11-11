@@ -80,9 +80,37 @@ node scripts/perf-mobile.mjs   # CPU 4x + Fast3G 下的冷启动与交互
 - `Emulation.setCPUThrottlingRate(4)` + `Network.emulateNetworkConditions` 模拟中低端设备
 - 指标取 `performance.getEntriesByType('navigation')`、`first-contentful-paint`、`largest-contentful-paint`、`layout-shift`、`longtask`
 
-## 6. 待补测（需要 adb 环境）
+## 6. 真机补测（2026-11-11 已完成，雷电模拟器 14 / Android 14）
 
-- [ ] APK 冷启动到首帧（`am start -W`）
-- [ ] WebView 内实际 FPS 与掉帧分布（`dumpsys gfxinfo`）
-- [ ] 低端机（如 4GB 内存）下的 JS 堆峰值与是否触发 WebView OOM
-- [ ] 后台切回后的恢复耗时
+**环境**：`emulator-5558`，机型 `25060RK16C`，Android 14 / SDK 34，1260×2800 / 560dpi，x86_64，无 root。
+APK 为本机重建的 debug 包（JDK 21 + SDK 36 + Gradle 8.14.3），WebView 通过
+`http://192.168.111.47:3001` 直连宿主机后端（首屏显示「服务器在线」）。
+
+- [x] APK 冷启动到首帧（`am start -W` + `uiautomator dump` 首帧文案校验）
+- [x] WebView 内实际 FPS 与掉帧分布（`dumpsys gfxinfo` framestats）
+- [x] JS 堆峰值 / WebView OOM（`dumpsys meminfo` + logcat）
+- [x] 后台切回后的恢复耗时（HOME → `am start -W`）
+
+## 7. 真机补测结果（12/12 全绿）
+
+原始数据在 `.trae/documents/性能基线_adb_真机数据_2026-11-11.json`，
+采集脚本 `node scripts/perf-adb.mjs`（全程命令行、零 `input tap`，遵守
+`.trae/documents/雷电模拟器_adb操作规范_2026-11-11.md`）。
+
+| 项 | 结果 | 口径 |
+|---|---|---|
+| 冷启动到首帧 | **1177 / 1145 / 1130 ms**（均值 1151） | `am start -W` 的 `TotalTime`；三次均 `focusOk=true`，控件树含「兽域手记 / 登录 / 服务器在线」 |
+| WebView 帧分布 | 冷启动渲染窗口 **35 帧**，Janky **3 (8.57%)** | p50 5ms / p90 125ms / p95 450ms / p99 450ms；Missed Vsync 3、Slow UI 2 |
+| 静置对照 | **0 帧** | 静态登录页静置 4s 无持续重绘；FPS 采样必须覆盖冷启动窗口，否则拿到空数据 |
+| 内存 / OOM | PSS **123611 KB（≈121 MB）** | Views 10 / Activities 1 / WebViews 1；logcat 无 `FATAL` / `OutOfMemoryError` / `SIGABRT` / ANR；consoleErrors 0 |
+| 后台恢复 | **48 ms**（WaitTime 50） | HOME 后 `focusOk=false`，恢复后 `true`；雷电 `am start -W` 不输出 `ThisTime`，以 `TotalTime` 为准 |
+
+**结论**：
+
+1. 真机冷启动 ~1.15 s，与 Web 基线「4x 降速 + Fast 3G 下 FCP 1.0–1.1 s」基本吻合；主要成本仍是 764 kB（gzip 166 kB）单 chunk 的 JS 加载解析，不是原生壳开销。
+2. 掉帧集中在冷启动长帧（p95/p99 450ms），对应 WebView 首屏解析与布局；稳态静态页无重绘、无持续掉帧，与 Web 侧「无长任务 / CLS≈0」一致。
+3. 内存 ~121 MB 属 Capacitor WebView 常规量级，未触发 OOM。**本次是 x86_64 模拟器、非 4GB 低端真机**：「低端机 JS 堆峰值」只完成了 OOM 信号观测这一半，真实低端 ARM 机仍需 P5-3 阶段补测。
+4. 后台恢复 48 ms，Activity 未重建（`Activity not started, its current task has been brought to the front`），符合预期。
+
+> 注：§0 写的「本沙盒没有 adb / Android SDK」是 2026-10-20 采集时的历史环境说明；
+> 2026-11-11 已在本机重建完整构建链并完成补测，详见 §6 / §7 与 `雷电模拟器_adb操作规范_2026-11-11.md`。

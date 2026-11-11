@@ -155,7 +155,7 @@
 
 ## ⚠️ 已知环境约束
 
-- 当前沙盒**没有 adb / 模拟器 / Android SDK**，`android-performance` 的原生采样（Simpleperf/Perfetto/gfxinfo）与 `android-emulator-qa` 的模拟器流程无法执行；Web 侧性能已建立基线，见 [性能基线\_web.md](file:///workspace/.trae/documents/性能基线_web.md)
+- ~~当前沙盒**没有 adb / 模拟器 / Android SDK**，`android-performance` 的原生采样（Simpleperf/Perfetto/gfxinfo）与 `android-emulator-qa` 的模拟器流程无法执行~~ → **2026-11-11 订正**：该结论只对 2026-10-20 的沙盒环境成立。本机已重建完整 Android 构建链（SDK 36 / Gradle 8.14.3 / JDK 21），并在雷电 `emulator-5558` 完成 `gfxinfo` / `meminfo` / 冷启动 / 后台恢复四项真机补测（**12/12 全绿**），详见 [性能基线\_web.md](file:///workspace/.trae/documents/性能基线_web.md) §6 / §7 与 `雷电模拟器_adb操作规范_2026-11-11.md`。Web 侧基线仍见前述文档。
 - 沙盒容器可能被重建（`node_modules` 消失、内网 IP 变化、预览路由失效），恢复步骤见 [bug\_log.md](file:///workspace/.trae/documents/bug_log.md) 第 8.1 节
 
 ---

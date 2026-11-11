@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建生效的清单叠加层（Android sourceSet 合并规则）。
+  本地调试 APK 需要把 WebView 的业务请求发到宿主机的 http://<宿主局域网IP>:3001，
+  Android 9+ 默认禁止明文流量，故在此放行（具体 IP 由构建期的 VITE_API_BASE 注入，不写死在清单里）。
+  release 构建不合并本文件，正式包（P5-3）不受影响，届时应改走 HTTPS 域名。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>

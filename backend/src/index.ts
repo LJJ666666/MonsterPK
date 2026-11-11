@@ -37,8 +37,15 @@ declare module 'fastify' {
 
 const fastify = Fastify({ logger: true });
 
+// CORS_ORIGIN 与 wsProtocol.isOriginAllowed 共用一份逗号分隔配置：
+// 单值时保持原行为（字符串精确匹配），多值时传数组让 @fastify/cors 逐个匹配。
+// 本地调试 APK 的 WebView origin 是 http://localhost，与 5173 不同端口，必须同时放行。
+const corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => s.length > 0);
 fastify.register(cors, {
-  origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  origin: corsOrigins.length <= 1 ? (corsOrigins[0] ?? 'http://localhost:5173') : corsOrigins,
 });
 
 fastify.register(jwt, {

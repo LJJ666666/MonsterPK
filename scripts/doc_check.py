@@ -565,6 +565,25 @@ checks = [
      "回归 B/C/E" in task_text and "回归 B/C/E" in log_text),
     ("verify 头部注释不再写死 17 组 E2E",
      "e2e    后端端到端（含对抗套件，阶段数以脚本输出为准）" in verify_text),
+    # ——— P5-1 / F10 共享存储迁移评估（2026-11-11）———
+    ("P5-1/F10 迁移评估文档存在且结构完整",
+     (DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md").exists()
+     and all(k in text(DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md")
+             for k in ("8 类进程内状态", "六个必须成组改造的耦合点",
+                       "需要杰哥拍板 / 提供的前置输入", "本文件不含任何产品代码改动"))),
+    ("评估钉住三处修正口径（revision 非列 / RoomStorage 同步 / 定时器重复）",
+     all(k in text(DOCS / "P5-1_F10_共享存储迁移评估_2026-11-11.md")
+         for k in ("`revision` 不是 DB 独立列", "`RoomStorage` 是同步接口",
+                   "两个 `setInterval` 每个进程各跑一遍", "Redis 只放锁"))),
+    ("F10 台账指向迁移评估文档且标注口径修正",
+     "P5-1_F10_共享存储迁移评估_2026-11-11.md"
+     in text(DOCS / "未来规划与技术债_2026-11-07.md")
+     and "偏乐观口径"
+     in text(DOCS / "未来规划与技术债_2026-11-07.md")),
+    ("MEMORY 与每日日志均记 P5-1 评估且未擅自开工",
+     "P5-1 / F10 共享存储迁移评估" in memory_text
+     and "P5-1 / F10 共享存储迁移评估" in log_text
+     and "不改任何产品代码" in log_text),
 ]
 
 for name, ok, *detail in checks:

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# 本仓库权威验收入口是 `npm run verify`（需要本地双服务 + headless Edge）。
+# CI 只跑不依赖服务与浏览器的静态检查 / 单测，避免与本地自测环境耦合。
+# E2E、375px 冒烟、文档记忆自检中的环境项仍按 HANDOFF 第 6 节在本机跑。
+jobs:
+  static-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 安装后端依赖
+        working-directory: backend
+        run: npm ci
+
+      # 拉到 schema / 迁移变化后必须重新生成 Client，否则后端 tsc 报新字段不存在
+      - name: 生成 Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: 前端类型检查
+        run: npm run check
+
+      - name: 前端单测
+        run: npm test
+
+      - name: 前端构建
+        run: npm run build
+
+      - name: 后端类型检查
+        working-directory: backend
+        run: npm run check
+
+      - name: 内容表与 src/game/data.ts 一致性
+        working-directory: backend
+        run: npm run check:content
+
+      - name: 后端单测
+        working-directory: backend
+        run: npm test
+
+      - name: 文档结构断言
+        run: python3 scripts/doc_check.py
+
+      - name: 记忆镜像一致性
+        run: python3 scripts/sync_memory.py --check

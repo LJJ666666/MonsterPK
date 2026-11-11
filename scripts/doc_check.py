@@ -611,6 +611,17 @@ checks = [
     ("bug_log §44 记录专家复核勘误",
      "## 44." in bug_text
      and "三组独立后端架构专家" in bug_text),
+    ("A3 CI 工作流存在且覆盖前后端静态与单测",
+     (ROOT / ".github" / "workflows" / "ci.yml").exists()
+     and all(k in text(ROOT / ".github" / "workflows" / "ci.yml")
+             for k in ("22.22.2", "npm run check", "npm test", "check:content",
+                       "prisma generate", "doc_check.py"))),
+    ("A6 台账补齐 F19~F26 并标注单机时代设想须重评",
+     all(f"| F{i} |" in text(DOCS / "未来规划与技术债_2026-11-07.md") for i in range(19, 27))
+     and "服务端权威重评" in text(DOCS / "未来规划与技术债_2026-11-07.md")),
+    ("A6 可玩性补全文档挂台账指针",
+     "F19" in text(DOCS / "游戏设计分析_可玩性补全.md")
+     and "服务端权威" in text(DOCS / "游戏设计分析_可玩性补全.md")),
 ]
 
 for name, ok, *detail in checks:

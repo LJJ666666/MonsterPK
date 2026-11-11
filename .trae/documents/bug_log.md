@@ -1155,3 +1155,33 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 
 ### 42.3 验收
 - `ui_smoke_f18a.mjs` 9/9 全绿（含「需获得「青苗徽章」解锁」+「未解锁」文案、375px 无横向溢出）；`verify.mjs --only=smoke:f18a` 通过。`npm run check` 无告警。
+
+## 43. 回归 B/C/E 补齐：内容矩阵、全局状态提示与只读闸门对照（2026-11-11）
+
+### 43.1 背景：45 项 verify 全绿，但三块系统性覆盖缺失
+- 基线 `npm run verify` **45/45 `VERIFY_OK`**（前端 133 单测 / 后端 401 单测 / 24 组 E2E / 14 组 375px 冒烟 / 文档 154 项）。
+- 已有 E2E 都是「单条主路径」或「单模块边界」，缺一份把**全部内容表与只读接口横着对一遍**的矩阵；已有 UI 冒烟只验「某功能弹窗能开、375px 不溢出」，没覆盖 Start 页三种状态文案，也没覆盖 `App.tsx` 里挂在 `<Routes>` 之外的全局封号 / 顶号弹窗。
+
+### 43.2 新增 `backend/tests/e2e_content_matrix.mjs`（47 项全绿 `E2E_CONTENT_MATRIX_OK`）
+- **A 内容完整度**：静态内容表 + 服务端 API 双侧钉住 7 城 / 7 徽章 / 7 馆 / 7 首 / 6 房 / 21 剧情 beat（7 到达 + 7 演武堂 + 7 地图首领）；另验 `placeholder:true` 为 0、王牌等级 8→30 递增、0 徽章只解锁首城。
+- **B 边界**：线性解锁不越级（直跳末城仍 `LOCATION_LOCKED`）、未知城 `LOCATION_UNKNOWN`、未知馆 `GYM_UNKNOWN`、整包 PUT 伪造 `locationId` 跳关、空状态存档（`party=[]` / `inventory={}` / `collection={}` / `box=[]`）建档与回读、空队伍开演武堂 `PARTY_EMPTY`、未解锁首领拒绝开局。
+- **C 只读闸门（口径差异如实记录，未擅自改产品语义）**：`/api/player/progress` → 400 `PROGRESS_INPUT_FORBIDDEN`；`/api/rank/:type` → 400 `RANK_INPUT_FORBIDDEN`（榜单类型是 `monster_power` / `team_power` / `summoner_level` / `progress`，不是 `power`）；`/api/boss` → 400 `BOSS_INPUT_FORBIDDEN`；而 `/api/gym/overview` 与 `/api/mapboss` 是纯只读派生，**忽略夹带字段、返回值与不带参一致**。两类都满足「客户端上报不生效」，只是拒绝方式不同。
+- **D**：三个只读路由 POST 均 404，确认无写入口。
+
+### 43.3 新增 `scripts/ui_smoke_ux.mjs`（26 项全绿 `UI_SMOKE_UX_OK`）
+- 探针 A（`/`）：云同步态 / 实时通道态 / 在线权威态三种文案、`break-words` 长文案不横向溢出、375px 无溢出。
+- 探针 B（`/camp`）：intro 剧情弹窗长文案与推进按钮；徽章弹窗可打开 / 有 `overflow-auto` / 点「关闭」后消失；在 **iframe 的 `contentWindow`** 派发 `mpk:banned` / `mpk:session-replaced` 触发全局封号 / 顶号弹窗（超长中文原因换行、双 `role="alertdialog"` 共存、点「重新登录」清登录态退回 `/auth`）。
+- **踩坑**：`waitFor('camp')` 若只等「兽域手记」会在**骨架阶段**就返回，此时 `useStoryTriggers` 的 intro `useEffect` 尚未挂载，误判「剧情弹窗未出现」→ 改为等「徽章」入口按钮出现（f18b 同款口径），并延后 350ms 再观测。
+
+### 43.4 两处断言写错（非应用 bug，实测口径已写回测试）
+- 地图首领每日上限**不是统一 3**，而是按城镇梯度分档 `3,3,2,2,2,1,1`（`mapBosses.ts` 的 `dailyLimit`，`mapBossDailyLimit()` 可被 env 下调）。断言改为「从内容表读期望序列 + 非递增 + `remaining = dailyLimit - used - held`」。
+- 榜单类型不是 `power`；`/api/rank/not_a_rank` 先返回 `RANK_TYPE_UNKNOWN`，须改用 `monster_power` 才测得到 `RANK_INPUT_FORBIDDEN`。顺带把「未知榜单类型」变成正向断言（C5a）。
+
+### 43.5 HANDOFF 过期口径订正
+- A 节仍写「下一步 F18-b / F18-d 剧情骨架（占位文案债务）」，但 F18-b/c/d 早已全部 ✅ → 改为 F18 全阶段收官 + 下一步等杰哥排期；§8 进度快照同步。
+- §7 坑清单写死 `SCHEMA_VERSION`(=10) / `EXPECTED_SAVE_VERSION`(=10)，而 F17 已升 **11** → 改为「当前值以 `src/stores/saveVersion.ts` 与 `backend/src/lib/saveValidator.ts` 为准，别照抄历史数字」，与 HANDOFF 自身「不写死数字」原则一致。
+- 注册：`backend/package.json` 加 `e2e:content_matrix`；`scripts/verify.mjs` 的 `STAGES` 与 `GROUPS.e2e` / `GROUPS.smoke` 四处注册（漏 `GROUPS` 会静默少跑）；`clean-test-data.mjs` 补 `matrix_` / `ux_` 前缀；头部注释「17 组 E2E」改为「以脚本输出为准」。
+
+### 43.6 验收
+- 聚焦 `npm run verify -- --only=e2e:content_matrix,smoke:ux,docs:doc,docs:memory` → **4/4 `VERIFY_OK`**（矩阵 47 项 + UX 26 项 + 文档 154 项 + 镜像一致，7.6s）。
+- 全量 `npm run verify -- --strict` **47/47 `VERIFY_OK`**（0 失败 / 0 跳过，158.8s）：前端 133 单测 + 后端 401 单测 + 前端构建 + **25 组 E2E**（含新增矩阵 47 项）+ **15 组 375px 冒烟**（含新增 UX 26 项）+ 文档自检 **160 项** + 记忆镜像一致；原 45 阶段零回归。

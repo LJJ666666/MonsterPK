@@ -544,6 +544,27 @@ checks = [
      and "F18-a 地图锁已实现并偿还" in task_text
      and "F18-b" in handoff_text and "F18-a" in memory_text and "## 40." in bug_text),
     ("bug_log 含 §40 F18-a 收官", "## 40." in bug_text and "LOCATION_LOCKED" in bug_text),
+    # ——— 回归 B/C/E 补齐（2026-11-11）———
+    ("回归 B/E：内容矩阵 E2E 存在且 verify 两处注册 + 清理前缀",
+     (ROOT / "backend" / "tests" / "e2e_content_matrix.mjs").exists()
+     and verify_text.count("e2e:content_matrix") >= 2
+     and '"e2e:content_matrix"' in pkg_text
+     and "matrix_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")),
+    ("回归 C：全局状态与弹窗 UX 冒烟存在且 verify 两处注册 + 清理前缀",
+     (ROOT / "scripts" / "ui_smoke_ux.mjs").exists()
+     and verify_text.count("smoke:ux") >= 2
+     and "ux_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")),
+    ("bug_log 含 §43 回归 B/C/E 收官与只读闸门口径差异",
+     "## 43." in bug_text and "PROGRESS_INPUT_FORBIDDEN" in bug_text
+     and "RANK_INPUT_FORBIDDEN" in bug_text and "PARTY_EMPTY" in bug_text),
+    ("HANDOFF 不再写死 SCHEMA_VERSION=10 且 F18 全阶段收官",
+     "SCHEMA_VERSION`(=10)" not in handoff_text
+     and "F18 地图内容全阶段已收官" in handoff_text
+     and "saveValidator.ts" in handoff_text),
+    ("任务表与每日日志均记回归 B/C/E 补齐",
+     "回归 B/C/E" in task_text and "回归 B/C/E" in log_text),
+    ("verify 头部注释不再写死 17 组 E2E",
+     "e2e    后端端到端（含对抗套件，阶段数以脚本输出为准）" in verify_text),
 ]
 
 for name, ok, *detail in checks:

@@ -482,7 +482,14 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
           <div className="grid gap-2">
             {(Object.values(LOCATIONS) as typeof LOCATIONS[LocationId][]).map((loc) => {
               const locked = unlockedLocations ? !unlockedLocations.includes(loc.id) : false;
-              const reqBadge = badgeCatalog.find((b) => b.locationName === loc.name)?.name ?? "上一级徽章";
+              // 解锁门槛 = 持有「上一相邻城镇」徽章（与后端 mapLock.requiredBadgeFor 同口径）；
+              // 因此提示文案要展示「前置城镇的徽章名」，而非本城自己的徽章（否则会变成循环依赖）。
+              const orderedIds = Object.keys(LOCATIONS) as LocationId[];
+              const idx = orderedIds.indexOf(loc.id);
+              const prevName = idx > 0 ? LOCATIONS[orderedIds[idx - 1] as LocationId].name : null;
+              const reqBadge = prevName
+                ? badgeCatalog.find((b) => b.locationName === prevName)?.name ?? "上一级徽章"
+                : "已解锁";
               return (
               <button
                 key={loc.id}

@@ -78,6 +78,7 @@ const STAGES = [
   { id: 'e2e:f18c', name: 'E2E 地图首领（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c'], need: 'backend', timeout: 300_000 },
   // F18-c 防御性：伪造/越权/顶号/超上限/跨用户/幂等/放弃泄漏回归。
   { id: 'e2e:f18c_security', name: 'E2E 地图首领防御性越权（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c_security'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:core_loop', name: 'E2E 核心循环串联（野怪→演武堂→Boss→地图首领→共斗）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:core_loop'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:hardening', name: 'E2E 对抗攻防（115 项）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:hardening'], need: 'backend', timeout: 300_000 },
   { id: 'smoke:ui', name: '375px 浏览器冒烟', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p21.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:p31c', name: '375px 前端服务端战斗链路（P3-1c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_p31c.mjs'], need: 'both', timeout: 300_000 },
@@ -90,6 +91,12 @@ const STAGES = [
   // F16：六房地图四态 + 进房按钮 + 375px 无横向溢出。
   { id: 'smoke:f16', name: '375px 六房副本 UI（F16）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f16.mjs'], need: 'both', timeout: 300_000 },
   { id: 'smoke:f04', name: '375px 徽章 / 成就 UI（F04）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f04.mjs'], need: 'both', timeout: 300_000 },
+  // F18-a：营地地图 Tab 地区锁定提示（前置城镇徽章，修复循环依赖）+ 375px 无横向溢出。
+  { id: 'smoke:f18a', name: '375px 地图地区锁定 UI（F18-a）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18a.mjs'], need: 'both', timeout: 300_000 },
+  // F18-b：演武堂弹窗 + 点首城馆主「挑战馆主」真进战斗（/arena）+ 375px 无横向溢出。
+  { id: 'smoke:f18b', name: '375px 演武堂 UI（F18-b）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18b.mjs'], need: 'both', timeout: 300_000 },
+  // F18-c：地图首领弹窗 + 掉落预览 + 点首城首领「挑战」真进战斗（/arena）+ 375px 无横向溢出。
+  { id: 'smoke:f18c', name: '375px 地图首领 UI（F18-c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18c.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -98,8 +105,8 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c'],
   docs: ['docs:doc', 'docs:memory'],
 };
 

@@ -1134,3 +1134,24 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - 根因：`backend/src/modules/battle.ts` 原释放守卫 `if (state.bossId && state.bossQuotaKey) bossQuota.release(...)`；mapBoss 战 state 只有 `mapBossId`（无 `bossId`），其 `bossQuotaKey` 虽已写入却永不释放。超时回收路径 `realtime.ts:174` 是 `if (st.bossQuotaKey)`（无 `bossId` 守卫），故仅「断线超时」会回收、「显式 HTTP abandon」会泄漏——口径不一致。
 - 修复：守卫改为 `if (state.bossQuotaKey) bossQuota.release(...)`，与 `realtime.ts:174` 一致，boss / mapBoss 共用 `bossQuota` 一并覆盖。零新迁移、不动 `SCHEMA_VERSION`。修复后 J 区 4 轮 start→abandon 全部 200，名额每轮回收。
 - 验收：`--only=check,e2e:f18c,e2e:f18c_security,e2e:f14` 全绿（前端/后端 tsc 无告警、内容表一致、F14 Boss 双档 46 项、F18-c 正例 33 项、F18-c 防御性 35 项）。
+
+## 42. Camp 地图 Tab 解锁提示循环依赖（展示本城自身徽章，2026-11-11）
+
+### 42.1 现象
+- `src/pages/Camp.tsx` 地图 Tab 未解锁城的提示文案，原取 `badgeCatalog.find(b => b.locationName === loc.name)?.name`——即展示**本城自己**的徽章名当解锁前提（如「解锁坚石市需获得「坚石徽章」」），造成循环依赖：永远无法解锁。
+- F18-a 375px UI 冒烟（`ui_smoke_f18a.mjs`）断言锁定文案为「需获得「青苗徽章」解锁」（首城 `town_starter` 的徽章 `badge_sprout` 名=「青苗徽章」、对应 `locationName=初心镇`），原实现会渲染错误文案。
+
+### 42.2 修复（与后端 `mapLock.requiredBadgeFor` 同口径）
+- 改为沿 `LOCATIONS` 键顺序取**上一相邻城镇**的徽章名：
+  ```ts
+  const orderedIds = Object.keys(LOCATIONS) as LocationId[];
+  const idx = orderedIds.indexOf(loc.id);
+  const prevName = idx > 0 ? LOCATIONS[orderedIds[idx - 1] as LocationId].name : null;
+  const reqBadge = prevName
+    ? badgeCatalog.find((b) => b.locationName === prevName)?.name ?? "上一级徽章"
+    : "已解锁";
+  ```
+- 首城（`town_starter`，`idx===0`）`prevName=null` → 显示「已解锁」；第二城 `city_pebble` 显示「需获得「青苗徽章」解锁」，与后端 `requiredBadgeFor` 线性解锁一致。
+
+### 42.3 验收
+- `ui_smoke_f18a.mjs` 9/9 全绿（含「需获得「青苗徽章」解锁」+「未解锁」文案、375px 无横向溢出）；`verify.mjs --only=smoke:f18a` 通过。`npm run check` 无告警。

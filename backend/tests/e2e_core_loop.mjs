@@ -46,11 +46,14 @@ const STRONG = {
   status: 'none', moveIds: ['tackle', 'wood_strike'],
   initStats: STATS, growthRates: GROWTH, isShiny: false,
 };
-// 弱档成员：仅随队占位；捕获步骤由强档（index 0）执行。
+// 第二只强宠：前面只占位、不参与捕获（捕获由 index 0 执行）；共斗时作替补。
+// 共斗敌人按 rng 生成、canMove / 命中 / 状态也吃 RNG，回合一旦拖长，
+// 「1 强 + 弱占位」的队伍会被反杀（round19 抓到 result=lose / cleared=3）。
+// 与 e2e_f16 的「6 只全强宠」同口径，把胜负从 RNG 手里拿回来。
 const WEAK = {
-  id: 'core_weak', specId: 'spark_mouse', level: 5, exp: 0,
-  element: 'electric', maxHp: 300, hp: 300,
-  atk: 4, def: 14, spAtk: 4, spDef: 14, spd: 9,
+  id: 'core_weak', specId: 'spark_mouse', level: 40, exp: 0,
+  element: 'electric', maxHp: 400, hp: 400,
+  atk: 500, def: 300, spAtk: 500, spDef: 300, spd: 300,
   status: 'none', moveIds: ['tackle'],
   initStats: STATS, growthRates: GROWTH, isShiny: false,
 };
@@ -309,7 +312,13 @@ async function main() {
   console.log('\n—— 5) 共斗 ——');
   const guest = await newAccount('core_g_');
   names.push(guest.username);
-  const guestParty = validSave({ money: 5000, party: [STRONG], inventory: { capsule_basic: 60, potion_small: 3 } });
+  // guest 同样带 3 只强宠：单只强宠一倒下该座位立即 out，是偶发全灭的主因。
+  const guestStrong = (i) => ({ ...STRONG, id: `core_g_strong_${i}` });
+  const guestParty = validSave({
+    money: 5000,
+    party: [guestStrong(0), guestStrong(1), guestStrong(2)],
+    inventory: { capsule_basic: 60, potion_small: 3 },
+  });
   const gPut = await save.put(guest.token, guestParty);
   s.check('共斗队友建档 → 200', gPut.status === 200, `${gPut.status}`);
 

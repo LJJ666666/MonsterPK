@@ -785,7 +785,7 @@ checks = [
     ("W2：双进程 E2E 注册到 npm / STAGES / GROUPS / 清理前缀",
      "e2e:w2" in text(ROOT / "backend/package.json")
      and "{ id: 'e2e:w2'" in text(ROOT / "scripts/verify.mjs")
-     and "'e2e:w2', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w2', 'e2e:w3', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
      and "'w2'" in text(ROOT / "backend/scripts/clean-test-data.mjs")
      and "--import" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")
      and "stopSecondInstance" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")),
@@ -813,6 +813,59 @@ checks = [
      "## 53." in bug_text
      and "headless Edge 单次导航失败" in task_text
      and "round14" in bug_text),
+    ("W3：Redis 锁后端（SET NX PX + Lua token 比对）与 Provider 落地",
+     (ROOT / "backend/src/lib/redisLockBackend.ts").exists()
+     and (ROOT / "backend/src/lib/redisLockProvider.ts").exists()
+     and "RENEW_SCRIPT" in text(ROOT / "backend/src/lib/redisLockBackend.ts")
+     and "RELEASE_SCRIPT" in text(ROOT / "backend/src/lib/redisLockBackend.ts")
+     and "'PX', ttlMs, 'NX'" in text(ROOT / "backend/src/lib/redisLockBackend.ts")
+     and "AsyncLocalStorage" in text(ROOT / "backend/src/lib/redisLockProvider.ts")
+     and "LOCK_RENEW_INTERVAL_MS" in text(ROOT / "backend/src/lib/redisLockProvider.ts")
+     and "maxAttempts" in text(ROOT / "backend/src/lib/redisLockProvider.ts")
+     and "lock:acct:" in text(ROOT / "backend/src/lib/redisLockProvider.ts")
+     and "lock:mapbossq:" in text(ROOT / "backend/src/lib/redisLockProvider.ts")),
+    ("W3：启动装配不静默降级，health 暴露锁模式，env 模板默认注释",
+     (ROOT / "backend/src/lib/lockBootstrap.ts").exists()
+     and "拒绝以进程内锁降级启动" in text(ROOT / "backend/src/lib/lockBootstrap.ts")
+     and "getLockDiagnostics" in text(ROOT / "backend/src/index.ts")
+     and "initializeLockProvider()" in text(ROOT / "backend/src/index.ts")
+     and "shutdownLockProvider()" in text(ROOT / "backend/src/index.ts")
+     and "# REDIS_URL=" in text(ROOT / "backend/.env.example")
+     and "REDIS_URL" in text(ROOT / "backend/.env.example")),
+    ("W3：确定性单测含去锁反证 / barrier / watchdog / 嵌套不死锁",
+     (ROOT / "backend/tests/w3RedisLock.test.ts").exists()
+     and "function barrier" in text(ROOT / "backend/tests/w3RedisLock.test.ts")
+     and "去掉锁必然交错" in text(ROOT / "backend/tests/w3RedisLock.test.ts")
+     and "watchdog 续租" in text(ROOT / "backend/tests/w3RedisLock.test.ts")
+     and "嵌套同 key 不死锁" in text(ROOT / "backend/tests/w3RedisLock.test.ts")
+     and "LOCK_ACQUIRE_TIMEOUT" in text(ROOT / "backend/tests/w3RedisLock.test.ts")),
+    ("W3：E2E 注册到 npm / STAGES / GROUPS / 清理前缀且用产品 TS 模块",
+     "e2e:w3" in text(ROOT / "backend/package.json")
+     and "--import tsx" in text(ROOT / "backend/package.json")
+     and "{ id: 'e2e:w3'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w2', 'e2e:w3', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
+     and "'w3'" in text(ROOT / "backend/scripts/clean-test-data.mjs")
+     and "redisLockProvider.ts" in text(ROOT / "backend/tests/e2e_w3_lock.mjs")
+     and "预占账号锁" in text(ROOT / "backend/tests/e2e_w3_lock.mjs")
+     and "拒绝以进程内锁降级启动" in text(ROOT / "backend/tests/e2e_w3_lock.mjs")),
+    ("bug_log §54 / 任务表 / HANDOFF / 定稿 / 台账记录 W3 收官与 49/49",
+     "## 54." in bug_text
+     and "P5-1 W3 收官" in task_text
+     and "W3 ✅ 2026-11-12" in handoff_text
+     and "49/49" in handoff_text
+     and "W3 ✅ 2026-11-12" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "49/49" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W3 ✅ 2026-11-12" in text(ROOT / ".trae/documents/未来规划与技术债_2026-11-07.md")),    ("bug_log §55 / 任务表记录 core_loop 偶发全灭根因",
+     "## 55." in bug_text
+     and "单强宠" in bug_text
+     and "round19" in bug_text
+     and "30/30" in bug_text
+     and "core_loop 共斗单强宠" in task_text),
+    ("core_loop 共斗测试档已与 f16 对齐（全强宠 + guest 多宠），断言未放宽",
+     "core_g_strong_" in text(ROOT / "backend/tests/e2e_core_loop.mjs")
+     and "level: 40, exp: 0" in text(ROOT / "backend/tests/e2e_core_loop.mjs")
+     and "六房全清 → settled / result=win / cleared=6" in text(ROOT / "backend/tests/e2e_core_loop.mjs")
+     and "COOP_REWARD_MONEY = 40" in text(ROOT / "backend/tests/e2e_core_loop.mjs")),
 ]
 
 for name, ok, *detail in checks:

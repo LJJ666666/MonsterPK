@@ -24,6 +24,7 @@ import { contentStats } from './game/content';
 import { getSessionStats, battles, wilds } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats } from './modules/realtime';
 import { getAccountState, checkSessionVersion, BAN_CODE, type AccountState } from './lib/account';
+import { initializeLockProvider, shutdownLockProvider, getLockDiagnostics } from './lib/lockBootstrap';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
 declare module 'fastify' {
@@ -133,6 +134,8 @@ fastify.get('/api/health', async () => ({
   content: contentStats(),
   // F04：等级 / 徽章 / 成就是服务端只读真值，health 只报来源，不查库。
   progress: progressStats(),
+  // W3：锁模式诊断。in-process 只允许单实例；redis 为跨进程租约锁。
+  lock: getLockDiagnostics(),
 }));
 
 fastify.register(authRoutes);
@@ -157,14 +160,20 @@ registerRealtime(fastify);
 
 const port = Number(process.env.PORT ?? 3001);
 
-fastify.listen({ port, host: '0.0.0.0' }).then(() => {
-  fastify.log.info(`MonsterPK backend listening on :${port}`);
-}).catch((err) => {
-  fastify.log.error(err);
-  process.exit(1);
-});
+// W3：先装配分布式锁再监听端口。REDIS_URL 已配置却连不上时启动直接失败，
+// 绝不带着进程内锁去接多实例流量（口径见 lib/lockBootstrap.ts）。
+initializeLockProvider()
+  .then(() => fastify.listen({ port, host: '0.0.0.0' }))
+  .then(() => {
+    fastify.log.info(`MonsterPK backend listening on :${port}`);
+  })
+  .catch((err) => {
+    fastify.log.error(err);
+    process.exit(1);
+  });
 
 process.on('SIGINT', async () => {
+  await shutdownLockProvider();
   await prisma.$disconnect();
   process.exit(0);
 });

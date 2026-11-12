@@ -23,6 +23,7 @@
     "e2e:p32": "node tests/e2e_p32_mutations.mjs",
     "e2e:p4": "node tests/e2e_p4_cas.mjs",
     "e2e:w2": "node tests/e2e_w2_cas.mjs",
+    "e2e:w3": "node --import tsx tests/e2e_w3_lock.mjs",
     "e2e:p41": "node tests/e2e_p41_wild.mjs",
     "e2e:p42a": "node tests/e2e_p42a_rank.mjs",
     "e2e:p42b": "node tests/e2e_p42b_room.mjs",
@@ -50,6 +51,7 @@
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "fastify": "^4.28.1",
+    "ioredis": "^5.11.1",
     "ws": "^8.22.1",
     "zod": "^3.23.8"
   },

@@ -1322,3 +1322,31 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **确定性证据**（`.verify-logs/edge-retry-proof.txt`，`EDGE_RETRY_PROOF pass=3 fail=0`）：① 前两次错误页 / 第三次成功 → 返回正常页且调用 3 次；② 三次全错误页 → 原样返回错误页、调用 3 次（证明不掩盖）；③ 非 `--dump-dom` → 透传且只调用 1 次。最后一次失败打 `[RETRY_EXHAUSTED]`，不再出现误导性的「重试 3/2」。
 - **验收**：加固后 `ui_smoke_p42d.mjs` 单独 **15/15**、定向压力 **20/20**（0 次重试触发，说明错误页不是常态）；`MPK_FRONT_PORT=5174 npm run verify -- --strict` **48/48 `VERIFY_OK`**（round15，355.1s，0 失败 0 跳过）；`doc_check` 新增 2 条断言后全绿。归档完成后连跑两轮全量 **48/48 `VERIFY_OK`**（round16 333.9s / round17 309.5s，均 0 失败 0 跳过），`doc_check` **208 项**、记忆镜像一致；3002 每轮验收后均释放。
 - **口径**：这是 §48 / §49 之后第三类偶发红根因（前两类是 Windows 盘符大小写导致别名解析失效、逃跑 RNG 假设），三类都靠「先落日志基建、再抓失败原文」定位，**没有靠重跑掩盖**。历史 §47 记的「UI 冒烟偶发」至此有具体成因与加固。
+
+
+## 54. P5-1 W3 收官：Redis 分布式租约锁（2026-11-12）
+
+- **触发**：杰哥「有硬阻塞那就打通它，没有 Redis 实例就加」。设计定稿 §3.2 / §4.2 W3 的唯一外部前置是 Redis，本机 6379 未监听、无 Docker、WSL 被宿主黑名单禁。
+- **自建实例（不入库）**：GitHub release 直连仅约 3KB/s、`ghproxy.net` 中途失败 → 改用 `ghfast.top` 代理 + **HTTP Range 六段并行**拉取 `Redis-x64-5.0.14.1.zip`（12,617,669 B，其中一段失败单独补下，`zipfile.testzip()` CRC 全过），解压到 `E:/Six/redis-runtime`（NTFS）。启动：`redis-server.exe --port 6379 --bind 127.0.0.1 --save "" --appendonly no --protected-mode no`，**必须受管前台进程**（与 PG 同口径，detach 会被宿主回收）。实测 `PING=PONG`、`SET NX PX` 第二次抢锁返回 nil、`PTTL` 正常、Lua token 比对释放返回 0/1。
+- **实现（W0 接口化的收益：6 个调用模块 + 锁顺序 + `alreadyLocked` 旁路全部零改动）**：新增 `lib/redisLockBackend.ts`（`acquire/renew/release` 三原子操作 + 两段带 token 比对的 Lua）、`lib/redisLockProvider.ts`（`RedisLockProvider implements LockProvider`）、`lib/lockBootstrap.ts`（启动装配 + health 诊断）。
+  - 命名空间 `lock:acct:` / `lock:room:` / `lock:bossq:` / `lock:mapbossq:` / `lock:rank:`，映射放在 Provider 内部，`slotLockKey()` / `roomLockKey()` 返回值不变。
+  - `AsyncLocalStorage` 记当前调用链已持 key，命中即 bypass —— `SET NX` 非重入，若把重入实现成轮询等待会自我死锁（§36 同锁重入教训）。
+  - TTL **30s**、watchdog 每 **10s** 用 Lua「GET==token 才 PEXPIRE」续租；释放用 Lua「GET==token 才 DEL」，迟到释放不抹掉同名新租约；租约到期自动归还，进程崩溃不残留。
+  - 抢锁抖动退避 + `acquireTimeoutMs=30s` + `maxAttempts` 兜底，超时明确抛 `LOCK_ACQUIRE_TIMEOUT`，**不静默放行**。定稿 §1#7 的「不同实例各持不同层级锁成环」由超时兜底（W6 统一层级前不改调用顺序）。
+  - **语义差异如实记**：进程内实现是 Promise 链、严格 FIFO；Redis 锁只保证「同 key 不同时执行」，不保证先到先得 —— 正确性由 W2 的 DB 条件更新裁决，不依赖顺序。
+  - **fencing token 不用在存档写**（revision 单调本身即 fence），token 只服务续租/释放；DB 条件更新仍作最后兜底。
+  - `REDIS_URL` 未配置 → 保持进程内锁、**仅允许单实例**（CI 无 Redis 可跑）；一旦配置就必须 PING 成功，否则**启动直接失败**，绝不静默降级回进程内锁；运行期断连同样不降级（ioredis 停止重连、命令报错）。`/api/health` 新增 `lock: { mode, ttlMs, renewMs }` 供验收诊断。
+- **验收**：`w3RedisLock.test.ts` 8 例确定性单测（内存后端 + 虚拟时钟 + 手动 watchdog）：同 key 并发不交错 / **去锁 + barrier 必交错反证**、20 次读-改-写无丢失、嵌套同 key 不死锁、嵌套不同 key 双锁并持、watchdog 续租与易主告警、reject 不阻断、抢锁超时、Lua 脚本 token 比对。后端 `node:test` **436/436**。`e2e_w3_lock.mjs` **23 项**（`node --import tsx` 直接 import 产品 TS 模块，不复制 Lua/命名空间规则）：两个独立 Provider 实例模拟双进程、真 Redis 续租/过期/安全释放、**预占 `lock:acct:<userId>` 后 :3001 与 :3002 的 PUT 都被挡在门外**、正确 token 释放后恰好 1×200 + 1×409 且 revision 严格 +1、错误 `REDIS_URL` 拒绝启动。定向压力 **10/10**，3002/3003 每轮干净释放。
+- **踩坑（测试夹具，非产品 bug）**：20 个并发用例共用虚拟时钟时，`sleep` 若推进时钟会让 TTL 与 deadline 一起累积撞到抢锁超时 → 首版 435/436。修法不是放宽断言：给 Provider 加 `maxAttempts` 兜底（同时防生产时钟回拨死循环），测试 `sleep` 改为只让出微任务、由用例显式 `clock.advance()`。
+- **验收（全量）**：新增 `e2e:w3` 后 `MPK_FRONT_PORT=5174 npm run verify -- --strict` **49/49 `VERIFY_OK`**（首次让全部 E2E 跑在分布式锁下）；首轮 48/49 唯一失败是 `doc_check` 的 W2 断言依赖 `'e2e:w2', 'e2e:p41'` 相邻字面量（GROUPS 插入 `e2e:w3` 后失配），改为独立检查，不是放宽。归档完成后连续两轮全量 **49/49 `VERIFY_OK`**（round20 257.2s / round21 193.2s，均 0 失败 0 跳过），`doc_check` **215 项**、记忆镜像一致；3002/3003 每轮释放。
+- **边界 / 下一步**：W3 **不改 schema、不动 `SCHEMA_VERSION`、不改迁移链**；房间 / 野怪 / 定时器 / 广播仍是单进程内存态，**W4~W8 完成前仍不开第二实例做常规服务**（本轮 :3002/:3003 只是临时验收进程）。W4 定时器选主、W5 广播顶号可复用同一 Redis 实例；正式 Redis 到位只需换 `REDIS_URL`。
+
+
+## 55. 偶发红第四个根因：core_loop 共斗「单强宠」被 RNG 拖到全灭（2026-11-12）
+
+- **触发**：W3 归档后最终回归 round19 **48/49**，唯一失败 `e2e:core_loop`（46 通过 / 3 失败）。这正是 §47 记录、此前 4 轮全量 + 定向 20 次都没抓到原文的悬案 —— 本轮日志基建（§48）终于留下完整原文。
+- **原文**（`.verify-logs/2026-11-12T12-02-59-923Z-p45112/31_e2e_core_loop.log`）：`六房全清 → settled / result=win / cleared=6` 实得 `{"result":"lose","cleared":3}`（房间 `turn:16`），随后 `房主通关奖励：+40 金钱`（`money=5950 expect=5990`）与 `+capsule_basic×1`（`capsule=52 expect=53`）连锁红。三项同一个根因，不是三个 bug。
+- **根因（测试档强度不足，非产品 bug、非 W3 引入）**：共斗敌人 `createRoomEnemies()` 按注入 rng 生成（Lv.5→15 递增、每房 2 只），`canMove` / 命中 / 状态异常也都吃 rng；`applyCoopTurn` 在 `state.sides.every(s => s.out)` 时判 `lose`。`e2e_core_loop.mjs` 的 host 是「1 只强宠 + 1 只弱占位 + 捕获来的弱野怪」、guest **只有 1 只强宠**；回合一被 rng 拖长，guest 单宠倒下即 `out`，host 弱补位很快全灭。稳定的 `e2e_f16.mjs` 用的是 **6 只全强宠**，所以从未出现。`roundTimeoutMs` 默认 20s，E2E 每轮毫秒级，与超时无关；W3 的 Redis 锁只增加约 2 次本地往返，也不是因果（W2 时期定向 20/20 全绿，说明概率本就低）。
+- **修复（只改测试档，断言零放宽）**：`e2e_core_loop.mjs` 的 `WEAK` 由 Lv.5 / hp300 / atk4 的占位宠改成与 `STRONG` 同口径的 Lv.40 高攻高血替补（保留 `id` / `specId`，不参与捕获，捕获仍由 index 0 执行）；`guestParty` 由 `[STRONG]` 改成 3 只 id 唯一的全强宠。**与 `e2e_f16` 的「全强宠」口径对齐**，把胜负从 rng 手里拿回来。`intentFor` / `playToFinish` / 六房与发奖断言一行未改。
+- **口径沉淀（§49 的延伸）**：不只是「逃跑有成功率」—— 凡服务端战斗带 rng（敌人生成、命中、状态、暴击）的 E2E，都**不能把「必胜」寄托在单次 rng 结果上**；要么像 f16 用压倒性数值把 rng 变量压到零，要么重试到终态。新增玩法串联 E2E 前先比对同玩法专项 E2E 的档位构造。
+- **验收**：加固后 `e2e:core_loop` 定向压力 **30/30 全绿**（49 项/轮，`lose_hits=0`）；归档完成后连续两轮全量 **49/49 `VERIFY_OK`**（round20 257.2s / round21 193.2s，均 0 失败 0 跳过），`doc_check` **215 项**、记忆镜像一致；3002/3003 每轮释放。

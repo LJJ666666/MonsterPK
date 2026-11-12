@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, API_BASE, UNAUTHORIZED_EVENT, BANNED_EVENT, BAN_CODE } from "./api";
 import { getToken, isTokenValid } from "./auth";
 import {
-  SESSION_STATE_EVENT, WILD_STATE_EVENT, ROOM_STATE_EVENT,
+  SESSION_STATE_EVENT, WILD_STATE_EVENT, ROOM_STATE_EVENT, WILD_REFRESH_EVENT,
   type SessionStateMessage, type WildStateMessage, type RoomStateMessage,
 } from "./sessionState";
 import {
@@ -156,6 +156,54 @@ let stopped = true;
  */
 let replacedToken: string | null = null;
 
+/**
+ * W5 前端跳号检测（设计定稿 §3.5）：维护每个下行域最近一次收到的 revision。
+ * 收到 revision 大于「上一帧 + 1」即判定订阅期间丢了快照，触发回源：
+ *  - session / room：发对应 resync 上行，服务端重推最新快照；
+ *  - wild：派发 WILD_REFRESH_EVENT，由 useWildList 走 REST 回源。
+ * 重连后服务端会 hydrate 重新建立基线，故 connect() 里清空本表（见下）。
+ */
+const lastRevs = new Map<string, number>();
+
+export type RevDelta = "reset" | "ok" | "jump";
+
+/**
+ * 记录一份下行快照的修订号，返回它与上一帧的关系。
+ *  - reset：首次见到该域（或基线被清空），直接建立基线，不发回源；
+ *  - ok：单调递增（+1 或持平/陈旧），基线顺延或不改；
+ *  - jump：出现大于「上一帧 + 1」的跳号，说明中间丢了快照，需要回源。
+ * 导出供单测精准覆盖（W5 跳号自动回源的核心判定）。
+ */
+export function noteReceivedRevision(domainKey: string, rev: number): RevDelta {
+  if (typeof rev !== "number" || !Number.isFinite(rev) || rev < 0) return "reset";
+  const prev = lastRevs.get(domainKey);
+  if (prev === undefined) {
+    lastRevs.set(domainKey, rev);
+    return "reset";
+  }
+  if (rev <= prev) return "ok"; // 重复或陈旧帧，基线不动、不回源
+  if (rev > prev + 1) {
+    lastRevs.set(domainKey, rev);
+    return "jump";
+  }
+  lastRevs.set(domainKey, rev);
+  return "ok";
+}
+
+/** 重置所有修订号基线（重连后 hydrate 重新建立）。导出供单测。 */
+export function resetRevisionBaselines(): void {
+  lastRevs.clear();
+}
+
+/** W5 上行回源：订阅期间丢快照后请求服务端重推最新快照（不携带任何状态数据）。 */
+function sendResync(message: { type: string; roomId?: string }): void {
+  if (socket && socket.readyState === OPEN) {
+    try {
+      socket.send(JSON.stringify(message));
+    } catch { /* 已断开 */ }
+  }
+}
+
 function clearTimers() {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
@@ -269,6 +317,9 @@ function connect() {
   socket = ws;
   everOpened = false;
   lastMessageAt = Date.now();
+  // W5：新连接会收到服务端 hydrate 重新建立基线；先清空旧基线，避免把重连后的
+  // 首帧误判成「跳号」触发无谓回源。
+  resetRevisionBaselines();
 
   ws.onopen = () => {
     everOpened = true;
@@ -287,16 +338,34 @@ function connect() {
       heartbeatMs = Math.min(Math.max(m.heartbeatMs, 5_000), 120_000);
       startHeartbeat();
     } else if (isSessionStateMessage(m)) {
+      // W5 跳号检测：hydrate 是全量重推，强制重设基线，绝不视为跳号。
+      if (m.source === "hydrate") {
+        lastRevs.set("session", m.revision);
+      } else if (noteReceivedRevision("session", m.revision) === "jump") {
+        // 订阅期间丢了中间帧 → 请求服务端重推最新快照。
+        sendResync({ type: "session.resync" });
+      }
       // P2-2：只转发，不在这里改游戏状态；session.ts 负责幂等应用与抑制回传。
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(SESSION_STATE_EVENT, { detail: m }));
       }
     } else if (isWildStateMessage(m)) {
+      // W5 跳号检测：野怪快照缺口 → 派发事件，由 useWildList 走 REST 回源。
+      if (noteReceivedRevision(`wild:${m.areaId}`, m.revision) === "jump") {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(WILD_REFRESH_EVENT));
+        }
+      }
       // P4-1b：共享野怪状态也是全量快照，只转发，由 lib/wild.ts 维护视图。
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(WILD_STATE_EVENT, { detail: m }));
       }
     } else if (isRoomStateMessage(m)) {
+      // W5 跳号检测：房间快照缺口 → 请求服务端按 roomId 重推。
+      const roomId = m.room.roomId;
+      if (noteReceivedRevision(`room:${roomId}`, m.room.revision) === "jump") {
+        sendResync({ type: "room.resync", roomId });
+      }
       // P4-2b：房间快照按成员分别下发，只转发；幂等应用由 lib/room.ts 负责。
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(ROOM_STATE_EVENT, { detail: m }));

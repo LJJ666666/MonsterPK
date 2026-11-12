@@ -26,6 +26,7 @@ import { registerRealtime, getRealtimeStats, heartbeatIntervalMs } from './modul
 import { getAccountState, checkSessionVersion, BAN_CODE, type AccountState } from './lib/account';
 import { initializeLockProvider, shutdownLockProvider, getLockDiagnostics, getLockRedisClient } from './lib/lockBootstrap';
 import { initializeSweepLeader, getSweepDiagnostics, getSweepLeader } from './lib/sweepLeader';
+import { initW5Broadcast, shutdownBroadcast, getBroadcastMode } from './lib/connectionControl';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
 declare module 'fastify' {
@@ -139,6 +140,8 @@ fastify.get('/api/health', async () => ({
   lock: getLockDiagnostics(),
   // W4：全局 sweep 选主诊断。current 会查一次 Redis，区分「本地缓存」与「真 leader」。
   sweep: { ...getSweepDiagnostics(), current: await getSweepLeader().verifyCurrent() },
+  // W5：广播模式诊断。local 为单实例直发；redis 为跨实例 pub/sub 双频道 + 顶号。
+  broadcast: getBroadcastMode(),
 }));
 
 fastify.register(authRoutes);
@@ -167,6 +170,10 @@ const port = Number(process.env.PORT ?? 3001);
 initializeLockProvider()
   .then(async () => {
     await initializeSweepLeader(getLockRedisClient(), heartbeatIntervalMs());
+    // W5：REDIS_URL 已配置（锁已是 redis 模式）时，装配跨实例广播 + 顶号；
+    // 否则保持 LocalBroadcastTransport（单实例直发，行为不变）。
+    const w5Client = getLockRedisClient();
+    if (w5Client) initW5Broadcast(w5Client);
     registerRealtime(fastify);
     return fastify.listen({ port, host: '0.0.0.0' });
   })
@@ -179,8 +186,9 @@ initializeLockProvider()
   });
 
 process.on('SIGINT', async () => {
-  // 先交出 leader 租约（要用 Redis 客户端），再关闭锁连接，让其它实例立即接管。
+  // 先交出 leader 租约（要用 Redis 客户端），再关闭广播订阅与锁连接，让其它实例立即接管。
   await getSweepLeader().shutdown();
+  await shutdownBroadcast();
   await shutdownLockProvider();
   await prisma.$disconnect();
   process.exit(0);

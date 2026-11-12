@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import {
-  WILD_STATE_EVENT, isSessionSuspended,
+  WILD_STATE_EVENT, WILD_REFRESH_EVENT, isSessionSuspended,
   type WildMonsterView, type WildStateMessage,
 } from "./sessionState";
 
@@ -63,9 +63,15 @@ export function useWildList(
         ? prev
         : { ...prev, revision: m.revision, monsters: m.monsters, loading: false, error: null });
     };
+    // W5：订阅期间丢了 wild.state 时，ws 通道派发此事件，这里走 REST 重新拉全量。
+    const onRefresh = () => { void refresh(); };
     window.addEventListener(WILD_STATE_EVENT, onState);
-    return () => window.removeEventListener(WILD_STATE_EVENT, onState);
-  }, [areaId]);
+    window.addEventListener(WILD_REFRESH_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener(WILD_STATE_EVENT, onState);
+      window.removeEventListener(WILD_REFRESH_EVENT, onRefresh);
+    };
+  }, [areaId, refresh]);
 
   // WS 未连上时的兜底轮询（30s），不替代广播，只防止列表永久不动。
   useEffect(() => {

@@ -1398,4 +1398,25 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **测试**：`w4SweepLeader.test.ts` 11 例（确定性时钟 + 内存 store：单实例续租不重编号 / 双实例只 1 leader / fence 递增 / 过期 leader guard 与广播全拒 / TTL 接管 / bucket 幂等 / 房间短期 claim 不饿死 / 错误 token 不误删 / 结算幂等 / shutdown 幂等 / lightContext 不续租）；`e2e_w4_sweep.mjs` 27 项（真 Redis 六分区：health 诊断、双 leader 互斥、kill 接管、TTL 自然过期接管、四类幂等键、生产租约隔离）。注册 `e2e:w4` + `STAGES` + `GROUPS.e2e`；**新增 verify 阶段必须同时改两处**，本次又踩到 doc_check 里 `'e2e:w2', 'e2e:w3', 'e2e:p41'` 相邻字面量断言，已改为独立检查（§52 同类坑复发一次，勿再写相邻串）。
 - **验收**：后端 `node:test` **447/447**（W3 的 436 + 11）、`e2e:w4` **27/27**、定向回归 p42b 43/43 / p42d 16/16 / p42e 20/20 / f16 14/14 / core_loop 49/49 全绿；全量 `MPK_FRONT_PORT=5174 npm run verify -- --strict` 连续两轮 **50/50 `VERIFY_OK`**（315.4s / 230.3s，均 0 失败 0 跳过）、`doc_check` **222 项**、记忆镜像 sha256 一致。
 
+## 59. P5-1 W5 收官：广播 / 顶号（双频道 + 本地裁剪 + revision 跳号回源，2026-11-12）
+
+- **范围**：设计定稿 §3.5 / §4.2 W5，依赖 W3 的 Redis 实例（本机 6379 在线）。不改 schema / `SCHEMA_VERSION` / 迁移链，不改存档协议；W0 已抽象的 `BroadcastTransport`（`toUser`/`toAll`）让所有发送点是零改动的注入点。验收断言（定稿 §3.5）：A 实例写入后 B 实例连接收到三种快照；跨实例顶号旧连接收到 `bye`；订阅闪断后跳号自动回源；room 消息不含隐藏态。
+- **新增 `backend/src/lib/redisBroadcastTransport.ts`**（唯一真值源）：
+  - 双频道：`mpk:bc:all`（野怪全局快照）+ `mpk:bc:user:<userId>`（定向，session/room 按 owner 路由）；控制频道 `mpk:ctl:takeover`（跨实例顶号信号）。
+  - subscriber 用**独立 ioredis 连接**（pub/sub 模式下普通命令在订阅连接上被禁）；publisher 复用 W3 `getLockRedisClient()` 那条已 PING 通的连。
+  - 本地裁剪：定向频道只把 `room.state` 发给房间里登记连接的 userId 集合，按接收者剔除 `tokenDigest` / `digest` / `conn_*` / 他人 username 等隐藏态；订阅端本地转发保证连接只收一次。单实例时「发布 → 自身订阅 → 本地转发」闭环，**零重复、零行为差异**（W5 单实例零行为变更验收点）。
+  - 订阅建立时 `hydrate` 全量（拉各 owner 当前权威态），避免订阅前窗口漏快照；hydrate 直接重置 revision 基线，不触发跳号误判。
+- **新增 `backend/src/lib/connectionControl.ts`**（模块边界不反向依赖：不被 session/realtime 反向 import）：
+  - `kickUserConnectionsExceptSv(userId, sv)`：顶号时只踢 `sessionVersion !== sv` 的连接，匹配的连接（同账号同代次）保留，避免「自己顶自己」把当前连接也断。
+  - `publishTakeover(userId, sv)` / `getBroadcastMode()` / `shutdownBroadcast()`：与 `realtime.ts` 的 `onConnected` 本地 takeover 串起来；`index.ts` SIGINT 前 `shutdownBroadcast` 先退订。
+  - 边界：跨实例顶号靠控制频道发信号 + 对端 `kickUserConnectionsExceptSv`；旧 token / 旧 sv 的旧 WS 连接收到 `bye` + close（4001，`SESSION_REPLACED`）。
+- **接线**：`index.ts` 在 `REDIS_URL` 配时 `initW5Broadcast()`，health 加 `broadcast`（值从 `getBroadcastMode()` 来，redis/local）；SIGINT 先 `shutdownBroadcast` 再交租约关锁。`realtime.ts` 新连接 `publishTakeover`、onClose 关广播。session 模块 `session.resync` 上行 → 重推 `buildSnapshot`；room 模块 `room.resync` 上行 → 重推房间态（`pvp/coop` 隐藏态仍按接收者裁剪）。
+- **前端跳号回源 `src/lib/ws.ts`**（零 React 耦合）：
+  - 维护 `(domain, ownerKey) → lastRev`；`noteReceivedRevision(domainKey, rev)` 三种返回 `reset` / `ok` / `jump`：首次/hydrate 建基线 `reset`，`rev<=prev` 重复帧 `ok`，`rev>prev+1` 跳号 `jump`。
+  - 三种快照分支接检测：`session` 跳号发 `session.resync` 上行、`wild` 跳号 `window.dispatchEvent(new CustomEvent(WILD_REFRESH_EVENT))`、`room` 跳号发 `room.resync` 上行（带 `roomId`）。`connect()` 重连后 `resetRevisionBaselines()` 重置基线，避免首帧误判跳号。
+  - `src/lib/sessionState.ts` 新增 `WILD_REFRESH_EVENT` 常量；`src/lib/wild.ts` 的 `useWildList` 监听该事件走 REST `GET /api/wild` 重拉全量（订阅期间丢 wild 快照的兜底）。
+- **边界（如实记录，别当已完成）**：房间态 / 野怪态在 W6/W7 之前仍是**进程内内存真值**，跨实例的 room 成员必须连同一实例。故定稿 §3.5 的「A 实例 room 写入 B 实例连接收到」中，**room 部分 W6 前无法构造跨实例送达**（W5 E2E 的 room 用例改为：同实例创建+加入+出招，验证经 `RedisBroadcastTransport.toUser` 传输 + 隐藏态裁剪，落点正确即可）；session/wild 是真正的跨实例双进程送达（A 写入 → B 连接收到）。W3~W8 完成前仍不开第二实例做常规服务。
+- **测试**：`w5Broadcast.test.ts` 6 例（FakeRedisBus/FakeRegistry 覆盖双频道路由、takeover 控制频道、只踢 sv 不匹配、未 init local 不广播）；`ws.test.ts` 7 例（`noteReceivedRevision` 的 reset/ok/jump/decreasing/非法/独立域基线）；`e2e_w5_broadcast.mjs` 23 项（真 Redis 临时 :3002 双实例：B0 双实例就绪+广播模式 redis、B1 session 跨实例送达、B2 wild 跨实例 claimed/available、B3 room 经 Redis 传输 + 隐藏态裁剪、B4 跨实例顶号旧连接收 bye/4001、B5 resync 回源通路）。注册 `e2e:w5` + `STAGES` + `GROUPS.e2e`（**新增 verify 阶段两处都改**，漏 `GROUPS` 静默少跑）；E2E 测试键带独立前缀，不抢 :3001 的锁 / 租约。
+- **验收**：后端 `node:test` **453/453**（W4 的 447 + 6）、`ws.test.ts` 前端 7 例（合并前端 16/16）、`e2e:w5` **23/23**、定向 f18a/b/c/ux 冒烟与 content matrix 回归全绿；全量前端 144 / 后端 453 / content / W5 E2E 23 / docs 222（记忆镜像 sha256 一致）全绿。健康检查 `broadcast: "redis"` 已 `curl --noproxy '*' /api/health` 探活确认。
+
 

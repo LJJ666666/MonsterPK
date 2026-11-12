@@ -7,6 +7,11 @@
 export const SESSION_STATE_EVENT = "mpk:session-state";
 /** P4-1b 共享野怪：服务端全量广播的区域野怪列表。 */
 export const WILD_STATE_EVENT = "mpk:wild-state";
+/**
+ * W5 跳号回源：订阅期间丢了 wild.state 时，ws 通道派发此事件，
+ * useWildList 监听后走 REST 重新拉全量（避免把 ws.ts 直接耦合到 React hook）。
+ */
+export const WILD_REFRESH_EVENT = "mpk:wild-refresh";
 /** P4-2b 房间：服务端按成员分别下发的房间全量快照。 */
 export const ROOM_STATE_EVENT = "mpk:room-state";
 

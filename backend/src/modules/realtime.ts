@@ -44,6 +44,7 @@ import {
 } from './room';
 import { tokenDigest } from '../lib/roomAuth';
 import { getSweepLeader, guardedCommit, type SweepContext } from '../lib/sweepLeader';
+import { publishTakeover, shutdownBroadcast } from '../lib/connectionControl';
 import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
@@ -309,6 +310,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
     wsRegistry.clear();
     gameSessions.clear();
     await getSweepLeader().shutdown();
+    await shutdownBroadcast();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   });
 }
@@ -351,6 +353,9 @@ function onConnected(
       'ws connection replaced by newer device',
     );
   }
+  // W5：跨实例顶号 —— 本地 takeover 踢掉了本进程旧连接；再广播 takeover 事件，
+  // 让其它实例上该账号的旧连接也收到 bye。新连接（sv 匹配）会被自身忽略，不会收到自己的 bye。
+  if (typeof sessionVersion === 'number') publishTakeover(userId, sessionVersion);
 
   ws.send(
     encodeServerMessage({

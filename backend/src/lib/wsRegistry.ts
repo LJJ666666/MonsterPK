@@ -25,6 +25,11 @@ export type WsConnection = {
   lastSeenAt: number;
   /** 底层 ping 后是否收到过 pong。 */
   alive: boolean;
+  /**
+   * W4：握手时 JWT 的 `sv`（会话代次）。本地心跳复查 DB 的 sessionVersion，
+   * 不匹配说明账号已在别处登录 / 封号，旧 WS 不能再无限存活。
+   */
+  sessionVersion?: number;
 };
 
 export class WsRegistry {

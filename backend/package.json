@@ -24,6 +24,7 @@
     "e2e:p4": "node tests/e2e_p4_cas.mjs",
     "e2e:w2": "node tests/e2e_w2_cas.mjs",
     "e2e:w3": "node --import tsx tests/e2e_w3_lock.mjs",
+    "e2e:w4": "node --import tsx tests/e2e_w4_sweep.mjs",
     "e2e:p41": "node tests/e2e_p41_wild.mjs",
     "e2e:p42a": "node tests/e2e_p42a_rank.mjs",
     "e2e:p42b": "node tests/e2e_p42b_room.mjs",

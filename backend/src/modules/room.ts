@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { rooms, wsRegistry, broadcastToUser } from './sessionBus';
 import { encodeServerMessage } from '../lib/wsProtocol';
 import { withRoomLock } from '../lib/slotLock';
+import { getSweepLeader, type SweepContext } from '../lib/sweepLeader';
 import { tokenDigest } from '../lib/roomAuth';
 import type { TickReport } from '../lib/roomRegistry';
 import { parseCoopIntent } from '../game/coop';
@@ -93,53 +94,103 @@ const emptyReport = (): TickReport => ({
   changedRoomIds: [], timedOut: 0, autopiloted: 0, abandoned: [], deleted: [],
 });
 
-/** 惰性推进：REST 读也触发一次服务端计时，E2E / 客户端不必纯等定时器。 */
-export function tickRoom(roomId: string, now = Date.now()): void {
+function mergeReport(into: TickReport, from: TickReport): void {
+  into.changedRoomIds.push(...from.changedRoomIds);
+  into.abandoned.push(...from.abandoned);
+  into.deleted.push(...from.deleted);
+  into.timedOut += from.timedOut;
+  into.autopiloted += from.autopiloted;
+}
+
+/**
+ * W4 房间推进核心（调用方必须已持 `withRoomLock`）。
+ *
+ * 幂等门 `idem:room:<roomId>:<revision>` 是**短期 claim + 用完释放**：
+ * 两个实例在同一 revision 上并发 tick 只有 1 个能推进；推进完 revision 就变了，
+ * 下一次 250ms tick 用新键正常推进，不会把回合饿死。W6 会用 PG 行版本 CAS 替换。
+ * 结算标记另用长期 `idem:settle:*` 保证胜负只触发一次写档；广播只在提交成功后发。
+ */
+async function tickRoomCore(
+  roomId: string,
+  now: number,
+  ctx: SweepContext | null | undefined,
+): Promise<TickReport> {
   const report = emptyReport();
-  rooms.tick(roomId, now, Math.random, report);
-  if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
-    maybeSettlePvp(roomId);
-    maybeSettleCoop(roomId);
-    publishRoom(roomId);
+  const activeCtx = ctx === undefined ? getSweepLeader().lightContext() : ctx;
+  const revision = rooms.get(roomId)?.revision ?? 0;
+  const roomKey = `room:${roomId}:${revision}`;
+  const token = activeCtx ? await activeCtx.claim(roomKey, 5_000) : null;
+  if (activeCtx && !token) return report;
+  try {
+    if (activeCtx && !(await activeCtx.guard())) return report;
+    rooms.tick(roomId, now, Math.random, report);
+    if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
+      await maybeSettlePvp(roomId, activeCtx);
+      await maybeSettleCoop(roomId, activeCtx);
+      publishRoom(roomId); // 提交成功才发
+    }
+    return report;
+  } finally {
+    if (activeCtx && token) await activeCtx.releaseClaim(roomKey, token);
   }
 }
 
+/** 惰性推进：REST 读也触发一次服务端计时，E2E / 客户端不必纯等定时器。 */
+export async function tickRoom(
+  roomId: string,
+  now = Date.now(),
+  ctx?: SweepContext | null,
+): Promise<TickReport> {
+  return withRoomLock(roomId, () => tickRoomCore(roomId, now, ctx));
+}
+
 /** 定时扫描：超时 / 托管 / 全员掉线 / TTL 全在服务端推进，客户端无法触发时间。 */
-export function sweepRooms(now = Date.now()): TickReport {
-  const report = rooms.sweep(now, Math.random);
-  for (const id of new Set([...report.changedRoomIds, ...report.abandoned])) {
-    maybeSettlePvp(id);
-    maybeSettleCoop(id);
-    publishRoom(id);
+export async function sweepRooms(
+  now = Date.now(),
+  ctx?: SweepContext | null,
+): Promise<TickReport> {
+  const merged = emptyReport();
+  // W4：逐房套 `withRoomLock`（与意图写入同一把锁），不再无锁遍历快照。
+  for (const roomId of rooms.roomIds()) {
+    const one = await withRoomLock(roomId, () => tickRoomCore(roomId, now, ctx));
+    mergeReport(merged, one);
   }
-  return report;
+  return merged;
 }
 
 /**
  * P4-2d：房间刚分出胜负（pvp 结束 → settled）时，触发写双方档。
- * 动态 import 避免 room ↔ pvp 模块顶层循环依赖；幂等由 room.pvpSettled 标记保证。
+ * 动态 import 避免 room ↔ pvp 模块顶层循环依赖；幂等由 room.pvpSettled 标记 +
+ * W4 的共享 `idem:settle:pvp:<roomId>` 双重保证（失败回滚键以允许重试）。
  */
-function maybeSettlePvp(roomId: string): void {
+async function maybeSettlePvp(roomId: string, ctx: SweepContext | null): Promise<void> {
   const room = rooms.get(roomId);
   if (!room || !room.pvp || !room.pvp.finished || room.pvpSettled) return;
-  // W0：经 RoomRegistry 显式写回，不依赖「get() 返回同一引用」这一单机假设。
+  const key = `settle:pvp:${roomId}`;
+  const token = ctx ? await ctx.claim(key) : null;
+  // 别的实例已领走结算：本地也置位，避免重复触发（发奖真值由 DB 唯一键裁决）。
   rooms.setSettledFlag(roomId, 'pvp', true);
-  void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(() => {
-    // 结算失败不阻断广播；下次心跳 / 意图提交会重试（标记回滚以允许重试）。
+  if (ctx && !token) return;
+  void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(async () => {
     rooms.setSettledFlag(roomId, 'pvp', false);
+    if (ctx && token) await ctx.releaseClaim(key, token);
   });
 }
 
 /**
  * F16：副本分出胜负（coop 结束 → settled）时，触发写各成员档与通关奖励。
- * 与 pvp 同款动态 import 规避 room ↔ coop 循环依赖；幂等靠 room.coopSettled。
+ * 与 pvp 同款动态 import 规避循环依赖；幂等靠 room.coopSettled + 共享 CAS 门。
  */
-function maybeSettleCoop(roomId: string): void {
+async function maybeSettleCoop(roomId: string, ctx: SweepContext | null): Promise<void> {
   const room = rooms.get(roomId);
   if (!room || !room.coop || !room.coop.finished || room.coopSettled) return;
+  const key = `settle:coop:${roomId}`;
+  const token = ctx ? await ctx.claim(key) : null;
   rooms.setSettledFlag(roomId, 'coop', true);
-  void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(() => {
+  if (ctx && !token) return;
+  void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(async () => {
     rooms.setSettledFlag(roomId, 'coop', false);
+    if (ctx && token) await ctx.releaseClaim(key, token);
   });
 }
 
@@ -239,8 +290,8 @@ export async function applyRoomIntent(params: {
       now: params.now ?? Date.now(),
     });
     if ('code' in res) return fail(res.code, res.reason);
-    maybeSettlePvp(params.roomId);
-    maybeSettleCoop(params.roomId);
+    await maybeSettlePvp(params.roomId, getSweepLeader().lightContext());
+    await maybeSettleCoop(params.roomId, getSweepLeader().lightContext());
     publishRoom(res.value.room);
     return { ok: true, value: rooms.view(res.value.room, params.userId) };
   });
@@ -388,7 +439,8 @@ export async function roomRoutes(fastify: FastifyInstance): Promise<void> {
     const gate = memberView(p.data.roomId, req.user.userId);
     if ('code' in gate) return replyResult(reply, gate);
     // 惰性推进：读一次也让服务端按真实时间处理超时与全掉解散。
-    await withRoomLock(p.data.roomId, async () => { tickRoom(p.data.roomId); });
+    // W4：tickRoom 内部已套 withRoomLock，这里不再嵌套（进程内锁非重入会自锁）。
+    await tickRoom(p.data.roomId);
     return replyResult(reply, memberView(p.data.roomId, req.user.userId));
   });
 

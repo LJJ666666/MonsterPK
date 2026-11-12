@@ -19,6 +19,11 @@ let mode: LockMode = 'in-process';
 let client: Redis | null = null;
 
 /** 供 /api/health 与 E2E 诊断：确认当前实例真的跑在分布式锁上。 */
+/** W4 复用同一个已 PING 通的 Redis 客户端做全局 sweep 选主，不另建连接。 */
+export function getLockRedisClient(): Redis | null {
+  return client;
+}
+
 export function getLockMode(): LockMode {
   return mode;
 }

@@ -43,6 +43,7 @@ import {
   publishRooms, sweepRooms, applyRoomIntent, applyRoomAutopilot,
 } from './room';
 import { tokenDigest } from '../lib/roomAuth';
+import { getSweepLeader, guardedCommit, type SweepContext } from '../lib/sweepLeader';
 import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
@@ -71,53 +72,92 @@ export function runLocalHeartbeat(
   }
 }
 
+/** guardedCommit 抽到 lib/sweepLeader.ts，供单测 / E2E 直接 import 同一实现。 */
+
 /**
- * W0：全局 sweep 段 —— 单实例仍由本进程跑；W4 加 leader 租约 + fencing 后
- * 只允许 leader 调用，并给每次 sweep 加幂等键。当前行为与拆分前逐字一致。
+ * W0：全局 sweep 段 —— W4 起只由 leader 调用。
+ *
+ * 无 ctx 时走「单实例直通」路径，行为与 W0 拆分前逐字一致（单测 / 本地无 Redis 用）；
+ * 有 ctx 时按心跳 bucket 加幂等键：sessions / battles / wilds 每个 bucket 只处理一次，
+ * quota.release 按 battleId、wild 广播按 (areaId, bucket) 各只发一次。
+ *
+ * 注意：W6/W7 才会把房间与野怪状态机迁到共享存储，本阶段的幂等键防的是
+ * 「leader 切换重叠窗口内的重复推进」，不是跨实例共享真值。
  */
-export function runGlobalSweep(now: number): void {
-  sweepSessions(now);
-  // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
-  // P4-2c：被回收的 Boss 战要放回「在途次数」，否则这次 hold 会占到进程重启。
-  for (const st of battles.sweepExpired(now)) {
-    if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
+export async function runGlobalSweep(
+  now: number,
+  heartbeatMs: number,
+  ctx?: SweepContext | null,
+): Promise<void> {
+  if (!ctx) {
+    sweepSessions(now);
+    for (const st of battles.sweepExpired(now)) {
+      if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
+    }
+    for (const areaId of wilds.sweep(now)) {
+      const spec = wilds.getAreaSpec(areaId);
+      if (spec) publishWild(areaId, spec, now);
+    }
+    return;
   }
-  // P4-1b：共享野怪过期换新 / 超时放回池子后，把新列表广播给所有在线客户端。
-  for (const areaId of wilds.sweep(now)) {
-    const spec = wilds.getAreaSpec(areaId);
-    if (spec) publishWild(areaId, spec, now);
+
+  const bucket = Math.floor(now / Math.max(1, heartbeatMs));
+  await guardedCommit(ctx, `sweep:sessions:${bucket}`, () => { sweepSessions(now); });
+
+  // 每个被回收的 Boss 战只放行一次 quota.release；重复 sweep 不会把名额多还。
+  const expired = battles.sweepExpired(now);
+  for (const st of expired) {
+    if (!st.bossQuotaKey) continue;
+    const key = st.bossQuotaKey;
+    await guardedCommit(ctx, `quota:release:${st.id}`, () => { bossQuota.release(key); });
+  }
+
+  // wilds.sweep 本身会补怪，必须整段只由一个 leader 在一个 bucket 内跑一次；
+  // 广播再按 (areaId, bucket) 二次幂等，重复订阅/切换不重复推快照。
+  const wildToken = (await ctx.guard()) ? await ctx.claim(`sweep:wilds:${bucket}`) : null;
+  if (wildToken) {
+    for (const areaId of wilds.sweep(now)) {
+      const spec = wilds.getAreaSpec(areaId);
+      if (!spec) continue;
+      await guardedCommit(ctx, `wild:${areaId}:${bucket}`, () => { publishWild(areaId, spec, now); });
+    }
   }
 }
 
 /**
- * W0：封号复查属于「本进程连接」范畴（踢的是自己手里的连接），
- * 但要查 DB，故单独成 async 段；无在线账号时直接短路。
+ * W0：封号复查属于「本进程连接」范畴（踢的是自己手里的连接），但要查 DB，故独立成段。
+ * W4：同一次查询顺带比对 `sessionVersion` —— 旧 token 的 WS 就算一直 pong 也不能
+ * 无限存活（顶号 / 封号残留兜底）。无在线账号时直接短路。
  */
 export async function runBanSweep(fastify: FastifyInstance): Promise<void> {
   const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
   if (userIds.length === 0) return;
   try {
-    const banned = await prisma.user.findMany({
-      where: { id: { in: userIds }, bannedAt: { not: null } },
-      select: { id: true, banReason: true },
+    const accounts = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, banReason: true, bannedAt: true, sessionVersion: true },
     });
-    for (const u of banned) {
-      for (const c of wsRegistry.listForUser(u.id)) {
-        try {
-          c.socket.send(
-            encodeServerMessage({
-              type: 'bye',
-              code: BAN_CODE,
-              reason: u.banReason ?? '你已被封号',
-            }),
-          );
-          c.socket.close(1008, BAN_CODE);
-        } catch { /* 已断开 */ }
-        wsRegistry.remove(c.id);
-        detachConnection(c.id);
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    for (const c of wsRegistry.all()) {
+      const acc = byId.get(c.userId);
+      if (!acc) continue;
+      const banned = acc.bannedAt !== null;
+      const replaced = c.sessionVersion !== undefined && c.sessionVersion !== acc.sessionVersion;
+      if (!banned && !replaced) continue;
+      const code = banned ? BAN_CODE : SESSION_REPLACED_CODE;
+      const reason = banned
+        ? (acc.banReason ?? '你已被封号')
+        : '账号已在其他设备登录，本设备已下线';
+      try {
+        c.socket.send(encodeServerMessage({ type: 'bye', code, reason }));
+        c.socket.close(banned ? 1008 : 4001, code);
+      } catch { /* 已断开 */ }
+      wsRegistry.remove(c.id);
+      detachConnection(c.id);
+      if (banned) {
+        dropUserSessions(c.userId);
+        battles.dropUser(c.userId);
       }
-      dropUserSessions(u.id);
-      battles.dropUser(u.id);
     }
   } catch (err) {
     fastify.log.error({ event: 'ws_ban_sweep_error', err }, 'ws ban sweep failed');
@@ -151,7 +191,7 @@ export function kickUserConnections(userId: string, reason: string): number {
 }
 
 /** 心跳周期可由 .env 覆盖（便于联调），但钳制在 5s~120s，防止配置失误打爆服务。 */
-function heartbeatIntervalMs(): number {
+export function heartbeatIntervalMs(): number {
   const raw = Number(process.env.WS_HEARTBEAT_MS ?? WS_HEARTBEAT_MS);
   if (!Number.isFinite(raw)) return WS_HEARTBEAT_MS;
   return Math.min(Math.max(raw, 5_000), 120_000);
@@ -218,7 +258,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
         // P4-2b：把 token 指纹带进连接生命周期，房间座位据此判断「同 token 同设备」。
         wss.handleUpgrade(
           req, socket, head,
-          (ws) => onConnected(fastify, ws, userId, heartbeatMs, tokenDigest(token)),
+          (ws) => onConnected(fastify, ws, userId, heartbeatMs, tokenDigest(token), payload?.sv),
         );
       } catch (err) {
         fastify.log.error({ event: 'ws_upgrade_error', err }, 'ws upgrade failed');
@@ -227,28 +267,33 @@ export function registerRealtime(fastify: FastifyInstance): void {
     })();
   });
 
-  // W0（设计定稿 §3.4）：原 30s 心跳是「本地连接管理 + 全局 sweep + 封号复查」
-  // 的混合体。现拆成三段独立函数，仍由本进程每 heartbeatMs 依次触发，
-  // 顺序与拆分前逐字一致 —— 单实例零行为变更；W4 只需给 runGlobalSweep 加
-  // leader 租约，把本地段留在每个进程各跑一份。
+  // W4（设计定稿 §3.4）：W0 拆出的三段里，本地心跳与封号复查每进程各跑；
+  // 全局 sweep 只有 leader 跑，且每段动作都带「guard → 幂等键 → 提交成功才 publish」。
   const timer = setInterval(() => {
     void (async () => {
       const now = Date.now();
       runLocalHeartbeat(fastify, now, heartbeatMs);
-      runGlobalSweep(now);
+      try {
+        await getSweepLeader().run(async (ctx) => {
+          await runGlobalSweep(now, heartbeatMs, ctx);
+        });
+      } catch (err) {
+        fastify.log.error({ event: 'sweep_leader_error', err }, 'global sweep failed');
+      }
       await runBanSweep(fastify);
     })();
   }, heartbeatMs);
   timer.unref?.();
 
   // P4-2b 房间时间线与 30s 心跳解耦：回合超时是秒级，不能等一个心跳周期才推进。
-  // 250ms 扫描纯内存状态，房间稳定时 tick 不产生变更、也不广播。
+  // W4：用本地 leader 缓存（不每 250ms 打 Redis），跨实例互斥由
+  // `withRoomLock` + `idem:room:<roomId>:<rev>` 短期 claim 共同裁决。
   const roomTimer = setInterval(() => {
-    try {
-      sweepRooms(Date.now());
-    } catch (err) {
+    const ctx = getSweepLeader().lightContext();
+    if (!ctx) return; // 本进程不是 leader：不推进、不广播，避免双推进
+    void sweepRooms(Date.now(), ctx).catch((err) => {
       fastify.log.error({ event: 'room_sweep_error', err }, 'room sweep failed');
-    }
+    });
   }, 250);
   roomTimer.unref?.();
 
@@ -263,6 +308,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
     }
     wsRegistry.clear();
     gameSessions.clear();
+    await getSweepLeader().shutdown();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
   });
 }
@@ -274,6 +320,7 @@ function onConnected(
   userId: string,
   heartbeatMs: number,
   digest: string,
+  sessionVersion?: number,
 ): void {
   const now = Date.now();
   const conn: WsConnection = {
@@ -283,6 +330,8 @@ function onConnected(
     connectedAt: now,
     lastSeenAt: now,
     alive: true,
+    // W4：握手时的 sv 存进连接，本地心跳复查 DB 发现代次变化就踢旧连接。
+    sessionVersion: typeof sessionVersion === 'number' ? sessionVersion : undefined,
   };
   // P4-1a 顶号：新连接原子接管，把同账号的旧连接全部踢下线。
   // 旧连接收到 bye 后由前端停实时 / 停同步 / 清 token，绝不重连、绝不合并本地改动。

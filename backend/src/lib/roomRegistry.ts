@@ -102,6 +102,9 @@ export class RoomRegistry {
 
   get(roomId: string): RoomState | undefined { return this.storage.get(roomId); }
 
+  /** W4：sweepRooms 要逐房套 `withRoomLock`，先取 id 快照（不暴露内部 storage）。 */
+  roomIds(): string[] { return this.storage.all().map((r) => r.roomId); }
+
   /**
    * W0：结算幂等标记的显式写回（**不 bump revision**，保持零行为变更）。
    * 旧代码直接改 `rooms.get()` 返回对象的字段，靠「同一引用」隐式生效；

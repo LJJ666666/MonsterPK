@@ -785,7 +785,7 @@ checks = [
     ("W2：双进程 E2E 注册到 npm / STAGES / GROUPS / 清理前缀",
      "e2e:w2" in text(ROOT / "backend/package.json")
      and "{ id: 'e2e:w2'" in text(ROOT / "scripts/verify.mjs")
-     and "'e2e:w2', 'e2e:w3', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:p41'," in text(ROOT / "scripts/verify.mjs")
      and "'w2'" in text(ROOT / "backend/scripts/clean-test-data.mjs")
      and "--import" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")
      and "stopSecondInstance" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")),
@@ -843,7 +843,7 @@ checks = [
      "e2e:w3" in text(ROOT / "backend/package.json")
      and "--import tsx" in text(ROOT / "backend/package.json")
      and "{ id: 'e2e:w3'" in text(ROOT / "scripts/verify.mjs")
-     and "'e2e:w2', 'e2e:w3', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:p41'," in text(ROOT / "scripts/verify.mjs")
      and "'w3'" in text(ROOT / "backend/scripts/clean-test-data.mjs")
      and "redisLockProvider.ts" in text(ROOT / "backend/tests/e2e_w3_lock.mjs")
      and "预占账号锁" in text(ROOT / "backend/tests/e2e_w3_lock.mjs")
@@ -889,6 +889,33 @@ checks = [
      and "配置分层硬约束" in memory_text
      and "curl --noproxy" in handoff_text
      and "唯一可提交真值" in handoff_text),
+    ("W4：选主 / fencing / 幂等键 / 启动装配 / health 诊断落地",
+     (ROOT / "backend/src/lib/sweepLeader.ts").exists()
+     and "ACQUIRE_SCRIPT" in text(ROOT / "backend/src/lib/sweepLeader.ts")
+     and "IS_CURRENT_SCRIPT" in text(ROOT / "backend/src/lib/sweepLeader.ts")
+     and "guardedCommit" in text(ROOT / "backend/src/lib/sweepLeader.ts")
+     and "lightContext" in text(ROOT / "backend/src/lib/sweepLeader.ts")
+     and "initializeSweepLeader" in text(ROOT / "backend/src/index.ts")
+     and "getSweepDiagnostics" in text(ROOT / "backend/src/index.ts")
+     and "sessionVersion" in text(ROOT / "backend/src/lib/wsRegistry.ts")
+     and "withRoomLock" in text(ROOT / "backend/src/modules/room.ts")),
+    ("W4：确定性单测 / 真 Redis E2E / verify 三处注册齐全",
+     (ROOT / "backend/tests/w4SweepLeader.test.ts").exists()
+     and (ROOT / "backend/tests/e2e_w4_sweep.mjs").exists()
+     and "sweepLeader.ts" in text(ROOT / "backend/tests/e2e_w4_sweep.mjs")
+     and "生产租约隔离" in text(ROOT / "backend/tests/e2e_w4_sweep.mjs")
+     and "e2e:w4" in text(ROOT / "backend/package.json")
+     and "{ id: 'e2e:w4'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w4'," in text(ROOT / "scripts/verify.mjs")),
+    ("bug_log §58 / 任务表 / HANDOFF / 定稿 / 台账 / MEMORY 记录 W4 收官与 50/50",
+     "## 58." in bug_text
+     and "P5-1 W4 收官" in task_text
+     and "W4 ✅ 2026-11-12" in handoff_text
+     and "50/50" in handoff_text
+     and "W4 ✅ 2026-11-12" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "50/50" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W4 ✅ 2026-11-12" in text(ROOT / ".trae/documents/未来规划与技术债_2026-11-07.md")
+     and "P5-1 W4 ✅" in memory_text),
 ]
 
 for name, ok, *detail in checks:

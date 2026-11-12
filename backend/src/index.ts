@@ -22,9 +22,10 @@ import { coopRoutes } from './modules/coop';
 import { playerProgressRoutes, progressStats } from './modules/playerProgress';
 import { contentStats } from './game/content';
 import { getSessionStats, battles, wilds } from './modules/sessionBus';
-import { registerRealtime, getRealtimeStats } from './modules/realtime';
+import { registerRealtime, getRealtimeStats, heartbeatIntervalMs } from './modules/realtime';
 import { getAccountState, checkSessionVersion, BAN_CODE, type AccountState } from './lib/account';
-import { initializeLockProvider, shutdownLockProvider, getLockDiagnostics } from './lib/lockBootstrap';
+import { initializeLockProvider, shutdownLockProvider, getLockDiagnostics, getLockRedisClient } from './lib/lockBootstrap';
+import { initializeSweepLeader, getSweepDiagnostics, getSweepLeader } from './lib/sweepLeader';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
 declare module 'fastify' {
@@ -136,6 +137,8 @@ fastify.get('/api/health', async () => ({
   progress: progressStats(),
   // W3：锁模式诊断。in-process 只允许单实例；redis 为跨进程租约锁。
   lock: getLockDiagnostics(),
+  // W4：全局 sweep 选主诊断。current 会查一次 Redis，区分「本地缓存」与「真 leader」。
+  sweep: { ...getSweepDiagnostics(), current: await getSweepLeader().verifyCurrent() },
 }));
 
 fastify.register(authRoutes);
@@ -156,14 +159,17 @@ fastify.register(coopRoutes);
 fastify.register(playerProgressRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
-registerRealtime(fastify);
-
+// W4：定时器必须在 Redis 选主装配之后启动，否则前几个心跳会用进程内 leader 跑全局 sweep。
 const port = Number(process.env.PORT ?? 3001);
 
 // W3：先装配分布式锁再监听端口。REDIS_URL 已配置却连不上时启动直接失败，
 // 绝不带着进程内锁去接多实例流量（口径见 lib/lockBootstrap.ts）。
 initializeLockProvider()
-  .then(() => fastify.listen({ port, host: '0.0.0.0' }))
+  .then(async () => {
+    await initializeSweepLeader(getLockRedisClient(), heartbeatIntervalMs());
+    registerRealtime(fastify);
+    return fastify.listen({ port, host: '0.0.0.0' });
+  })
   .then(() => {
     fastify.log.info(`MonsterPK backend listening on :${port}`);
   })
@@ -173,6 +179,8 @@ initializeLockProvider()
   });
 
 process.on('SIGINT', async () => {
+  // 先交出 leader 租约（要用 Redis 客户端），再关闭锁连接，让其它实例立即接管。
+  await getSweepLeader().shutdown();
   await shutdownLockProvider();
   await prisma.$disconnect();
   process.exit(0);

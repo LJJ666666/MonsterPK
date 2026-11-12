@@ -1380,3 +1380,21 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **可复现核验命令（先读再动手）**：`env | grep -i proxy` → `11811`；PowerShell `Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' | Select-Object ProxyEnable,ProxyServer` → `8693`；`curl --noproxy '*' -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health` → `200`；`P=http://127.0.0.1:8693; HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P curl -o /dev/null -w '%{http_code}' https://github.com` → `200`。
 - **归档落点**：HANDOFF 提交规矩段、项目 MEMORY §4、用户级长期记忆、今日日志、`scripts/doc_check.py` 的 §57 断言；`.trae` 镜像由 `scripts/sync_memory.py` 同步。
 
+## 58. P5-1 W4 收官：定时器选主 + fencing + 幂等键（2026-11-12）
+
+- **范围**：设计定稿 §3.4 / §4.2 W4，依赖 W3 的 Redis 实例与 PG（本机均已在线）。不改 schema / `SCHEMA_VERSION` / 迁移链，不改存档协议。
+- **新增 `backend/src/lib/sweepLeader.ts`**（唯一真值源）：
+  - `SweepLeaseStore` 接口 + Redis 实现（`createRedisSweepLeaseStore(client, keyPrefix='')`）+ 确定性内存实现（`InProcessSweepLeaseStore`，CI 无 Redis 也能验）。
+  - leader 租约 `lock:sweep:global`（`SET NX PX`，TTL 默认 `2×WS_HEARTBEAT_MS` = 60s，可 `SWEEP_LEASE_TTL_MS` 覆盖）；`sweep:fence` 只在 acquire 成功时 `INCR`，新 leader fence 严格大于旧 leader。
+  - `renew` / `release` / `isCurrent` / `claim` / `releaseClaim` 全用 Lua token 比对；`isCurrent` 同时校验 token 与 fence，**过期 leader 写共享态全拒**。
+  - `guardedCommit(ctx, key, action)` = guard → claim → 动作，publish 一律写在 action 内，**提交成功才发**；抽到本模块让单测 / E2E 直接 import 同一实现。
+  - `SweepLeader.run()`（心跳用：抢/续租 + 两次 re-check）与 `lightContext()`（250ms 房间定时器用：本地缓存，不打 Redis，跨实例正确性由 room 幂等键 + `withRoomLock` 兜底）；`shutdown()` 主动交出租约。
+- **接线**：`lockBootstrap.ts` 导出 `getLockRedisClient()` 复用 W3 那条已 PING 通的 ioredis 连接；`index.ts` 在 `initializeLockProvider()` 之后 `await initializeSweepLeader(...)` **启动即抢一次租约**（否则 250ms timer 在前 30s 因 `lightContext()` 为空而停摆），再 `registerRealtime()` / `listen()`；health 加 `sweep:{mode,instanceId,leader,fence,ttlMs,idemTtlMs,current}`（`current` 查一次 Redis，区分缓存与真 leader）；SIGINT / onClose 先交租约再关锁连接。
+- **三段心跳**：`runLocalHeartbeat` / `runBanSweep` 每进程各跑；`runGlobalSweep(now, heartbeatMs, ctx?)` 只有 leader 跑，按心跳 bucket 给 `sweep:sessions` / `sweep:battles` / `sweep:wilds`、`quota:release:<battleId>`、`wild:<areaId>:<bucket>` 加幂等键；无 ctx 时走单实例直通路径，与 W0 拆分前逐字一致。
+- **封号段顺带修 W5 前置项**：`WsConnection` 加 `sessionVersion`（握手 JWT 的 sv），`runBanSweep` 一次查库同时判 `bannedAt` 与 `sessionVersion`，不匹配即本地 `bye` + close + remove + detach —— 旧 token 的 WS 不再靠 pong 无限存活。
+- **房间路径**：`tickRoom` / `sweepRooms` 改 async 并统一套 `withRoomLock`（`sweepRooms` 逐房加锁，不再无锁遍历快照；REST 读去掉外层嵌套锁，避免进程内锁非重入自锁）；`RoomRegistry.roomIds()` 提供 id 快照。幂等门 `idem:room:<roomId>:<revision>` 是**短期 claim + 用完释放**：同 revision 双实例并发只 1 个推进，推进后 revision 变了下一次 tick 用新键，不会饿死回合。结算标记提共享 CAS 门 `idem:settle:pvp|coop:<roomId>`（失败回滚键以允许重试），`maybeSettle*` 改 async。
+- **边界（如实记录，别当已完成）**：W6 才把 RoomStorage 换 PG 行版本 CAS、W7 才把野怪池全量搬 Redis；本阶段的房间/野怪状态仍是**进程内内存真值**，幂等键防的是「leader 切换重叠窗口重复推进」，不是跨实例共享真值。定稿 §4.2 的「双实例跑 5 分钟」长稳验收**延后到 W6/W7 之后**才有意义；本轮用「两个独立 SweepLeader 共享同一真 Redis」等价验证选主/fence/接管，测试键带独立前缀，**绝不抢常驻 :3001 的租约**（否则 :3001 的 250ms 房间 timer 会停摆，连锁污染后续 E2E）。W3~W8 完成前仍不开第二实例做常规服务。**性能边界（如实记录）**：250ms 房间定时器在 Redis 模式下每房每轮约 4 次 Redis 往返（`withRoomLock` 抢/放 + room 幂等键 claim/放），房间规模大时需 W6 批量化；本轮 11 房规模全量 50/50 通过，未做大规模压测。
+- **测试**：`w4SweepLeader.test.ts` 11 例（确定性时钟 + 内存 store：单实例续租不重编号 / 双实例只 1 leader / fence 递增 / 过期 leader guard 与广播全拒 / TTL 接管 / bucket 幂等 / 房间短期 claim 不饿死 / 错误 token 不误删 / 结算幂等 / shutdown 幂等 / lightContext 不续租）；`e2e_w4_sweep.mjs` 27 项（真 Redis 六分区：health 诊断、双 leader 互斥、kill 接管、TTL 自然过期接管、四类幂等键、生产租约隔离）。注册 `e2e:w4` + `STAGES` + `GROUPS.e2e`；**新增 verify 阶段必须同时改两处**，本次又踩到 doc_check 里 `'e2e:w2', 'e2e:w3', 'e2e:p41'` 相邻字面量断言，已改为独立检查（§52 同类坑复发一次，勿再写相邻串）。
+- **验收**：后端 `node:test` **447/447**（W3 的 436 + 11）、`e2e:w4` **27/27**、定向回归 p42b 43/43 / p42d 16/16 / p42e 20/20 / f16 14/14 / core_loop 49/49 全绿；全量 `MPK_FRONT_PORT=5174 npm run verify -- --strict` 连续两轮 **50/50 `VERIFY_OK`**（315.4s / 230.3s，均 0 失败 0 跳过）、`doc_check` **222 项**、记忆镜像 sha256 一致。
+
+

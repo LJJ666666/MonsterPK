@@ -15,7 +15,7 @@
  * 运行：cd backend && npm run e2e:f18c（需要 :3001 后端在线）
  * 也可经 npm run verify 自动纳入（见 scripts/verify.mjs 的 e2e 分组）。
  */
-import { Suite, api, asText, newAccount, cleanupAccounts, requireBackend, validSave, save } from './lib/harness.mjs';
+import { Suite, api, asText, newAccount, cleanupAccounts, requireBackend, validSave, save, formatFatal } from './lib/harness.mjs';
 
 // 强力队伍：一级 Lv30 高数值，确保能稳定击败 Lv8 地图首领（不与 rng 博弈）。
 const STATS = { hp: 45, atk: 55, def: 46, spAtk: 63, spDef: 53, spd: 68 };
@@ -78,6 +78,23 @@ async function playToEnd(token, battleId, maxRounds = 80) {
     rounds += 1;
   }
   return { st, mbResult, rounds };
+}
+
+/**
+ * 服务端逃跑按速度判定成功率（`game/battle.ts:417`，速度占优 75%）。单次 flee
+ * 有 25% 概率失败、战斗继续（日志「撤离失败！对方抓住了破绽。」），此时 mapBoss
+ * 在途名额不会释放、战斗仍在册 —— 后续 start 直接 409 MAPBOSS_BATTLE_IN_PROGRESS，
+ * 让「余量 / 用满 / 超限」四项断言连锁假红（2026-11-12 全量实测，bug_log §49）。
+ * 与 f14 / p42c 的 fleeUntilDone 同口径：重试到 finished 为止。
+ */
+async function fleeUntilDone(token, battleId, maxTries = 12) {
+  let res = null;
+  for (let i = 0; i < maxTries; i += 1) {
+    if (i > 0) console.log(`[INFO] 逃跑骰子未通过，第 ${i} 次重试（服务端有成功率）`);
+    res = await act(token, battleId, { type: 'flee' });
+    if (res.status !== 200 || res.data?.battle?.finished) return res;
+  }
+  return res;
 }
 
 async function main() {
@@ -185,7 +202,10 @@ async function main() {
   const fleeStart = await startMapBoss(token, STARTER);
   if (fleeStart.status === 200) {
     const fb = fleeStart.data.battle.battleId;
-    const fleeRes = await act(token, fb, { type: 'flee' });
+    const fleeRes = await fleeUntilDone(token, fb);
+    s.check('地图首领逃跑重试到真正撤离（服务端有成功率）',
+      fleeRes?.data?.battle?.finished === true && fleeRes.data.battle.result === 'fled',
+      `finished=${fleeRes?.data?.battle?.finished} result=${fleeRes?.data?.battle?.result}`);
     s.check('地图首领逃跑结算无 mapBoss 掉落',
       fleeRes.data?.mapBoss === undefined || fleeRes.data?.mapBoss?.drop === null,
       asText(fleeRes.data?.mapBoss));
@@ -222,7 +242,8 @@ async function main() {
 try {
   await main();
 } catch (e) {
-  s.check('套件执行未抛异常', false, String(e?.stack || e).replace(/\s+/g, ' ').slice(0, 280));
+  console.error(`[FATAL:main] ${formatFatal(e)}`);
+  s.check('套件执行未抛异常', false, formatFatal(e).replace(/\s+/g, ' ').slice(0, 1200));
 } finally {
   try { await cleanupAccounts(names); } catch (e) { console.log(`[WARN] 清理测试账号失败: ${e}`); }
 }

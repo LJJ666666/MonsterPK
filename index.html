@@ -8,17 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>兽域手记</title>
-    <script type="module">
-      if (import.meta.hot?.on) {
-        import.meta.hot.on('vite:error', (error) => {
-          if (error.err) {
-            console.error(
-              [error.err.message, error.err.frame].filter(Boolean).join('\n'),
-            )
-          }
-        })
-      }
-    </script>
+    <!-- 内联 HMR 脚本已移除：生产无用且触发 Vite html-proxy 构建失败，见 bug_log §48。 -->
   </head>
   <body style="background-color: #070a14; margin: 0; padding: 0;">
     <div id="root"></div>

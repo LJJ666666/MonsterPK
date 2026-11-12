@@ -60,6 +60,44 @@ export function loadContent() {
   return JSON.parse(raw.slice(raw.indexOf('{')).replace(/;\s*$/, '').trim());
 }
 
+// —————————————————————————— 异常与请求留痕（2026-11-12 偶发红排查）——————————————————————————
+
+/**
+ * 最近若干条 HTTP 交互。偶发红常表现为「某一步返回值不对」，只有断言标题和
+ * 截断后的 detail 时无法还原当时的请求链；失败断言会附印这段上下文。
+ */
+const httpTrace = [];
+const pushHttp = (row) => {
+  httpTrace.push(row);
+  if (httpTrace.length > 60) httpTrace.shift();
+};
+
+export function lastHttp(limit = 6) {
+  return httpTrace.slice(-limit);
+}
+
+/** 把异常格式化成「完整堆栈 + cause + 最近请求」，供顶层 handler 与套件 catch 共用。 */
+export function formatFatal(e) {
+  const stack = String(e?.stack || e);
+  const cause = e?.cause ? `\n  [cause] ${String(e.cause?.stack || e.cause)}` : '';
+  const trace = lastHttp(8)
+    .map((r) => `  ${r.method} ${r.path} -> ${r.status} ${r.preview}`)
+    .join('\n');
+  return `${stack}${cause}\n--- 最近 HTTP（最多 8 条）---\n${trace || '  (无)'}`;
+}
+
+let fatalReported = false;
+/** 未捕获异常 / Promise rejection：默认行为只打一行，这里补完整堆栈并明确以失败码退出。 */
+function reportFatal(kind, e) {
+  if (fatalReported) return;
+  fatalReported = true;
+  console.error(`[FATAL:${kind}] ${formatFatal(e)}`);
+  // 不进入 finally 的 cleanupAccounts；verify 前置清理会兜底删测试账号。
+  process.exit(1);
+}
+process.on('uncaughtException', (e) => reportFatal('uncaughtException', e));
+process.on('unhandledRejection', (e) => reportFatal('unhandledRejection', e));
+
 // —————————————————————————— 断言与汇总 ——————————————————————————
 
 export class Suite {
@@ -71,9 +109,15 @@ export class Suite {
   }
 
   check(title, ok, detail = '') {
-    const normalized = String(detail ?? '').replace(/\s+/g, ' ').slice(0, 300);
+    // 300 字符会把响应体 / 结算结果截掉，偶发红复盘时看不到真值；放宽到 1200。
+    const normalized = String(detail ?? '').replace(/\s+/g, ' ').slice(0, 1200);
     this.results.push({ title, ok: !!ok, detail: normalized });
     console.log(`${ok ? '[PASS]' : '[FAIL]'} ${title}${ok ? '' : `  « ${normalized}`}`);
+    if (!ok) {
+      for (const r of lastHttp(5)) {
+        console.log(`  [CONTEXT] ${r.method} ${r.path} -> ${r.status} ${r.preview}`);
+      }
+    }
     return !!ok;
   }
 
@@ -133,10 +177,19 @@ export async function api(path, opts = {}) {
   }
   if (token) h.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(BASE + path, { method, headers: h, body: payload });
+  let res;
+  try {
+    res = await fetch(BASE + path, { method, headers: h, body: payload });
+  } catch (e) {
+    // 后端重启 / 连接被重置时原本抛的是裸 ECONNREFUSED，套件 catch 里再一截断，
+    // 只剩「fetch failed」四个字。这里带上方法与完整 URL，并挂 cause 保留堆栈。
+    pushHttp({ method, path, status: -1, preview: `NETWORK_ERROR ${String(e?.message || e)}` });
+    throw new Error(`E2E_HTTP_NETWORK ${method} ${BASE + path}: ${String(e?.message || e)}`, { cause: e });
+  }
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = text; }
+  pushHttp({ method, path, status: res.status, preview: text.replace(/\s+/g, ' ').slice(0, 300) });
   return { status: res.status, data, text };
 }
 

@@ -685,6 +685,50 @@ checks = [
      and "P5-1 W0 收官" in task_text
      and "2026-11-12 已完成并验收" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
      and "W1 起进入批次 B" in text(ROOT / "HANDOFF.md")),
+    ("偶发红修复：Vite 原生别名 + 卸载 tsconfigPaths + IPv4 全网卡",
+     "resolve" in text(ROOT / "vite.config.ts")
+     and "alias" in text(ROOT / "vite.config.ts")
+     and "^@" in text(ROOT / "vite.config.ts")
+     and "tsconfigPaths()" not in text(ROOT / "vite.config.ts")
+     and "import tsconfigPaths" not in text(ROOT / "vite.config.ts")
+     and "vite-tsconfig-paths" not in root_pkg_text
+     and "host: '0.0.0.0'" in text(ROOT / "vite.config.ts")),
+    ("生产模板不再含内联 module script（Vite html-proxy 大小写坑）",
+     "import.meta.hot" not in text(ROOT / "index.html")
+     and '<script type="module">' not in text(ROOT / "index.html")),
+    ("verify 逐阶段完整日志留痕",
+     (ROOT / "scripts/lib/verifyLogger.mjs").exists()
+     and "createLogSession" in verify_text
+     and "outTail" in verify_text
+     and "SPAWN_ERROR" in verify_text
+     and ".verify-logs/" in text(ROOT / ".gitignore")),
+    ("E2E 异常与 HTTP 上下文不再被截断",
+     all(k in text(ROOT / "backend/tests/lib/harness.mjs")
+         for k in ("formatFatal", "uncaughtException", "[CONTEXT]", "E2E_HTTP_NETWORK"))
+     and "[FATAL:main]" in text(ROOT / "backend/tests/e2e_f18c.mjs")),
+    ("7 个 E2E 套件 catch 统一打完整堆栈",
+     all("formatFatal" in text(ROOT / f"backend/tests/{n}") for n in (
+         "e2e_content_matrix.mjs", "e2e_core_loop.mjs", "e2e_f17.mjs",
+         "e2e_f18a.mjs", "e2e_f18b.mjs", "e2e_f18c.mjs", "e2e_f18c_security.mjs"))),
+    ("bug_log §48 记录偶发红根因与四轮验收",
+     "## 48." in bug_text
+     and "resolversByDir" in bug_text
+     and "45/47" in bug_text
+     and "47/47" in bug_text
+     and "偶发红定位与修复" in task_text
+     and "验收留痕（2026-11-12" in handoff_text),
+    ("逃跑 RNG 偶发红：f18b/f18c E2E 重试到终态",
+     all("fleeUntilDone" in text(ROOT / f"backend/tests/{n}")
+         and "result === 'fled'" in text(ROOT / f"backend/tests/{n}")
+         for n in ("e2e_f18b.mjs", "e2e_f18c.mjs"))
+     and "fleeUntilDone" in text(ROOT / "backend/tests/e2e_f14.mjs")),
+    ("bug_log §49 记录逃跑 RNG 根因与订正指针",
+     "## 49." in bug_text
+     and "MAPBOSS_BATTLE_IN_PROGRESS" in bug_text
+     and "撤离失败" in bug_text
+     and "2026-11-12 订正" in bug_text
+     and "E2E 偶发红第二个根因收敛" in task_text
+     and "fleeUntilDone" in handoff_text),
 ]
 
 for name, ok, *detail in checks:

@@ -13,7 +13,7 @@
  * 运行：cd backend && npm run e2e:f18b（需要 :3001 后端在线）
  * 也可经 npm run verify 自动纳入（见 scripts/verify.mjs 的 e2e 分组）。
  */
-import { Suite, api, asText, newAccount, cleanupAccounts, requireBackend, validSave, save } from './lib/harness.mjs';
+import { Suite, api, asText, newAccount, cleanupAccounts, requireBackend, validSave, save, formatFatal } from './lib/harness.mjs';
 
 // 强力队伍：一级 Lv30 高数值，确保能稳定击败 Lv8 馆主王牌（不与 rng 博弈）。
 const STATS = { hp: 45, atk: 55, def: 46, spAtk: 63, spDef: 53, spd: 68 };
@@ -61,6 +61,21 @@ async function playToEnd(token, battleId, maxRounds = 80) {
     rounds += 1;
   }
   return { st, gymResult, rounds };
+}
+
+/**
+ * 逃跑有成功率（服务端 `game/battle.ts:417`，速度占优 75%），单次 flee 失败时战斗
+ * 不会结束、CD 与战斗态都不释放。与 f14 / p42c / f18c 同口径，重试到 finished，
+ * 避免把未结束的战斗残留到下一个用例（2026-11-12，bug_log §49）。
+ */
+async function fleeUntilDone(token, battleId, maxTries = 12) {
+  let res = null;
+  for (let i = 0; i < maxTries; i += 1) {
+    if (i > 0) console.log(`[INFO] 逃跑骰子未通过，第 ${i} 次重试（服务端有成功率）`);
+    res = await act(token, battleId, { type: 'flee' });
+    if (res.status !== 200 || res.data?.battle?.finished) return res;
+  }
+  return res;
 }
 
 async function main() {
@@ -134,7 +149,10 @@ async function main() {
   const start2 = await startGym(token, 'city_pebble');
   if (start2.status === 200) {
     const b2 = start2.data.battle.battleId;
-    const fleeRes = await act(token, b2, { type: 'flee' });
+    const fleeRes = await fleeUntilDone(token, b2);
+    s.check('演武堂逃跑重试到真正撤离（服务端有成功率）',
+      fleeRes?.data?.battle?.finished === true && fleeRes.data.battle.result === 'fled',
+      `finished=${fleeRes?.data?.battle?.finished} result=${fleeRes?.data?.battle?.result}`);
     s.check('演武堂逃跑结算无 gymCleared（不发徽章）',
       fleeRes.data?.gym === undefined || fleeRes.data?.gym?.gymCleared === false,
       asText(fleeRes.data?.gym));
@@ -146,7 +164,8 @@ async function main() {
 try {
   await main();
 } catch (e) {
-  s.check('套件执行未抛异常', false, String(e?.stack || e).replace(/\s+/g, ' ').slice(0, 280));
+  console.error(`[FATAL:main] ${formatFatal(e)}`);
+  s.check('套件执行未抛异常', false, formatFatal(e).replace(/\s+/g, ' ').slice(0, 1200));
 } finally {
   try { await cleanupAccounts(names); } catch (e) { console.log(`[WARN] 清理测试账号失败: ${e}`); }
 }

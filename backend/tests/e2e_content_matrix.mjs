@@ -21,8 +21,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   Suite, api, asText, newAccount, cleanupAccounts, requireBackend,
-  validSave, save, BACKEND_ROOT,
-} from './lib/harness.mjs';
+  validSave, save, BACKEND_ROOT, formatFatal } from './lib/harness.mjs';
 
 const s = new Suite('E2E_CONTENT_MATRIX');
 const names = [];
@@ -297,7 +296,8 @@ async function main() {
 try {
   await main();
 } catch (e) {
-  s.check('套件执行未抛异常', false, String(e?.stack || e).replace(/\s+/g, ' ').slice(0, 280));
+  console.error(`[FATAL:main] ${formatFatal(e)}`);
+  s.check('套件执行未抛异常', false, formatFatal(e).replace(/\s+/g, ' ').slice(0, 1200));
 } finally {
   try { await cleanupAccounts(names); } catch (e) { console.log(`[WARN] 清理测试账号失败: ${e}`); }
 }

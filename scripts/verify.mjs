@@ -28,6 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createLogSession } from './lib/verifyLogger.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND = resolve(ROOT, 'backend');
@@ -118,6 +119,10 @@ const GROUPS = {
 
 const argv = process.argv.slice(2);
 const valueOf = (flag) => argv.find((a) => a.startsWith(`--${flag}=`))?.split('=').slice(1).join('=');
+/** 每轮完整日志目录；默认 .verify-logs/<runId>/，可用 --log-dir=xxx 指定固定目录便于多轮对照。 */
+const logDirRaw = valueOf('log-dir');
+const logger = createLogSession(ROOT, logDirRaw ? { dir: logDirRaw } : {});
+if (!argv.includes('--quiet')) console.log(`本轮日志：${logger.base}`);
 const onlyRaw = valueOf('only');
 const skipRaw = valueOf('skip');
 const strict = argv.includes('--strict');
@@ -238,8 +243,22 @@ function runStage(stage) {
     timeout: stage.timeout ?? 600_000,
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
   });
-  const out = decode(r.stdout) + decode(r.stderr);
-  return { code: r.status ?? 1, out, ms: Date.now() - started };
+  const ms = Date.now() - started;
+  let out = decode(r.stdout) + decode(r.stderr);
+  // spawn 级错误（命令不存在 / 阶段超时 / 被宿主回收）原本只表现为「空输出 + 非零退出码」，
+  // 复盘时看不出是脚本失败还是进程被杀，故显式写进输出与日志。
+  const notes = [];
+  if (r.error) notes.push(`[SPAWN_ERROR] ${String(r.error?.message || r.error)} code=${r.error?.code ?? 'unknown'}`);
+  if (r.signal) notes.push(`[SIGNAL] ${r.signal}`);
+  if (notes.length) out += `\n${notes.join('\n')}\n`;
+  return {
+    code: r.status ?? 1,
+    out,
+    ms,
+    signal: r.signal ?? null,
+    error: r.error ? String(r.error?.message || r.error) : null,
+    timedOut: r.error?.code === 'ETIMEDOUT',
+  };
 }
 
 // —————————————————————————— 主流程 ——————————————————————————
@@ -295,16 +314,18 @@ for (const stage of stages) {
   }
 
   process.stdout.write(`▶ ${stage.name} … `);
-  const { code, out, ms } = runStage(stage);
+  const { code, out, ms, signal, error, timedOut } = runStage(stage);
   const ok = code === 0;
   const metric = summarize(out);
-  results.push({ id: stage.id, name: stage.name, status: ok ? 'PASS' : 'FAIL', ms, metric, out });
+  const logFile = logger.write(stage, { code, out, ms, signal, error, timedOut });
+  results.push({ id: stage.id, name: stage.name, status: ok ? 'PASS' : 'FAIL', ms, metric, out, logFile });
 
   const seconds = (ms / 1000).toFixed(1);
   console.log(`${ok ? '✓' : '✗'} ${metric || ''} (${seconds}s)`);
   if (!ok && !quiet) {
     console.log('  ── 输出末尾 ──');
-    for (const line of tail(out).split('\n')) console.log(`  ${line}`);
+    for (const line of tail(out, 30).split('\n')) console.log(`  ${line}`);
+    console.log(`  ── 完整日志：${logFile}`);
     console.log('  ──────────────');
   }
 }
@@ -344,18 +365,33 @@ console.log(`\n通过 ${passed} / 失败 ${failed} / 跳过 ${skipped}，合计 
 
 const report = {
   at: new Date().toISOString(),
+  runId: logger.runId,
+  logDir: logger.base,
   totals: { passed, failed, skipped, ms: totalMs },
   services: { backend: backendUp, front: frontUp },
   cleanedTestAccounts: cleaned,
-  // 失败阶段把输出末尾存进报告：跨套件偶发失败（共享野怪池 / 在途名额等
-  // 进程内残留）只靠 metric 无法定位，留痕后可直接读 .verify-report.json 复盘。
+  preCleanedTestAccounts: preCleaned,
+  // 失败阶段把输出首尾都存进报告 + 指向落盘的完整日志：跨套件偶发失败
+  // （共享野怪池 / 在途名额 / 心跳相位等进程内残留）只靠 metric 无法定位。
   stages: results.map((r) => ({
     id: r.id, name: r.name, status: r.status, ms: r.ms, metric: r.metric,
-    ...(r.status === 'FAIL' ? { outTail: String(r.out ?? '').slice(-8000) } : {}),
+    ...(r.logFile ? { logFile: r.logFile } : {}),
+    ...(r.status === 'FAIL' ? {
+      outHead: String(r.out ?? '').slice(0, 4000),
+      outTail: String(r.out ?? '').slice(-32000),
+    } : {}),
   })),
 };
 try {
   writeFileSync(resolve(ROOT, '.verify-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  logger.writeIndex({
+    at: report.at,
+    totals: report.totals,
+    services: report.services,
+    preCleanedTestAccounts: preCleaned,
+    cleanedTestAccounts: cleaned,
+    reportStages: report.stages.map((r) => ({ id: r.id, status: r.status, metric: r.metric })),
+  });
 } catch {
   // 报告写不进去不影响验收结论
 }

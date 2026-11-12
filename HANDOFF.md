@@ -54,7 +54,9 @@ python scripts/sync_memory.py --check          # 镜像 [一致]
 npm run verify                                 # VERIFY_OK（阶段数与数字以输出为准）
 ```
 
-起服务：前端 `npm run dev -- --host 0.0.0.0`（端口由 `vite.config.ts` 读 `MPK_FRONT_PORT`，默认 5173、`strictPort`）；后端 `cd backend && npm run dev`（3001）。**端口随时可换**：本机 5173 被微信等程序占用时，在**同一个 shell**里设 `MPK_FRONT_PORT=5174` 再起前端与跑 `verify`（`scripts/lib/devConfig.mjs` 是脚本侧单一真值源，backend E2E 与 CORS 默认值读同名 env），并把 `backend/.env` 的 `CORS_ORIGIN` 加上新端口的 origin；不要在命令行再传 `--port`，那会覆盖配置。用户级记忆 `C:\Users\<用户名>\.workbuddy\`（称呼与沟通口径）不随 git 走；项目级 `.workbuddy/memory/`、`.trae/documents/`、`HANDOFF.md` 都随 git 走。
+起服务：前端 `npm run dev`（`vite.config.ts` 已固定 `host: '0.0.0.0'` + `strictPort`，端口读 `MPK_FRONT_PORT`，默认 5173）；后端 `cd backend && npm run dev`（3001）。**端口随时可换**：本机 5173 被微信等程序占用时，在**同一个 shell**里设 `MPK_FRONT_PORT=5174` 再起前端与跑 `verify`（`scripts/lib/devConfig.mjs` 是脚本侧单一真值源，backend E2E 与 CORS 默认值读同名 env），并把 `backend/.env` 的 `CORS_ORIGIN` 加上新端口的 origin；不要在命令行再传 `--port`，那会覆盖配置。用户级记忆 `C:\Users\<用户名>\.workbuddy\`（称呼与沟通口径）不随 git 走；项目级 `.workbuddy/memory/`、`.trae/documents/`、`HANDOFF.md` 都随 git 走。
+
+> **验收留痕（2026-11-12，bug_log §48）**：`verify` 每轮把 47 个阶段的完整 stdout/stderr 写到 `.verify-logs/<runId>/`（轮末 `index.json`，`--log-dir=xxx` 可固定目录），失败阶段另在 `.verify-report.json` 留 `outHead` + `outTail`；E2E 断言失败会附印最近 5 条 HTTP，未捕获异常由 `harness.mjs` 顶层 handler 打完整堆栈。**偶发红先看日志再改代码，不要直接重跑掩盖**。别名由 `vite.config.ts` 的 Vite 原生 `resolve.alias` 提供（不再依赖 `vite-tsconfig-paths`），`index.html` 不含内联 module script —— 这两处是 Windows 盘符大小写导致跨轮假红的根因，勿回退。**另一类偶发红已定位并修复**：服务端逃跑 / 捕获有成功率，E2E 必须重试到终态（复用 `fleeUntilDone`），否则 `e2e:f18c` 会因约 25% 的逃跑失败连锁 5 项假红（bug_log §49）；新增玩法分支写 E2E 前先查既有 helper。
 
 ## 0. 结论与两种场景
 

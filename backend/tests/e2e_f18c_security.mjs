@@ -21,8 +21,7 @@
  * 也可经 npm run verify 自动纳入（scripts/verify.mjs 的 e2e 分组）。
  */
 import {
-  Suite, api, asText, newAccount, login, cleanupAccounts, requireBackend, validSave, save,
-} from './lib/harness.mjs';
+  Suite, api, asText, newAccount, login, cleanupAccounts, requireBackend, validSave, save, formatFatal } from './lib/harness.mjs';
 
 // 强力队伍：一级 Lv30，确保稳定击败 Lv8 地图首领（不与 rng 博弈）。
 const STATS = { hp: 45, atk: 55, def: 46, spAtk: 63, spDef: 53, spd: 68 };
@@ -310,7 +309,8 @@ async function main() {
 try {
   await main();
 } catch (e) {
-  s.check('套件执行未抛异常', false, String(e?.stack || e).replace(/\s+/g, ' ').slice(0, 280));
+  console.error(`[FATAL:main] ${formatFatal(e)}`);
+  s.check('套件执行未抛异常', false, formatFatal(e).replace(/\s+/g, ' ').slice(0, 1200));
 } finally {
   try { await cleanupAccounts(names); } catch (e) { console.log(`[WARN] 清理测试账号失败: ${e}`); }
 }

@@ -71,7 +71,7 @@ npm run verify                                 # VERIFY_OK（阶段数与数字�
 
 - 远端 `https://github.com/LJJ666666/MonsterPK.git`，分支 `master`。**提交号不在此固化**，用 `git log --oneline -10` 和 `git ls-remote origin refs/heads/master` 看当前事实。
 - 回滚点 tag 命名 `rollback-YYYYMMDD-<阶段>`，成对建在阶段前后并推远端；回滚用 `git reset --hard <tag>` 或 `git revert <commit>`。
-- **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 建并推回滚 tag → 确认无 `.env` / `*.db` 入库 → 中文分条 commit（末尾写验收数字）→ `git push origin master` → 核对 `HEAD == origin/master` 且工作树干净。
+- **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 建并推回滚 tag → 确认无 `.env` / `*.db` 入库 → 中文分条 commit（末尾写验收数字）→ `git push origin master` → 核对 `HEAD == origin/master` 且工作树干净。**若 push 恒 502 而浏览器能开 GitHub**：`HTTPS_PROXY` 多半被钉在 WorkBuddy 沙箱代理 `127.0.0.1:11811`（`sandbox-cli.exe`），系统代理端口读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer`（本机 `8693`），用一次性 `HTTPS_PROXY=http://127.0.0.1:8693 HTTP_PROXY=... git push origin master` 覆盖即可；**不改全局 git config、不换协议**（bug_log §56）。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，新机器必须补**：`backend/.env`、`backend/prisma/dev.db`、`save_data.json`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。
 

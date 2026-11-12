@@ -1350,3 +1350,11 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **修复（只改测试档，断言零放宽）**：`e2e_core_loop.mjs` 的 `WEAK` 由 Lv.5 / hp300 / atk4 的占位宠改成与 `STRONG` 同口径的 Lv.40 高攻高血替补（保留 `id` / `specId`，不参与捕获，捕获仍由 index 0 执行）；`guestParty` 由 `[STRONG]` 改成 3 只 id 唯一的全强宠。**与 `e2e_f16` 的「全强宠」口径对齐**，把胜负从 rng 手里拿回来。`intentFor` / `playToFinish` / 六房与发奖断言一行未改。
 - **口径沉淀（§49 的延伸）**：不只是「逃跑有成功率」—— 凡服务端战斗带 rng（敌人生成、命中、状态、暴击）的 E2E，都**不能把「必胜」寄托在单次 rng 结果上**；要么像 f16 用压倒性数值把 rng 变量压到零，要么重试到终态。新增玩法串联 E2E 前先比对同玩法专项 E2E 的档位构造。
 - **验收**：加固后 `e2e:core_loop` 定向压力 **30/30 全绿**（49 项/轮，`lose_hits=0`）；归档完成后连续两轮全量 **49/49 `VERIFY_OK`**（round20 257.2s / round21 193.2s，均 0 失败 0 跳过），`doc_check` **215 项**、记忆镜像一致；3002/3003 每轮释放。
+
+## 56. git push 恒 502 的真实根因：沙箱代理与系统代理错配（2026-11-12）
+
+- **现象**：W3 本地提交 `12a9ef2`、tag `rollback-20261112-w3-redis-lock` 均已建，但 `git push` 累计约 30 次有限重试恒报 `CONNECT tunnel failed, response 502`，`origin/master` 一直停在 W2 的 `cd83638`；期间杰哥开启代理后浏览器能打开 GitHub，git 仍不通。
+- **只读定位（可复现）**：环境变量 `HTTPS_PROXY` / `HTTP_PROXY` = `http://127.0.0.1:11811`；`netstat` 显示 11811 由 PID 8460 监听，进程是 `sandbox-cli.exe`（WorkBuddy 沙箱网络代理，命令行带 `--rule_decision center`）。经该代理 `curl -I https://github.com` 得 `HTTP/1.1 502 Bad Gateway` + `Retry-After: 1` + `Content-Type: text/plain`（46 B，代理自生成，非 GitHub 返回）；`--noproxy '*'` 直连超时。而注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings` 是 `ProxyEnable=1` / `ProxyServer=127.0.0.1:8693` —— **浏览器走 8693，所以能打开；git/curl 被环境变量钉在 11811，两者不是同一条通道**。git 未设 `http.proxy`，完全依赖环境变量。
+- **解法（不改仓库配置、不改协议、不换 Git Data API）**：先验证系统代理端口 `P=http://127.0.0.1:8693; HTTPS_PROXY=$P HTTP_PROXY=$P curl -o /dev/null -w '%{http_code}' https://github.com` → `200`，仓库 `info/refs?service=git-upload-pack` 亦 `200`；再一次性覆盖 env 推送：`HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P git push origin master`。**用完即弃，不改全局 `git config http.proxy`**。
+- **结果**：master 第 1 次成功；tag 第 1 次 `schannel: failed to receive handshake, SSL/TLS connection failed`、第 2 次成功。`HEAD == origin/master == 2ad52b3`，ahead 0，`git ls-remote --tags origin rollback-20261112-w3-redis-lock` 返回 `12a9ef2`，工作树干净。
+- **口径**：与既有「推送 502 = 网络波动、有限次重试」不冲突 —— 若多次重试仍恒为 502 且浏览器能通，就核对 `HTTPS_PROXY` 是否指向沙箱代理；系统代理端口从注册表读。诊断只做「环境变量 / 端口归属 / 单次 curl 对照」三件，不做分层连通性排查。详见 HANDOFF 提交规矩段。

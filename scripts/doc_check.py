@@ -866,6 +866,16 @@ checks = [
      and "level: 40, exp: 0" in text(ROOT / "backend/tests/e2e_core_loop.mjs")
      and "六房全清 → settled / result=win / cleared=6" in text(ROOT / "backend/tests/e2e_core_loop.mjs")
      and "COOP_REWARD_MONEY = 40" in text(ROOT / "backend/tests/e2e_core_loop.mjs")),
+    ("bug_log §56 记录沙箱代理错配与 W3 推送收官",
+     "## 56." in bug_text
+     and "sandbox-cli.exe" in bug_text
+     and "8693" in bug_text
+     and "11811" in bug_text
+     and "HEAD == origin/master == 2ad52b3" in bug_text),
+    ("HANDOFF / MEMORY / 任务表固化 git 502 时的系统代理口径",
+     "8693" in handoff_text
+     and "8693" in memory_text
+     and "W3 推送收官" in task_text),
 ]
 
 for name, ok, *detail in checks:

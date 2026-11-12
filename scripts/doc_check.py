@@ -876,6 +876,19 @@ checks = [
      "8693" in handoff_text
      and "8693" in memory_text
      and "W3 推送收官" in task_text),
+    ("bug_log §57 固化配置分层与防再犯六条硬规则",
+     "## 57." in bug_text
+     and "沙箱 / 工具层" in bug_text
+     and "系统 / 本机层" in bug_text
+     and "项目层（唯一可提交真值）" in bug_text
+     and "防再犯六条硬规则" in bug_text
+     and "11811" in bug_text
+     and "8693" in bug_text),
+    ("HANDOFF / MEMORY 固化配置分层，避免沙箱配置混入项目配置",
+     "配置分层" in handoff_text
+     and "配置分层硬约束" in memory_text
+     and "curl --noproxy" in handoff_text
+     and "唯一可提交真值" in handoff_text),
 ]
 
 for name, ok, *detail in checks:

@@ -1358,3 +1358,25 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **解法（不改仓库配置、不改协议、不换 Git Data API）**：先验证系统代理端口 `P=http://127.0.0.1:8693; HTTPS_PROXY=$P HTTP_PROXY=$P curl -o /dev/null -w '%{http_code}' https://github.com` → `200`，仓库 `info/refs?service=git-upload-pack` 亦 `200`；再一次性覆盖 env 推送：`HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P git push origin master`。**用完即弃，不改全局 `git config http.proxy`**。
 - **结果**：master 第 1 次成功；tag 第 1 次 `schannel: failed to receive handshake, SSL/TLS connection failed`、第 2 次成功。`HEAD == origin/master == 2ad52b3`，ahead 0，`git ls-remote --tags origin rollback-20261112-w3-redis-lock` 返回 `12a9ef2`，工作树干净。
 - **口径**：与既有「推送 502 = 网络波动、有限次重试」不冲突 —— 若多次重试仍恒为 502 且浏览器能通，就核对 `HTTPS_PROXY` 是否指向沙箱代理；系统代理端口从注册表读。诊断只做「环境变量 / 端口归属 / 单次 curl 对照」三件，不做分层连通性排查。详见 HANDOFF 提交规矩段。
+
+## 57. 配置分层失守：把沙箱 env 当成本机 / 项目配置（2026-11-12，流程级低级错误）
+
+- **定性**：§56 的 502 不是网络故障也不是代码缺陷，是**配置分层没做** —— 直接把工具会话注入的 `HTTPS_PROXY=http://127.0.0.1:11811` 当成「本机代理配置」，按既有「502 = 网络波动、有限次重试」口径累计重试约 30 次；直到杰哥提示「浏览器能打开 GitHub」才去核对变量归属。**错在流程，不在技术**。本节记「以后怎么不犯」，§56 记「这一次怎么修」，两条并存不互相取代。
+- **三层配置（本项目硬口径，跨机器 / 跨会话通用）**：
+
+| 层 | 谁注入 / 从哪读 | 本项目实例 | 能否写进仓库 | 有效期 |
+|---|---|---|---|---|
+| **沙箱 / 工具层** | WorkBuddy 会话给子进程注入 | `HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`、只在命令前缀临时指定的 `MPK_*` | **禁止**：不得进 `.env` / 脚本 / 文档 / CI 当默认值 | 仅当前会话进程 |
+| **系统 / 本机层** | Windows 注册表、用户环境变量、本机安装路径 | 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer` = `127.0.0.1:8693`、`E:/Six/pg-runtime`、`E:/Six/redis-runtime`、JDK21 路径 | **禁止硬编码**：只在 bug_log / HANDOFF 作诊断例子，产品配置一律走 env | 机器级、跨会话 |
+| **项目层（唯一可提交真值）** | 仓库内 `.env.example` + 配置模块 + 本机 `.env`（不入库） | `MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`；`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`） | **允许**：模板随 git 走，`.env` 不入库 | 随仓库 |
+
+- **防再犯六条硬规则**：
+  1. 任何「环境类」失败（连接 502 / refused / 端口占用 / 凭据不通 / 工具找不到 / 路径大小写），**先报配置来源三层，再谈重试**；有限次重试前必须先核对一次变量归属，禁止「先重试 30 次再说」。
+  2. 沙箱层的值不得写进任何项目文件；系统层端口（11811 / 8693）与本机绝对路径不得成为产品默认值，只作为 bug_log / HANDOFF 的诊断例子。
+  3. 项目真值源唯一：端口 `MPK_FRONT_PORT`（`scripts/lib/devConfig.mjs`），后端 `DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN`（`backend/.env`，模板 `.env.example`）。新增配置项先定真值源，再写读取方。
+  4. 覆盖环境只允许**一次性命令前缀**（`P=...; HTTPS_PROXY=$P ... git push ...`），用完即弃；不改全局 `git config http.proxy`、不改系统代理、不改仓库配置来「修」一次会话问题。
+  5. 本地服务探活一律 `curl --noproxy '*'`（或直连 TCP），避免沙箱代理把 localhost 请求变成假 502（与 §33.2 同口径）；PG / Redis 不是 HTTP，`curl /` 返回 `000` **不等于**服务没起，用 `redis-cli PING` / `GET /api/health` 判活。
+  6. 诊断只做三件：读 env → 查端口归属进程 → 单次 curl 对照；不做分层连通性排查、不换协议 / 通道 / Git Data API。
+- **可复现核验命令（先读再动手）**：`env | grep -i proxy` → `11811`；PowerShell `Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' | Select-Object ProxyEnable,ProxyServer` → `8693`；`curl --noproxy '*' -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health` → `200`；`P=http://127.0.0.1:8693; HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P curl -o /dev/null -w '%{http_code}' https://github.com` → `200`。
+- **归档落点**：HANDOFF 提交规矩段、项目 MEMORY §4、用户级长期记忆、今日日志、`scripts/doc_check.py` 的 §57 断言；`.trae` 镜像由 `scripts/sync_memory.py` 同步。
+

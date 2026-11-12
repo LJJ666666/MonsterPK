@@ -636,10 +636,10 @@ checks = [
      "vite-plugin-trae-solo-badge" not in root_pkg_text
      and "traeBadgePlugin" not in text(ROOT / "vite.config.ts")
      and "补测执行结果（2026-11-11，12/12 全绿）" in text(DOCS / "雷电模拟器_adb操作规范_2026-11-11.md")),
-    ("A1 vite 分包落地",
+    ("A1 vite 分包精简为仅 vendor-react",
      "manualChunks" in text(ROOT / "vite.config.ts")
      and "vendor-react" in text(ROOT / "vite.config.ts")
-     and "vendor-state" in text(ROOT / "vite.config.ts")),
+     and "vendor-state" not in text(ROOT / "vite.config.ts")),
     ("A2 后端 requestId 追踪与 CORS 暴露",
      "genReqId" in text(ROOT / "backend/src/index.ts")
      and "X-Request-Id" in text(ROOT / "backend/src/index.ts")
@@ -655,6 +655,36 @@ checks = [
      and "P5-1" in text(ROOT / "backend/src/lib/loginRateLimit.ts")),
     ("bug_log §46 记录 A1/A2/A4/A5 收官与 5173 端口坑",
      "## 46." in bug_text and "A5" in bug_text and "5173" in bug_text),
+    ("前端端口单一真值源 MPK_FRONT_PORT 已接入脚本",
+     (ROOT / "scripts/lib/devConfig.mjs").exists()
+     and "MPK_FRONT_PORT" in text(ROOT / "scripts/lib/devConfig.mjs")
+     and "devConfig" in text(ROOT / "scripts/verify.mjs")
+     and "devConfig" in text(ROOT / "scripts/ui_smoke_ux.mjs")
+     and "MPK_FRONT_PORT" in text(ROOT / "vite.config.ts")
+     and "MPK_FRONT_PORT" in text(ROOT / "backend/src/index.ts")),
+    ("W0 锁与广播接口化并删掉 broadcastToMany 死代码",
+     (ROOT / "backend/src/lib/lockProvider.ts").exists()
+     and (ROOT / "backend/src/lib/broadcastTransport.ts").exists()
+     and "setLockProvider" in text(ROOT / "backend/src/lib/slotLock.ts")
+     and "setBroadcastTransport" in text(ROOT / "backend/src/modules/sessionBus.ts")
+     and "broadcastToMany" not in text(ROOT / "backend/src/lib/wsRegistry.ts")),
+    ("W0 CAS 基线可注入 / pvpSettled 写回 / quota key 去截断",
+     (ROOT / "backend/src/lib/revisionSource.ts").exists()
+     and "readRevision" in text(ROOT / "backend/src/modules/save.ts")
+     and "setSettledFlag" in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "slice(-8)" not in text(ROOT / "backend/src/modules/coop.ts")),
+    ("W0 心跳拆分与确定性单测模板",
+     "runGlobalSweep" in text(ROOT / "backend/src/modules/realtime.ts")
+     and (ROOT / "backend/tests/lib/deterministic.ts").exists()
+     and all((ROOT / f"backend/tests/{n}").exists() for n in (
+         "w0LockProvider.test.ts", "w0BroadcastTransport.test.ts",
+         "w0RevisionSource.test.ts", "w0QuotaSettled.test.ts"))),
+    ("bug_log §47 与任务表 / 定稿 / HANDOFF 记录 W0 收官",
+     "## 47." in bug_text
+     and "MPK_FRONT_PORT" in bug_text
+     and "P5-1 W0 收官" in task_text
+     and "2026-11-12 已完成并验收" in text(DOCS / "P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W1 起进入批次 B" in text(ROOT / "HANDOFF.md")),
 ]
 
 for name, ok, *detail in checks:

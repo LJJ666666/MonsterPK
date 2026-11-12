@@ -167,7 +167,7 @@ async function main() {
     `got=${ridForgedVal.slice(0, 80)}`);
 
   const ridCors = await fetch(`${rawBase}/api/health`, {
-    headers: { Origin: 'http://localhost:5173' },
+    headers: { Origin: `http://localhost:${process.env.MPK_FRONT_PORT || 5173}` },
   });
   suite.check('A2 CORS 暴露 X-Request-Id 给浏览器 / WebView',
     (ridCors.headers.get('access-control-expose-headers') || '').includes('X-Request-Id'),

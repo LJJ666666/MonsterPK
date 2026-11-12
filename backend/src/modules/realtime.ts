@@ -47,6 +47,83 @@ import {
   hydrateForUser, detachConnection, dropUserSessions, sweepSessions,
 } from './session';
 
+/**
+ * W0：本地心跳段 —— 每个进程各跑一份，只管「本进程登记的连接」。
+ * 死连接清理 + ping 探活；W5 还会在这里补 `sessionVersion` 比对（顶号残留兜底）。
+ */
+export function runLocalHeartbeat(
+  fastify: FastifyInstance,
+  now: number,
+  heartbeatMs: number,
+): void {
+  for (const c of wsRegistry.findStale(now, deadAfterMs(heartbeatMs))) {
+    fastify.log.warn(
+      { event: 'ws_dead', userId: c.userId, connectionId: c.id },
+      'ws heartbeat timeout',
+    );
+    try { c.socket.terminate(); } catch { /* 已断开 */ }
+    wsRegistry.remove(c.id);
+    detachConnection(c.id);
+  }
+  for (const c of wsRegistry.all()) {
+    c.alive = false;
+    try { c.socket.ping(); } catch { /* 已断开，交给 close 事件注销 */ }
+  }
+}
+
+/**
+ * W0：全局 sweep 段 —— 单实例仍由本进程跑；W4 加 leader 租约 + fencing 后
+ * 只允许 leader 调用，并给每次 sweep 加幂等键。当前行为与拆分前逐字一致。
+ */
+export function runGlobalSweep(now: number): void {
+  sweepSessions(now);
+  // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
+  // P4-2c：被回收的 Boss 战要放回「在途次数」，否则这次 hold 会占到进程重启。
+  for (const st of battles.sweepExpired(now)) {
+    if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
+  }
+  // P4-1b：共享野怪过期换新 / 超时放回池子后，把新列表广播给所有在线客户端。
+  for (const areaId of wilds.sweep(now)) {
+    const spec = wilds.getAreaSpec(areaId);
+    if (spec) publishWild(areaId, spec, now);
+  }
+}
+
+/**
+ * W0：封号复查属于「本进程连接」范畴（踢的是自己手里的连接），
+ * 但要查 DB，故单独成 async 段；无在线账号时直接短路。
+ */
+export async function runBanSweep(fastify: FastifyInstance): Promise<void> {
+  const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
+  if (userIds.length === 0) return;
+  try {
+    const banned = await prisma.user.findMany({
+      where: { id: { in: userIds }, bannedAt: { not: null } },
+      select: { id: true, banReason: true },
+    });
+    for (const u of banned) {
+      for (const c of wsRegistry.listForUser(u.id)) {
+        try {
+          c.socket.send(
+            encodeServerMessage({
+              type: 'bye',
+              code: BAN_CODE,
+              reason: u.banReason ?? '你已被封号',
+            }),
+          );
+          c.socket.close(1008, BAN_CODE);
+        } catch { /* 已断开 */ }
+        wsRegistry.remove(c.id);
+        detachConnection(c.id);
+      }
+      dropUserSessions(u.id);
+      battles.dropUser(u.id);
+    }
+  } catch (err) {
+    fastify.log.error({ event: 'ws_ban_sweep_error', err }, 'ws ban sweep failed');
+  }
+}
+
 export function getRealtimeStats(): { connections: number; users: number } {
   return { connections: wsRegistry.size, users: wsRegistry.userCount };
 }
@@ -109,7 +186,7 @@ export function registerRealtime(fastify: FastifyInstance): void {
 
     void (async () => {
       try {
-        const allowedOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+        const allowedOrigin = process.env.CORS_ORIGIN ?? `http://localhost:${process.env.MPK_FRONT_PORT || 5173}`;
         if (!isOriginAllowed(req.headers.origin, allowedOrigin)) {
           return reject(socket, 403, 'ORIGIN_DENIED', '连接来源不被允许');
         }
@@ -150,63 +227,16 @@ export function registerRealtime(fastify: FastifyInstance): void {
     })();
   });
 
-  // —— 心跳扫描：死连接清理 + 会话期封号复查 + 空会话回收 ——
+  // W0（设计定稿 §3.4）：原 30s 心跳是「本地连接管理 + 全局 sweep + 封号复查」
+  // 的混合体。现拆成三段独立函数，仍由本进程每 heartbeatMs 依次触发，
+  // 顺序与拆分前逐字一致 —— 单实例零行为变更；W4 只需给 runGlobalSweep 加
+  // leader 租约，把本地段留在每个进程各跑一份。
   const timer = setInterval(() => {
     void (async () => {
       const now = Date.now();
-      for (const c of wsRegistry.findStale(now, deadAfterMs(heartbeatMs))) {
-        fastify.log.warn(
-          { event: 'ws_dead', userId: c.userId, connectionId: c.id },
-          'ws heartbeat timeout',
-        );
-        try { c.socket.terminate(); } catch { /* 已断开 */ }
-        wsRegistry.remove(c.id);
-        detachConnection(c.id);
-      }
-      for (const c of wsRegistry.all()) {
-        c.alive = false;
-        try { c.socket.ping(); } catch { /* 已断开，交给 close 事件注销 */ }
-      }
-      sweepSessions(now);
-      // P3-1：活跃战斗也有 TTL，断线挂机不占内存；封号时随会话一起丢弃。
-      // P4-2c：被回收的 Boss 战要放回「在途次数」，否则这次 hold 会占到进程重启。
-      for (const st of battles.sweepExpired(now)) {
-        if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
-      }
-      // P4-1b：共享野怪过期换新 / 超时放回池子后，把新列表广播给所有在线客户端。
-      for (const areaId of wilds.sweep(now)) {
-        const spec = wilds.getAreaSpec(areaId);
-        if (spec) publishWild(areaId, spec, now);
-      }
-
-      const userIds = Array.from(new Set(wsRegistry.all().map((c) => c.userId)));
-      if (userIds.length === 0) return;
-      try {
-        const banned = await prisma.user.findMany({
-          where: { id: { in: userIds }, bannedAt: { not: null } },
-          select: { id: true, banReason: true },
-        });
-        for (const u of banned) {
-          for (const c of wsRegistry.listForUser(u.id)) {
-            try {
-              c.socket.send(
-                encodeServerMessage({
-                  type: 'bye',
-                  code: BAN_CODE,
-                  reason: u.banReason ?? '你已被封号',
-                }),
-              );
-              c.socket.close(1008, BAN_CODE);
-            } catch { /* 已断开 */ }
-            wsRegistry.remove(c.id);
-            detachConnection(c.id);
-          }
-          dropUserSessions(u.id);
-          battles.dropUser(u.id);
-        }
-      } catch (err) {
-        fastify.log.error({ event: 'ws_ban_sweep_error', err }, 'ws ban sweep failed');
-      }
+      runLocalHeartbeat(fastify, now, heartbeatMs);
+      runGlobalSweep(now);
+      await runBanSweep(fastify);
     })();
   }, heartbeatMs);
   timer.unref?.();

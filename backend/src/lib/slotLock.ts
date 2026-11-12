@@ -7,12 +7,31 @@
  * 版本号却只涨了一次（monotonicAuthority 按进程内序 +1）。这就是典型的 TOCTOU。
  *
  * 做法：按 `userId` 串行排队，把「校验 + 写」整体关进临界区。
- * 单进程部署下这就足够了；将来多实例部署要换成 DB 层的条件更新或分布式锁
- * （SQLite → Postgres 时可在事务里 `UPDATE ... WHERE revision = ?` 拿到行锁）。
+ * 单进程部署下这就足够了；W3 会换成 Redis 租约锁（改 `setLockProvider` 注入实现即可），
+ * 最终由 DB 条件更新兜底（SQLite → Postgres 时 `UPDATE ... WHERE revision = ?`）。
  *
  * 注意：**只锁路由层**，`commitState()` 本身不再取锁，否则同一次请求会自我死锁。
+ *
+ * W0：队列实现已抽到 `lib/lockProvider.ts`，本文件只保留 key 规则与薄封装，
+ * 全部导出名与调用顺序不变（零行为变更）。
  */
-const chains = new Map<string, Promise<unknown>>();
+import { InProcessLockProvider, type LockProvider } from './lockProvider';
+
+let provider: LockProvider = new InProcessLockProvider();
+
+/** W3 注入 Redis 租约锁；调用点与锁顺序零改动。 */
+export function setLockProvider(next: LockProvider): void {
+  provider = next;
+}
+
+export function getLockProvider(): LockProvider {
+  return provider;
+}
+
+/** 仅单测：恢复进程内默认实现，避免注入污染其它用例。 */
+export function resetLockProviderForTest(): void {
+  provider = new InProcessLockProvider();
+}
 
 /** 账号锁 key：一账号一档，直接以 userId 排队（历史名保留）。 */
 export function slotLockKey(userId: string): string {
@@ -32,32 +51,17 @@ export function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T
   return withSlotLock(roomLockKey(roomId), fn);
 }
 
-/**
- * 在账号临界区内执行 fn。
- * 前一个任务失败不能阻断后续任务，所以 then 的两个回调都指向 fn 的调用。
- */
+/** 在账号临界区内执行 fn（委托给当前 LockProvider）。 */
 export function withSlotLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prev = chains.get(key) ?? Promise.resolve();
-  const run = prev.then(fn, fn);
-  // 队列尾巴只用于排队，不承载结果；失败已在 run 上体现，这里吞掉避免 unhandled rejection。
-  const tail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  chains.set(key, tail);
-  // 队尾跑完且没有新任务排队时清理，避免 Map 随账号数无限增长。
-  void tail.then(() => {
-    if (chains.get(key) === tail) chains.delete(key);
-  });
-  return run;
+  return provider.run(key, fn);
 }
 
 /** 仅用于单测：清空排队状态。 */
 export function clearSlotLocksForTest(): void {
-  chains.clear();
+  provider.clear();
 }
 
 /** 仅用于诊断：当前有多少个账号存在排队链。 */
 export function activeSlotLocks(): number {
-  return chains.size;
+  return provider.activeKeys();
 }

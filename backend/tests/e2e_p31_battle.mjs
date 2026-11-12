@@ -25,7 +25,7 @@ try {
 
 const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
-const ORIGIN = 'http://localhost:5173';
+const ORIGIN = `http://localhost:${process.env.MPK_FRONT_PORT || 5173}`;
 const RUN = Date.now().toString(36).slice(-6);
 
 let pass = 0;

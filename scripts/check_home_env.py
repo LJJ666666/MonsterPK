@@ -138,7 +138,9 @@ for name, p in (("HANDOFF.md", ROOT / "HANDOFF.md"),
         say("FAIL", f"{name} missing")
 
 # ---- services ----
-for label, port in (("frontend :5173", 5173), ("backend :3001", 3001)):
+# 前端端口与 scripts/lib/devConfig.mjs 同源：默认 5173，可用 MPK_FRONT_PORT 覆盖。
+FRONT_PORT = int(__import__("os").environ.get("MPK_FRONT_PORT", "5173"))
+for label, port in ((f"frontend :{FRONT_PORT}", FRONT_PORT), ("backend :3001", 3001)):
     if port_open(port):
         say("OK", f"{label} reachable")
     else:

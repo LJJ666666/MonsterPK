@@ -89,12 +89,17 @@ async function readParty(userId: string) {
 
 /**
  * 房间 quota 的隔离键：账号 + UTC+8 自然日（§30.7 每日通关上限）。
- * `userId` 是 cuid（25 字符），整键会超过房间内核 `validQuotaKey` 的 64 字符上限，
- * 故只取尾 8 字符作内存 Map 键 —— 它不是权威真值，只用于 quota 三段式的隔离，
- * 真值在 `CoopRewardGrant` 落库记录里（P5-1 迁共享存储时统一改 key，F10）。
+ *
+ * W0 修正：旧实现只取 userId 的尾 8 字符，注释称「整键会超过 64 字符上限」——
+ * 实测是错的：`periodKeyOf()` 返回 `YYYY-MM-DD`（10 字符）、cuid 为 25 字符，
+ * 整键 `coop:2026-11-12:<cuid>` 只有 41 字符，远低于 `roomRegistry.ts` 的
+ * `INTENT_MAX_LEN = 64`。截断纯属历史误判，还会让尾 8 字符相同的两个账号碰撞
+ * （设计定稿 §1#9 已列为缺陷）。现改为完整 userId，W6 换 Redis 计数时无需再改键。
+ *
+ * 它仍不是权威真值，只用于 quota 三段式的隔离；真值在 `CoopRewardGrant` 落库记录。
  */
-function coopQuotaKey(userId: string, now: number): string {
-  return `coop:${periodKeyOf(now)}:${userId.slice(-8)}`;
+export function coopQuotaKey(userId: string, now: number): string {
+  return `coop:${periodKeyOf(now)}:${userId}`;
 }
 
 /**

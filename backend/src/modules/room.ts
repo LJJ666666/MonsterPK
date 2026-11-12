@@ -122,11 +122,11 @@ export function sweepRooms(now = Date.now()): TickReport {
 function maybeSettlePvp(roomId: string): void {
   const room = rooms.get(roomId);
   if (!room || !room.pvp || !room.pvp.finished || room.pvpSettled) return;
-  room.pvpSettled = true;
+  // W0：经 RoomRegistry 显式写回，不依赖「get() 返回同一引用」这一单机假设。
+  rooms.setSettledFlag(roomId, 'pvp', true);
   void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(() => {
-    // 结算失败不阻断广播；下次心跳 / 意图提交会重试（pvpSettled 已置位，这里回滚以允许重试）。
-    const r = rooms.get(roomId);
-    if (r) r.pvpSettled = false;
+    // 结算失败不阻断广播；下次心跳 / 意图提交会重试（标记回滚以允许重试）。
+    rooms.setSettledFlag(roomId, 'pvp', false);
   });
 }
 
@@ -137,10 +137,9 @@ function maybeSettlePvp(roomId: string): void {
 function maybeSettleCoop(roomId: string): void {
   const room = rooms.get(roomId);
   if (!room || !room.coop || !room.coop.finished || room.coopSettled) return;
-  room.coopSettled = true;
+  rooms.setSettledFlag(roomId, 'coop', true);
   void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(() => {
-    const r = rooms.get(roomId);
-    if (r) r.coopSettled = false;
+    rooms.setSettledFlag(roomId, 'coop', false);
   });
 }
 

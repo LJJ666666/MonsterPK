@@ -15,7 +15,8 @@ import { checkIntentDelta } from '../lib/settlements';
 import { checkWriteRevision, type RevisionFailure } from '../lib/revision';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { gameSessions } from './sessionBus';
-import { commitState, currentState } from './session';
+import { commitState } from './session';
+import { readRevision } from '../lib/revisionSource';
 
 // PUT 入参：存档 JSON 文本（限 5MB）+ 客户端标识 / 基线版本 / 意图 nonce / 重建基线标记
 const putSchema = z.object({
@@ -121,7 +122,8 @@ export async function saveRoutes(fastify: FastifyInstance) {
     // —— P4 前置：CAS 版本校验，必须放在风控之前 ——
     // 并发写冲突不是作弊，先判版本能省掉一次全量结构校验，
     // 也避免「旧客户端拿着过期存档」被误判成改档而封号。
-    const server = await currentState(userId);
+    // W0：CAS 基线统一走可注入 readRevision()，W2 换 DB 列时只改注入实现。
+    const server = await readRevision(userId);
     const currentRev = server?.revision ?? 0;
     const revCheck = checkWriteRevision(currentRev, parsed.data.revision);
     if (!revCheck.ok) {

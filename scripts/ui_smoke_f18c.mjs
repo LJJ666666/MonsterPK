@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const EDGE = process.env.EDGE_PATH || String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
-const BASE = 'http://localhost:5173';
+import { FRONT_BASE as BASE } from './lib/devConfig.mjs';
 const API = 'http://localhost:3001';
 const RUN = Date.now().toString(36).slice(-6);
 const SEED = path.join(PUBLIC, '_f18c_seed.html');

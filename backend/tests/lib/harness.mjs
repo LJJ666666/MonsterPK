@@ -23,7 +23,8 @@ export const BACKEND_ROOT = resolve(HERE, '../..');
 
 export const BASE = process.env.E2E_BASE || 'http://localhost:3001';
 export const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
-export const ORIGIN = process.env.E2E_ORIGIN || 'http://localhost:5173';
+/** 与 scripts/lib/devConfig.mjs 同源：E2E_ORIGIN 优先，否则按 MPK_FRONT_PORT（默认 5173）拼。 */
+export const ORIGIN = process.env.E2E_ORIGIN || `http://localhost:${process.env.MPK_FRONT_PORT || 5173}`;
 /** 单次运行的短标识；同一进程内创建的账号都带它，便于精确清理。 */
 export const RUN = Date.now().toString(36).slice(-6);
 

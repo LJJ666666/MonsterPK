@@ -245,16 +245,17 @@ function runStage(stage) {
 // —————————————————————————— 主流程 ——————————————————————————
 
 const needService = stages.some((s) => s.need);
+import { FRONT_PORT, FRONT_PROBE } from './lib/devConfig.mjs';
 let backendUp = true;
 let frontUp = true;
 if (needService) {
   if (!quiet) console.log('检查服务可用性…');
   [backendUp, frontUp] = await Promise.all([
     probe('http://127.0.0.1:3001/api/health'),
-    probe('http://127.0.0.1:5173/'),
+    probe(FRONT_PROBE),
   ]);
   if (!quiet) {
-    console.log(`  后端 :3001 ${backendUp ? '在线' : '离线'} / 前端 :5173 ${frontUp ? '在线' : '离线'}`);
+    console.log(`  后端 :3001 ${backendUp ? '在线' : '离线'} / 前端 :${FRONT_PORT} ${frontUp ? '在线' : '离线'}`);
   }
 }
 
@@ -281,8 +282,8 @@ for (const stage of stages) {
 
   if (missing) {
     const reason = stage.need === 'both'
-      ? `需要前端 5173 与后端 3001 同时在线`
-      : `需要${stage.need === 'front' ? '前端 5173' : '后端 3001'}在线`;
+      ? `需要前端 ${FRONT_PORT} 与后端 3001 同时在线`
+      : `需要${stage.need === 'front' ? `前端 ${FRONT_PORT}` : '后端 3001'}在线`;
     if (strict) {
       results.push({ id: stage.id, name: stage.name, status: 'FAIL', ms: 0, metric: reason, out: '' });
       console.log(`✗ ${stage.name} — ${reason}`);
@@ -346,8 +347,11 @@ const report = {
   totals: { passed, failed, skipped, ms: totalMs },
   services: { backend: backendUp, front: frontUp },
   cleanedTestAccounts: cleaned,
+  // 失败阶段把输出末尾存进报告：跨套件偶发失败（共享野怪池 / 在途名额等
+  // 进程内残留）只靠 metric 无法定位，留痕后可直接读 .verify-report.json 复盘。
   stages: results.map((r) => ({
     id: r.id, name: r.name, status: r.status, ms: r.ms, metric: r.metric,
+    ...(r.status === 'FAIL' ? { outTail: String(r.out ?? '').slice(-8000) } : {}),
   })),
 };
 try {

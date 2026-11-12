@@ -3,6 +3,9 @@
  *
  * 单独抽一层是为了消除循环依赖：realtime.ts 需要推快照、session.ts 需要广播，
  * 两边都只依赖本模块，不互相 import。
+ *
+ * W0：广播出口改为可注入 `BroadcastTransport`（W5 换 Redis pub/sub 只改注入），
+ * 并删除无调用点的 `broadcastToMany`。所有单例与函数签名保持不变。
  */
 import { WsRegistry } from '../lib/wsRegistry';
 import { GameSessionRegistry, type SessionStats } from '../lib/gameSession';
@@ -10,6 +13,7 @@ import { BattleRegistry } from '../lib/battleSession';
 import { WildRegistry } from '../lib/wildRegistry';
 import { RoomRegistry } from '../lib/roomRegistry';
 import { BossQuotaLedger } from '../lib/bossQuota';
+import { LocalBroadcastTransport, type BroadcastTransport } from '../lib/broadcastTransport';
 
 /** 在线 WebSocket 连接登记表（P2-1 已在用）。 */
 export const wsRegistry = new WsRegistry();
@@ -27,19 +31,26 @@ export const rooms = new RoomRegistry();
  */
 export const bossQuota = new BossQuotaLedger();
 
+let transport: BroadcastTransport = new LocalBroadcastTransport(wsRegistry);
+
+/** W5 注入共享 pub/sub 实现；所有 broadcast* 调用点零改动。 */
+export function setBroadcastTransport(next: BroadcastTransport): void {
+  transport = next;
+}
+
+/** 仅单测：恢复本地实现。 */
+export function resetBroadcastTransportForTest(): void {
+  transport = new LocalBroadcastTransport(wsRegistry);
+}
+
 /** 把一条服务端消息发给该账号的所有在线连接；返回实际送达条数。 */
 export function broadcastToUser(userId: string, data: string): number {
-  return wsRegistry.broadcastToUser(userId, data);
+  return transport.toUser(userId, data);
 }
 
 /** P4-1b：跨账号全量广播（共享野怪状态），返回实际送达条数。 */
 export function broadcastAll(data: string): number {
-  return wsRegistry.broadcastAll(data);
-}
-
-/** P4-2b：给一批账号发同一份消息（去重），返回实际送达条数。 */
-export function broadcastToMany(userIds: string[], data: string): number {
-  return wsRegistry.broadcastToMany(userIds, data);
+  return transport.toAll(data);
 }
 
 export function getSessionStats(): SessionStats {

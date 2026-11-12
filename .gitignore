@@ -42,3 +42,7 @@ save_data.json
 
 # 验收编排器报告（scripts/verify.mjs 生成，属本地产物）
 .verify-report.json
+
+# Python 字节码缓存（py_compile / 脚本自检生成，可重建）
+__pycache__/
+*.pyc

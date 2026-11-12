@@ -21,7 +21,8 @@ import { digestOf, compareDigest, parseAuthority } from '../lib/authority';
 import { checkWriteRevision, type RevisionFailure } from '../lib/revision';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { decideIntent, INTENT_TYPES, type IntentType } from '../lib/settlements';
-import { commitState, currentState } from './session';
+import { commitState } from './session';
+import { readRevision } from '../lib/revisionSource';
 import { gameSessions } from './sessionBus';
 
 const paramsSchema = z.object({ type: z.string().min(1).max(40) });
@@ -65,7 +66,8 @@ export async function actionRoutes(fastify: FastifyInstance) {
     // ⓪ P4 前置：CAS 版本校验。多人同时发意图时，后到的一方必须被拒，
     //    否则两端会各自基于同一份旧数据算出结果，后落库的一方静默覆盖前一方。
     //    放在消费 nonce 之前：冲突属并发而非攻击，不该吃掉一次性 nonce。
-    const server = await currentState(userId);
+    // W0：CAS 基线统一走可注入 readRevision()，W2 换 DB 列时只改注入实现。
+    const server = await readRevision(userId);
     const revCheck = checkWriteRevision(server?.revision ?? 0, body.revision);
     if (!revCheck.ok) {
       const bad = revCheck as RevisionFailure;

@@ -103,6 +103,20 @@ export class RoomRegistry {
   get(roomId: string): RoomState | undefined { return this.storage.get(roomId); }
 
   /**
+   * W0：结算幂等标记的显式写回（**不 bump revision**，保持零行为变更）。
+   * 旧代码直接改 `rooms.get()` 返回对象的字段，靠「同一引用」隐式生效；
+   * W6 换共享存储后 `get()` 会返回反序列化副本，那种写法会静默丢失
+   * （设计定稿 §3.6 序列化三障碍之一）。统一走这里，后续只改本方法为异步。
+   */
+  setSettledFlag(roomId: string, kind: 'pvp' | 'coop', value: boolean): void {
+    const room = this.storage.get(roomId);
+    if (!room) return;
+    if (kind === 'pvp') room.pvpSettled = value;
+    else room.coopSettled = value;
+    this.storage.set(room);
+  }
+
+  /**
    * P4-2d：把 1v1 战斗态挂到房间上（双方 join 完成后由路由层调用）。
    * 只接受「房间已 active 且尚无 pvp 态」的状态；挂上后 bump 一次让客户端拿到新快照。
    */
@@ -267,6 +281,10 @@ export class RoomRegistry {
       endReason: null,
       pvp: params.pvp ?? null,
       coop: null,
+      // W0：与 coopSettled 对称地显式初始化。旧代码只靠 `undefined` 兜幂等判定，
+      // 一旦 W6 序列化/反序列化（optional 字段丢失）就会重新变成 undefined，
+      // 结算可能重复触发。显式布尔是 §3.6 的三处序列化修复之一。
+      pvpSettled: false,
       coopSettled: false,
       coopBossId: params.coopBossId ?? null,
     };

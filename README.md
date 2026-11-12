@@ -13,7 +13,11 @@ npm install
 ### 2) 启动开发服务器
 
 ```bash
-npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
+npm run dev -- --host 0.0.0.0
+# 默认端口 5173；被占用时改 MPK_FRONT_PORT（vite.config.ts 与 scripts/lib/devConfig.mjs 同源），
+# 启动服务与跑 verify 要在同一个 shell 里设同一个值：
+#   MPK_FRONT_PORT=5174 npm run dev -- --host 0.0.0.0
+#   MPK_FRONT_PORT=5174 npm run verify -- --strict
 ```
 
 ### 3) 构建与检查

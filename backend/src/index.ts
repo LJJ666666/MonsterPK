@@ -71,13 +71,15 @@ fastify.addHook('onResponse', async (req, reply) => {
 
 // CORS_ORIGIN 与 wsProtocol.isOriginAllowed 共用一份逗号分隔配置：
 // 单值时保持原行为（字符串精确匹配），多值时传数组让 @fastify/cors 逐个匹配。
-// 本地调试 APK 的 WebView origin 是 http://localhost，与 5173 不同端口，必须同时放行。
-const corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+// 本地调试 APK 的 WebView origin 是 http://localhost，与前端 dev 不同端口，必须同时放行。
+// 前端 dev 端口由 MPK_FRONT_PORT 控制（默认 5173），与 scripts/lib/devConfig.mjs 同源。
+const defaultFrontOrigin = `http://localhost:${process.env.MPK_FRONT_PORT || 5173}`;
+const corsOrigins = (process.env.CORS_ORIGIN ?? defaultFrontOrigin)
   .split(',')
   .map((s) => s.trim())
   .filter((s) => s.length > 0);
 fastify.register(cors, {
-  origin: corsOrigins.length <= 1 ? (corsOrigins[0] ?? 'http://localhost:5173') : corsOrigins,
+  origin: corsOrigins.length <= 1 ? (corsOrigins[0] ?? defaultFrontOrigin) : corsOrigins,
   // 让浏览器 / WebView 能读到回写的 X-Request-Id（自定义响应头默认不暴露）。
   exposedHeaders: ['X-Request-Id'],
 });

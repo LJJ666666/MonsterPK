@@ -6,7 +6,11 @@
  * 而是注册真实账号 → 直接写 Grant 表（等价于服务端唯一写入口刚执行完）
  * → 浏览器打开营地 → 点「徽章」→ 验证只读投影与 375px 无横向溢出。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

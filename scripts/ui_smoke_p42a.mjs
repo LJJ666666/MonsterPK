@@ -5,7 +5,11 @@
  * 目标：证明榜单入口、弹窗、四榜切换、免责文案与只读提示在真浏览器里渲染出来，
  * 且 375px 窄屏不出现横向滚动。接口权威由 e2e:p42a 覆盖，这里只管可视层。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

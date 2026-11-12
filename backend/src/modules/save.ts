@@ -15,7 +15,7 @@ import { checkIntentDelta } from '../lib/settlements';
 import { checkWriteRevision, type RevisionFailure } from '../lib/revision';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { gameSessions } from './sessionBus';
-import { commitState } from './session';
+import { commitState, RevisionConflictError } from './session';
 import { readRevision } from '../lib/revisionSource';
 
 // PUT 入参：存档 JSON 文本（限 5MB）+ 客户端标识 / 基线版本 / 意图 nonce / 重建基线标记
@@ -75,14 +75,12 @@ export async function saveRoutes(fastify: FastifyInstance) {
 
     const rec = await prisma.save.findUnique({ where: { userId } });
     if (!rec) return reply.code(404).send({ error: '还没有存档' });
-    let revision = 0;
-    try { revision = JSON.parse(rec.authority ?? '{}')?.revision ?? 0; } catch { /* 忽略坏数据 */ }
     return {
       data: rec.data,
       updatedAt: rec.updatedAt,
       clientId: rec.clientId,
       schemaVersion: rec.schemaVersion,
-      revision,
+      revision: rec.revision,
     };
   });
 
@@ -265,20 +263,43 @@ export async function saveRoutes(fastify: FastifyInstance) {
       req.log.warn({ userId, kind: 'save_suspicious', codes: validation.soft.map((x) => x.code), stats: validation.stats }, '存档存在兼容类告警，已放行并记录');
     }
 
-    // P2-2：写入收敛到在线权威态（DB + 内存 + 广播），revision 由 commitState 保证单调递增。
-    const { saved, revision } = await commitState(userId, {
-      data: dataToStore,
-      schemaVersion: validation.schemaVersion,
-      clientId: parsed.data.clientId ?? null,
-      authority,
-      source: 'put',
-    });
+    // W2：唯一 +1 源是 Save.revision 列。baseRevision 必须是快速拒绝时读到的 DB
+    // 基线（currentRev），不能改成「重读当前版本」——否则并发写推进列之后，
+    // 基于旧版的客户端写入会借新基线把别人的写入覆盖掉。
+    let committed: Awaited<ReturnType<typeof commitState>>;
+    try {
+      committed = await commitState(userId, {
+        data: dataToStore,
+        schemaVersion: validation.schemaVersion,
+        clientId: parsed.data.clientId ?? null,
+        authority,
+        source: 'put',
+        baseRevision: currentRev,
+      });
+    } catch (err) {
+      if (err instanceof RevisionConflictError) {
+        const row = err.row;
+        req.log.info(
+          { userId, kind: 'revision_conflict_db', current: row?.revision ?? null, provided: parsed.data.revision },
+          'DB 条件更新未命中，已拒绝（不 apply 内存、不广播）',
+        );
+        return reply.code(409).send({
+          error: '存档已被其它端更新（服务端条件写入未命中），已拒绝本次写入',
+          code: 'REVISION_CONFLICT',
+          revision: row?.revision ?? 0,
+          data: row?.data ?? null,
+          updatedAt: row ? new Date(row.updatedAt).toISOString() : null,
+          schemaVersion: row?.schemaVersion ?? null,
+        });
+      }
+      throw err;
+    }
     return {
       ok: true,
-      updatedAt: saved.updatedAt,
-      clientId: saved.clientId,
-      schemaVersion: saved.schemaVersion,
-      revision,
+      updatedAt: committed.saved.updatedAt,
+      clientId: committed.saved.clientId,
+      schemaVersion: committed.saved.schemaVersion,
+      revision: committed.revision,
     };
   }
 }

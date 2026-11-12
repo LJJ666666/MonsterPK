@@ -6,7 +6,11 @@
  * 这条链路在真浏览器里跑得通，且 375px 窄屏无横向溢出。
  * 双方真实对战 / 结算 / 逃跑判负 / 越权由 `e2e:p42d` 覆盖，这里只管可视层与接线。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

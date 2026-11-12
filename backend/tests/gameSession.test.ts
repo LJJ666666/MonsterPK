@@ -1,12 +1,12 @@
 /**
  * GameSession 在线权威态单测（P2-2）。
- * 纯逻辑测试，不连库、不起 WS 服务；覆盖 revision 单调、hydrate、生命周期、
+ * 纯逻辑测试，不连库、不起 WS 服务；覆盖 W2 的 revision 只读缓存、hydrate、生命周期、
  * 快照构造，以及「上行不能写状态」的协议约束。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GameSessionRegistry, buildSnapshot, monotonicAuthority, isSessionExpired,
+  GameSessionRegistry, buildSnapshot, isSessionExpired,
   SESSION_TTL_MS, sessionKey, type AuthorityState,
 } from '../src/lib/gameSession.js';
 import { parseClientMessage, WS_CAPABILITIES } from '../src/lib/wsProtocol.js';
@@ -40,13 +40,6 @@ test('sessionKey：按 userId 隔离（账号单档）', () => {
   assert.notEqual(sessionKey('u1'), sessionKey('u2'));
 });
 
-test('monotonicAuthority：任何一次写入 revision 至少 +1', () => {
-  assert.equal(monotonicAuthority(null, auth(0)).revision, 1);
-  assert.equal(monotonicAuthority(auth(3), auth(3)).revision, 4);
-  assert.equal(monotonicAuthority(auth(3), auth(5)).revision, 5);
-  assert.equal(monotonicAuthority(auth(0), auth(0)).revision, 1);
-});
-
 test('hydrate：无 DB 记录不建会话；有记录时建立且重复 hydrate 命中内存', () => {
   const r = new GameSessionRegistry();
   assert.equal(r.hydrate('u1', null), null);
@@ -61,31 +54,31 @@ test('hydrate：无 DB 记录不建会话；有记录时建立且重复 hydrate 
   assert.equal(again!.authority.revision, 7);
 });
 
-test('apply：连续两次写入 revision 严格递增、来源与数据同步更新', () => {
+test('apply：W2 起 revision 由 DB 列给定，内存缓存不自行 +1', () => {
   const r = new GameSessionRegistry();
   r.hydrate('u1', record(2));
   const a = r.apply('u1', {
     data: '{"version":"10","money":100}', schemaVersion: '10', clientId: 'c1',
     authority: auth(2), source: 'put',
   }, 1_000);
-  assert.equal(a.authority.revision, 3);
+  assert.equal(a.authority.revision, 2);
   assert.equal(a.source, 'put');
   const b = r.apply('u1', {
     data: '{"version":"10","money":80}', schemaVersion: '10', clientId: 'c1',
     authority: auth(3), source: 'intent',
   }, 2_000);
-  assert.equal(b.authority.revision, 4);
+  assert.equal(b.authority.revision, 3);
   assert.equal(b.data, '{"version":"10","money":80}');
   assert.equal(b.updatedAt, 2_000);
 });
 
-test('apply：未 hydrate 过的账号也能由首次写入创建会话', () => {
+test('apply：未 hydrate 过的账号也能由首次写入创建会话（版本原样保留）', () => {
   const r = new GameSessionRegistry();
   const s = r.apply('u9', {
     data: '{}', schemaVersion: '10', clientId: null, authority: auth(0), source: 'put',
   });
   assert.equal(s.userId, 'u9');
-  assert.equal(s.authority.revision, 1);
+  assert.equal(s.authority.revision, 0);
 });
 
 test('attach / detach：连接登记到该账号会话，断线后逐一摘除', () => {

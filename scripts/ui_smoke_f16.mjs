@@ -7,7 +7,11 @@
  * 快照由探针注入 `mpk:room-state`（服务端下发的同形状全量快照），客户端零计算只渲染；
  * 真实房间推进 / 发奖 / 幂等由 `e2e:f16` 覆盖。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

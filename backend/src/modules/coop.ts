@@ -233,7 +233,6 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
         const authority: AuthorityState = {
           ...rec.authority,
           expected: digestOf(raw),
-          revision: rec.authority.revision + 1,
           pending: null,
         };
         await commitState(side.userId, {

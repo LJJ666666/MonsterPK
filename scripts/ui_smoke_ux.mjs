@@ -12,7 +12,11 @@
  *
  * 运行：node scripts/ui_smoke_ux.mjs（需要 5173 + 3001 同时在线）
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

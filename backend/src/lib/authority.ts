@@ -38,7 +38,7 @@ export type AuthorityState = {
   idleStartedAtMs: number | null;
   idleAreaId: string | null;
   idleLevel: number | null;
-  /** 裁决次数，便于排查；每次意图成功 +1。 */
+  /** W2：Save.revision 列的只读下行镜像；+1 只由 DB 条件更新裁决。 */
   revision: number;
   /** 一次性意图授权（裁决接口写入，带 intentNonce 的 PUT 消费）。 */
   pending: PendingIntent | null;
@@ -165,7 +165,10 @@ export function freshAuthority(saveRaw: string): AuthorityState {
   };
 }
 
-/** 结算落库后推进权威状态：以服务端认可的存档为准，覆盖挂机会话与 pending。 */
+/**
+ * 结算落库后推进权威状态：以服务端认可的存档为准，覆盖挂机会话与 pending。
+ * W2：不再递增 revision（原 P1-2 的内存 +1 已废除），由 commitState 写入 DB 列。
+ */
 export function advanceAuthority(
   prev: AuthorityState,
   settledSaveRaw: string,
@@ -176,7 +179,7 @@ export function advanceAuthority(
     idleStartedAtMs: patch.idleStartedAtMs !== undefined ? patch.idleStartedAtMs : prev.idleStartedAtMs,
     idleAreaId: patch.idleAreaId !== undefined ? patch.idleAreaId : prev.idleAreaId,
     idleLevel: patch.idleLevel !== undefined ? patch.idleLevel : prev.idleLevel,
-    revision: prev.revision + 1,
+    revision: prev.revision,
     pending: patch.pending !== undefined ? patch.pending : prev.pending,
   };
 }

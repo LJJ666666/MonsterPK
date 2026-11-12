@@ -6,7 +6,11 @@
  * 同源 iframe 分别加载 / 与 /camp → 读回 DOM 文本、根节点渲染情况、scrollWidth。
  * 临时 public 文件与浏览器 profile 用完即删。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

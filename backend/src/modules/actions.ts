@@ -21,9 +21,8 @@ import { digestOf, compareDigest, parseAuthority } from '../lib/authority';
 import { checkWriteRevision, type RevisionFailure } from '../lib/revision';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { decideIntent, INTENT_TYPES, type IntentType } from '../lib/settlements';
-import { commitState } from './session';
+import { commitState, RevisionConflictError } from './session';
 import { readRevision } from '../lib/revisionSource';
-import { gameSessions } from './sessionBus';
 
 const paramsSchema = z.object({ type: z.string().min(1).max(40) });
 const bodySchema = z.object({
@@ -149,16 +148,35 @@ export async function actionRoutes(fastify: FastifyInstance) {
       authority.idleAreaId = null;
       authority.idleLevel = null;
     }
-    await commitState(userId, {
-      data: baseData,
-      schemaVersion: validation.schemaVersion,
-      clientId: rec?.clientId ?? null,
-      authority,
-      source: 'intent',
-    });
+    // W2：CAS 基线用前置校验读到的 DB 列值；条件更新未命中即 409。
+    // 注意此刻 nonce 已消费：裁决结果没落库，客户端会带新 nonce 重放，
+    // 不退还 nonce 是为了保持「失败也消费」的反重放语义（RNG 结果不会二次生效）。
+    let committed: Awaited<ReturnType<typeof commitState>>;
+    try {
+      committed = await commitState(userId, {
+        data: baseData,
+        schemaVersion: validation.schemaVersion,
+        clientId: rec?.clientId ?? null,
+        authority,
+        source: 'intent',
+        baseRevision: server?.revision ?? 0,
+      });
+    } catch (err) {
+      if (err instanceof RevisionConflictError) {
+        const row = err.row;
+        return reply.code(409).send({
+          error: '存档已被其它端更新（服务端条件写入未命中），已拒绝本次写入',
+          code: 'REVISION_CONFLICT',
+          revision: row?.revision ?? 0,
+          data: row?.data ?? null,
+          updatedAt: row ? new Date(row.updatedAt).toISOString() : null,
+        });
+      }
+      throw err;
+    }
     req.log.info({ userId, kind: 'intent_decided', type, nonce, result: pending.result }, '服务端裁决完成');
     // P4：返回裁决后的版本号。客户端提交结果（PUT 带 intentNonce）必须基于这一版，
     // 否则它手里还是「裁决前」的 revision，提交会被自己的 CAS 拒掉。
-    return { ok: true, nonce, revision: gameSessions.get(userId)?.authority.revision ?? 0, result: pending.result };
+    return { ok: true, nonce, revision: committed.revision, result: pending.result };
   }
 }

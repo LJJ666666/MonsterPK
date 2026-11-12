@@ -6,8 +6,8 @@
  *   - 内存态：在线期间以内存为准，避免每次读写都回 DB，且能立刻广播给同账号其它连接；
  *   - DB 持久化：仍落到既有的 Save 表（data + authority），不新增 Prisma 迁移，
  *     重启 / 新连接时从 DB hydrate，语义与 P1-2 的权威摘要完全兼容；
- *   - revision：复用 authority.revision，任何一次服务端写入都单调递增，
- *     客户端据此判断快照新旧，旧快照一律忽略；
+ *   - revision：W2 起真值在 Save.revision 列；本层只保存 DB 下发的只读镜像，
+ *     不自行递增，客户端据此判断快照新旧、旧快照一律忽略；
  *   - 上行不写状态：客户端只能通过 REST 的意图裁决 / 整包 PUT 请求变更，
  *     WS 上行只有控制消息（ping / session.resync），伪造 session.state 会被协议层拒绝。
  *
@@ -86,19 +86,6 @@ export function buildSnapshot(s: GameSessionState): SessionSnapshot {
   };
 }
 
-/**
- * 保证「每次服务端写入 revision 至少 +1」。
- * P1-2 的 advanceAuthority 会自己 +1；普通整包 PUT / 意图登记不会，
- * 这里统一补齐，避免出现「写入了但版本号没变」导致客户端忽略快照。
- */
-export function monotonicAuthority(
-  prev: AuthorityState | null | undefined,
-  next: AuthorityState,
-): AuthorityState {
-  const floor = prev ? prev.revision + 1 : 1;
-  return next.revision >= floor ? next : { ...next, revision: floor };
-}
-
 /** 无连接且超过 TTL 的会话可回收；有连接的会话永不回收。 */
 export function isSessionExpired(s: GameSessionState, now: number, ttl = SESSION_TTL_MS): boolean {
   return s.connections.size === 0 && now - s.lastActiveAt > ttl;
@@ -163,7 +150,8 @@ export class GameSessionRegistry {
   ): GameSessionState {
     const key = sessionKey(userId);
     const prev = this.byKey.get(key);
-    const authority = monotonicAuthority(prev?.authority, input.authority);
+    // W2：revision 由 DB 条件更新裁决后写入，内存缓存不再自行 +1。
+    const authority = input.authority;
     const state: GameSessionState = {
       userId,
       data: input.data,

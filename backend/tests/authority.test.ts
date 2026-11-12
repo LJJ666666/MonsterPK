@@ -96,13 +96,14 @@ test('serialize / parse 往返保留一次性意图授权', () => {
   assert.equal(restored.idleStartedAtMs, 1234);
 });
 
-test('advanceAuthority：结算后抬升期望值、递增 revision、清 pending', () => {
+test('advanceAuthority：结算后抬升期望值、保持 revision 镜像、清 pending', () => {
   const a = freshAuthority(raw());
   a.pending = { nonce: 'n', type: 'capture', createdAtMs: 0, baseDigest: a.expected, allow: {}, result: {} };
   const nextRaw = raw({ money: 150 });
   const next = advanceAuthority(a, nextRaw, { pending: null });
   assert.equal(next.expected.money, 150);
-  assert.equal(next.revision, 1);
+  // W2：+1 由 Save.revision 列裁决，本层不再递增（首档 freshAuthority 为 0）。
+  assert.equal(next.revision, 0);
   assert.equal(next.pending, null);
 });
 

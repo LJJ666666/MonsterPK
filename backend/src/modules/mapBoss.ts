@@ -199,7 +199,6 @@ async function grantMapBossDrop(p: {
     const authority: AuthorityState = {
       ...row.authority,
       expected: digestOf(raw),
-      revision: row.authority.revision + 1,
       pending: null,
     };
     const committed = await commitState(userId, {

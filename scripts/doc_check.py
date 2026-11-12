@@ -762,6 +762,57 @@ checks = [
      and "W1 起进入批次 B" in handoff_text
      and "W1 ✅ 2026-11-12" in handoff_text
      and "W1 ✅ 2026-11-12" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")),
+    ("W2：CAS 策略层落盘且 commitState 用条件 updateMany 裁决 409",
+     (ROOT / "backend/src/lib/saveCas.ts").exists()
+     and "updateIfRevision" in text(ROOT / "backend/src/lib/saveCas.ts")
+     and "count !== 1" in text(ROOT / "backend/src/lib/saveCas.ts")
+     and "P2002" in text(ROOT / "backend/src/lib/saveCas.ts")
+     and "RevisionConflictError" in text(ROOT / "backend/src/modules/session.ts")
+     and "updateMany({" in text(ROOT / "backend/src/modules/session.ts")
+     and "revision: baseRevision" in text(ROOT / "backend/src/modules/session.ts")
+     and "不 apply 内存" in text(ROOT / "backend/src/modules/session.ts")),
+    ("W2：内存 +1 已废除、CAS 基线只读 DB 列",
+     "monotonicAuthority" not in text(ROOT / "backend/src/lib/gameSession.ts")
+     and "revision: prev.revision + 1" not in text(ROOT / "backend/src/lib/authority.ts")
+     and "currentState(userId)" in text(ROOT / "backend/src/lib/revisionSource.ts")
+     and "baseRevision: currentRev" in text(ROOT / "backend/src/modules/save.ts")
+     and "baseRevision: server?.revision ?? 0" in text(ROOT / "backend/src/modules/actions.ts")),
+    ("W2：确定性单测含 barrier 与无条件 upsert 反证",
+     (ROOT / "backend/tests/w2SaveCas.test.ts").exists()
+     and "function barrier" in text(ROOT / "backend/tests/w2SaveCas.test.ts")
+     and "unconditional: true" in text(ROOT / "backend/tests/w2SaveCas.test.ts")
+     and "反证" in text(ROOT / "backend/tests/w2SaveCas.test.ts")),
+    ("W2：双进程 E2E 注册到 npm / STAGES / GROUPS / 清理前缀",
+     "e2e:w2" in text(ROOT / "backend/package.json")
+     and "{ id: 'e2e:w2'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w2', 'e2e:p41'" in text(ROOT / "scripts/verify.mjs")
+     and "'w2'" in text(ROOT / "backend/scripts/clean-test-data.mjs")
+     and "--import" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")
+     and "stopSecondInstance" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")),
+    ("W2：E2E 不做时序概率硬断言（分支类型只作 INFO）",
+     "分支类型只作 INFO" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")
+     and "[INFO] 双进程 5 组并发中命中 DB 条件更新分支" in text(ROOT / "backend/tests/e2e_w2_cas.mjs")),
+    ("bug_log §52 / 任务表 / HANDOFF / 定稿记录 W2 收官与 48/48",
+     "## 52." in bug_text
+     and "P5-1 W2 收官" in task_text
+     and "W2 ✅ 2026-11-12" in handoff_text
+     and "48/48" in handoff_text
+     and "W2 ✅ 2026-11-12" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "48/48" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "48/48" in text(ROOT / ".trae/documents/未来规划与技术债_2026-11-07.md")),
+    ("W2：HANDOFF 不再保留 SQLite DATABASE_URL 过期口径",
+     'DATABASE_URL="file:./dev.db"' not in handoff_text
+     and "postgresql://" in handoff_text),
+    ("headless Edge 错误页重试加固（§53）落地且断言未放宽",
+     (ROOT / "scripts/lib/edgeDom.mjs").exists()
+     and "createRetriedExec" in text(ROOT / "scripts/lib/edgeDom.mjs")
+     and "RETRY_EXHAUSTED" in text(ROOT / "scripts/lib/edgeDom.mjs")
+     and all("createRetriedExec" in text(p) for p in (ROOT / "scripts").glob("ui_smoke_*.mjs"))
+     and "seedDom.includes('SEEDED')" in text(ROOT / "scripts/ui_smoke_p42d.mjs")),
+    ("bug_log §53 与任务表记录冒烟偶发红第三类根因",
+     "## 53." in bug_text
+     and "headless Edge 单次导航失败" in task_text
+     and "round14" in bug_text),
 ]
 
 for name, ok, *detail in checks:

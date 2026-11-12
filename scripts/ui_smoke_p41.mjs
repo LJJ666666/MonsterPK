@@ -6,7 +6,11 @@
  * 不出现横向滚动。E2E 只能证明接口一致，证明不了 DOM 没撑破屏幕。
  * 刻意不点「挑战」：共享野怪的抢占互斥由 e2e:p41 覆盖，这里只管可视层。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

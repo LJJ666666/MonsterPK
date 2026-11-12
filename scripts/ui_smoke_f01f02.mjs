@@ -5,7 +5,11 @@
  * 只验证可视层：三个视图切换、只读文案、空/有数据态与 375px 无横向溢出。
  * 结算与发奖的权威口径由 e2e:f01f02 覆盖，这里不重复造数据。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

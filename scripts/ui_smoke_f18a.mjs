@@ -9,7 +9,11 @@
  * 修复后应展示「上一相邻城镇的徽章名」（与后端 mapLock.requiredBadgeFor 同口径），
  * 即 city_pebble 一行应显示「需获得「青苗徽章」解锁」。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { createRetriedExec } from './lib/edgeDom.mjs';
+
+// headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
+const execFileSync = createRetriedExec(rawExecFileSync);
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

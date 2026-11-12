@@ -14,7 +14,7 @@
  *  D 权威增量与意图  E WebSocket 攻防   F 战斗接口伪造   G 数值边界（成对：放行 / 封号）
  *
  * 输出逐例 [PASS]/[FAIL]，末尾 E2E_HARDENING_OK；失败 exit 1。
- * 收尾自动清理本轮创建的账号（除非 --keep），避免 dev.db 无限膨胀。
+ * 收尾自动清理本轮创建的账号（除非 --keep），避免 数据库 无限膨胀。
  */
 import {
   Suite, api, newAccount, login, setRole, cleanupAccounts, forgeToken, loadContent,

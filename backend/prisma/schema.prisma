@@ -1,12 +1,16 @@
 // MonsterPK 后端数据模型
-// SQLite + Prisma。迁移到 Postgres 只需把 datasource.provider 改成 "postgresql" 并改 DATABASE_URL。
+// Postgres + Prisma（P5-1 W1 起，2026-11-12）。
+// ⚠️ 原注释「迁移到 Postgres 只需把 provider 改成 postgresql」是错的：11 条旧迁移全是
+// SQLite 方言（AUTOINCREMENT / DROP COLUMN / DATETIME），migration_lock.toml 也锁着
+// sqlite，直接改 provider 会让 migrate deploy 全链失败。正确做法是归档旧链 + 重置 lock
+// + 用一条 PG 基线 init 重建，见 .trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md §1#1/#2。
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -59,6 +63,10 @@ model Save {
   // P1-2 服务端权威摘要（JSON 文本）：expected 资源摘要 + 挂机会话的服务端时钟 + revision。
   // 客户端整包 PUT 时用它做单调比对，自造的资源增量一律拒绝；裁决接口执行后同步更新。
   authority     String?
+  // P5-1 W1 提列：CAS 基线原先藏在 authority JSON 的 revision 字段里，无独立列，
+  // 导致规范 §21.3 的 `UPDATE ... WHERE revision = ?` 无法落地。本工单只建列 +
+  // 一次性回填（不重编号、不 +1）；W2 才把它收敛为唯一 +1 源并改写入逻辑。
+  revision      Int      @default(0)
   updatedAt     DateTime @updatedAt
 }
 

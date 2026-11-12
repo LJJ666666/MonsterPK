@@ -173,7 +173,7 @@
 
 杰哥拍板：App 框架保持 React+Capacitor 不动；联网走**自建 Node+TS 后端**（非 Supabase）。**2026-11-04 追加拍板：最终形态 = 服务端权威 + 实时多人同玩**（WebSocket 实时传输，战斗/捕获/经济由服务端结算，客户端只发意图、收状态）；本地存档为过渡态，待服务端权威 + 实时就绪后去除，仅保留登录态/设置等本地非游戏状态。
 
-- **技术栈**：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + SQLite（dev.db）+ bcryptjs + zod + tsx；独立目录 `backend/`，与前端解耦。
+- **技术栈**：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + **Postgres 16（P5-1 W1 起）** + bcryptjs + zod + tsx；独立目录 `backend/`，与前端解耦。
 - **数据模型**：`User`(用户名唯一 + `role`/`bannedAt`/`banReason`) + `Save`(userId+slot 复合唯一，data 存完整存档 JSON、`schemaVersion`、`clientId`、`updatedAt`；每用户 3 槽) + `BanRecord`(封号审计)。迁移 `20261105101951_add_account_moderation` 已应用。
 - **API**：`POST /api/auth/register|login`（返回 JWT，含 `exp`；已封号 403）、`GET /api/auth/me`（返回 `isAdmin`/`banned`）、`GET|PUT /api/save?slot=1|2|3`（PUT 做结构+数值校验 → 风控决策 → 服务端时钟钳制 → upsert）、`GET /api/health`。
 - **风控（P1-1 / P1-1b 已完成）**：`saveValidator.ts` 校验数值契约、`antiCheat.ts` 分 `allow/reject/ban`（**改档即封号 + 弹窗登出**，管理员放行测试菜单数据，格式/旧档问题只 400 不封号）、`serverClock.ts` 把未来时间戳钳制为服务端时间（**改系统时间不生效、不封号**）；管理员由 `ADMIN_USERNAMES` 或 `User.role` 服务端判定，用 `npm run admin -- grant <用户名>` 授权。

@@ -136,7 +136,7 @@ checks = [
          "src/lib/wild.test.ts",
      ])),
     ("P4-1 Prisma 迁移已落盘并写进 schema",
-     (ROOT / "backend" / "prisma" / "migrations" / "20261107164000_add_session_version" / "migration.sql").exists()
+     (ROOT / "backend" / "prisma" / "migrations_sqlite_archive" / "20261107164000_add_session_version" / "migration.sql").exists()
      and "sessionVersion" in text(ROOT / "backend" / "prisma" / "schema.prisma")),
     ("任务表记 P4-1 ✅ 与 30/30 E2E_P41_OK",
      "P4-1" in task_text and "E2E_P41_OK" in task_text and "UI_SMOKE_P41_OK" in task_text),
@@ -345,7 +345,7 @@ checks = [
          "backend/tests/settlement.test.ts",
          "backend/tests/bossQuota.test.ts",
          "backend/tests/e2e_p42c_boss.mjs",
-         "backend/prisma/migrations/20261107233000_add_boss_damage_event/migration.sql",
+         "backend/prisma/migrations_sqlite_archive/20261107233000_add_boss_damage_event/migration.sql",
          "scripts/ui_smoke_p42c.mjs",
          "src/lib/boss.ts",
          "src/lib/boss.test.ts",
@@ -448,7 +448,7 @@ checks = [
          "backend/tests/e2e_f01f02.mjs",
          "scripts/ui_smoke_f01f02.mjs",
          "src/lib/rankPeriod.test.ts",
-         "backend/prisma/migrations/20261109040021_add_rank_period_and_reward/migration.sql",
+         "backend/prisma/migrations_sqlite_archive/20261109040021_add_rank_period_and_reward/migration.sql",
      ])),
     ("P4-3 编号冲突已定死（交易/赠送，不再是周期结算）",
      "P4-3（交易 / 赠送）" in task_text and "P4-3（周期结算" not in plan_text
@@ -489,7 +489,7 @@ checks = [
          "backend/src/modules/coopReward.ts",
          "backend/tests/e2e_f16.mjs",
          "scripts/ui_smoke_f16.mjs",
-         "backend/prisma/migrations/20261109181400_add_coop_reward_grant/migration.sql",
+         "backend/prisma/migrations_sqlite_archive/20261109181400_add_coop_reward_grant/migration.sql",
      ])),
     ("F16 发奖表与幂等键已落 schema",
      "model CoopRewardGrant" in text(ROOT / "backend" / "prisma" / "schema.prisma")
@@ -517,7 +517,7 @@ checks = [
      "SAVE_SLOT_FORBIDDEN" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
      and "SCHEMA_VERSION = 11" in text(ROOT / "src" / "stores" / "saveVersion.ts")
      and "EXPECTED_SAVE_VERSION = 11" in text(ROOT / "backend" / "src" / "lib" / "saveValidator.ts")
-     and (ROOT / "backend" / "prisma" / "migrations" / "20261110113000_f17_single_save" / "migration.sql").exists()),
+     and (ROOT / "backend" / "prisma" / "migrations_sqlite_archive" / "20261110113000_f17_single_save" / "migration.sql").exists()),
     ("F17 E2E 接入 verify 两处且清理前缀含 f17_",
      verify_text.count("e2e:f17") >= 2 and '"e2e:f17"' in pkg_text
      and "f17_" in text(ROOT / "backend" / "scripts" / "clean-test-data.mjs")
@@ -636,10 +636,13 @@ checks = [
      "vite-plugin-trae-solo-badge" not in root_pkg_text
      and "traeBadgePlugin" not in text(ROOT / "vite.config.ts")
      and "补测执行结果（2026-11-11，12/12 全绿）" in text(DOCS / "雷电模拟器_adb操作规范_2026-11-11.md")),
-    ("A1 vite 分包精简为仅 vendor-react",
-     "manualChunks" in text(ROOT / "vite.config.ts")
-     and "vendor-react" in text(ROOT / "vite.config.ts")
-     and "vendor-state" not in text(ROOT / "vite.config.ts")),
+    ("A1 分包复核定稿：移除人工分包，回到 Vite 默认单包",
+     "manualChunks(id)" not in text(ROOT / "vite.config.ts")
+     and "return 'vendor-react'" not in text(ROOT / "vite.config.ts")
+     and "rollupOptions" not in text(ROOT / "vite.config.ts")
+     and "Capacitor" in text(ROOT / "vite.config.ts")
+     and "## 50." in bug_text
+     and "770,965" in bug_text),
     ("A2 后端 requestId 追踪与 CORS 暴露",
      "genReqId" in text(ROOT / "backend/src/index.ts")
      and "X-Request-Id" in text(ROOT / "backend/src/index.ts")
@@ -729,6 +732,36 @@ checks = [
      and "2026-11-12 订正" in bug_text
      and "E2E 偶发红第二个根因收敛" in task_text
      and "fleeUntilDone" in handoff_text),
+    ("W1：provider 切 Postgres、Save.revision 提列、PG 基线 init 落盘",
+     'provider = "postgresql"' in text(ROOT / "backend/prisma/schema.prisma")
+     and 'provider = "sqlite"' not in text(ROOT / "backend/prisma/schema.prisma")
+     and 'revision      Int      @default(0)' in text(ROOT / "backend/prisma/schema.prisma")
+     and '"revision" INTEGER NOT NULL DEFAULT 0' in text(ROOT / "backend/prisma/migrations/20261112123700_init/migration.sql")
+     and 'CREATE TABLE "Save"' in text(ROOT / "backend/prisma/migrations/20261112123700_init/migration.sql")),
+    ("W1：11 条 SQLite 迁移归档、lock 重置、只剩一条 PG 基线",
+     len(list((ROOT / "backend/prisma/migrations_sqlite_archive").glob("*/migration.sql"))) == 11
+     and 'provider = "postgresql"' in text(ROOT / "backend/prisma/migrations/migration_lock.toml")
+     and len(list((ROOT / "backend/prisma/migrations").glob("*/migration.sql"))) == 1
+     and (ROOT / "backend/prisma/migrations_sqlite_archive/README.md").exists()),
+    ("W1：revision 回填幂等脚本与事务回滚验证脚本存在",
+     (ROOT / "backend/prisma/backfill_revision.sql").exists()
+     and "regexp_match" in text(ROOT / "backend/prisma/backfill_revision.sql")
+     and 'WHERE "revision" = 0' in text(ROOT / "backend/prisma/backfill_revision.sql")
+     and (ROOT / "backend/scripts/w1_backfill_check.mjs").exists()
+     and "W1_BACKFILL_RESULT" in text(ROOT / "backend/scripts/w1_backfill_check.mjs")),
+    ("W1：SQLite 专属 PRAGMA 已换 information_schema、新机自检认 PG",
+     "PRAGMA table_info" not in text(ROOT / "backend/tests/e2e_f17.mjs")
+     and "information_schema.columns" in text(ROOT / "backend/tests/e2e_f17.mjs")
+     and "DATABASE_URL uses postgresql provider" in text(ROOT / "scripts/check_home_env.py")
+     and "dev.db exists" not in text(ROOT / "scripts/check_home_env.py")
+     and "postgresql://" in text(ROOT / "backend/.env.example")),
+    ("bug_log §51 与任务表 / HANDOFF / 定稿记录 W1 收官",
+     "## 51." in bug_text
+     and "20261112123700_init" in bug_text
+     and "P5-1 W1 收官" in task_text
+     and "W1 起进入批次 B" in handoff_text
+     and "W1 ✅ 2026-11-12" in handoff_text
+     and "W1 ✅ 2026-11-12" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")),
 ]
 
 for name, ok, *detail in checks:

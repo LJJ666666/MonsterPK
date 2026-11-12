@@ -105,7 +105,11 @@ async function main() {
     s.check('DB：尝试插第二档后仍只有 1 条', stillOne === 1, `count=${stillOne}`);
 
     for (const t of SLOTLESS_TABLES) {
-      const cols = await prisma.$queryRawUnsafe(`PRAGMA table_info("${t}")`);
+      // W1 起 provider=postgresql：SQLite 的 PRAGMA 表信息查询不可用，改用标准
+      // information_schema.columns。Prisma 模型名映射为保留大小写的 PG 标识符。
+      const cols = await prisma.$queryRawUnsafe(
+        `SELECT column_name AS name FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = $1`, t);
       const namesInTable = cols.map((c) => c.name);
       s.check(`DB：${t} 表已无 slot 列`, !namesInTable.includes('slot'), namesInTable.join(','));
     }

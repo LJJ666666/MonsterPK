@@ -22,7 +22,7 @@
 | Web 框架 | Fastify 4 | 轻量、内置校验钩子、装饰器机制灵活 |
 | 鉴权 | `@fastify/jwt` + `@fastify/cors` | JWT 签发含 `exp`；CORS 仅放行前端来源 |
 | ORM | Prisma 5 | 数据模型即文档，`migrate dev` 生成可复现迁移 |
-| 数据库 | SQLite（`dev.db` 文件库） | 开发期；上线切 Postgres 只需改 `provider` 与 `DATABASE_URL` |
+| 数据库 | **Postgres 16**（P5-1 W1 起，2026-11-12） | 唯一真值；`DATABASE_URL` 指向实例。旧 SQLite 迁移链已归档，切 provider 不是「改一行」，见设计定稿 §1#1/#2 |
 | 密码 | `bcryptjs` | 明文密码只进哈希，绝不落库 |
 | 入参校验 | `zod` | 每个路由先用 `safeParse` 拦非法入参 |
 | 配置 | `.env` + `lib/env` | 密钥/端口/跨域来源/管理员白名单外置，`.env` 入 `.gitignore` |
@@ -38,7 +38,7 @@ backend/
 ├── prisma/
 │   ├── schema.prisma          # 数据模型（唯一真源）+ 迁移基线
 │   ├── migrations/            # 每次 schema 变更的 SQL 迁移（可复现、可提交）
-│   └── dev.db                 # 开发期文件库（不提交）
+│   └── (无 dev.db)            # W1 起数据在外部 Postgres，dev.db 仅作旧库兜底留存、不提交
 ├── scripts/
 │   └── admin.ts               # 账号管理 CLI：grant / revoke / ban / unban / list / audit
 ├── src/
@@ -236,7 +236,7 @@ model Save {
 
 1. 改 `prisma/schema.prisma`。
 2. **先停掉正在运行的 backend dev 服务**（见 §8 坑位），否则 `prisma generate` 会因 Windows 文件锁 EPERM 失败。
-3. `npx prisma migrate dev --name <语义化名字>` —— 生成 SQL 迁移并应用到 `dev.db`，随后自动 `generate`。
+3. 改 schema 前**先停 3001**；W1 起迁移链只有一条 PG 基线 `20261112123700_init`，后续改动用**新的前向迁移**（PG 链单向不回滚），`npx prisma migrate deploy` + `npx prisma generate`。
 4. 若 `generate` 报 EPERM（rename query_engine DLL），重启 dev 服务前确认无 backend 进程占用 :3001。
 5. 迁移文件**必须提交**；上线切 Postgres 时按 Prisma 官方流程重跑迁移即可。
 6. 重置开发库：`npx prisma migrate reset`（会清数据，仅本地用）。
@@ -325,7 +325,7 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - ✅ **P1-2 关键随机与结算上移服务端**：见 §14；捕获判定、金币/道具/挂机结算均由服务端裁决，挂机 `startedAt` 用服务端时钟。
 - ✅ **P2-1 WebSocket 实时通道 + P2-2 GameSession 在线权威态**：见 §15 / §16；状态写入收敛到 `commitState()`，客户端只收 `session.state` 快照。
 - ⬜ **P3 服务端模拟（下一步 P3-1）**：战斗/捕获/挂机中间态上移服务端，客户端变瘦终端（此时才真正防住 GG 修改器 / 加速器）。
-- ⬜ **P5 上线与去本地**：SQLite → Postgres、HTTPS、`VITE_API_BASE`/`CORS_ORIGIN` 切云、
+- ⬜ **P5 上线与去本地**：SQLite → Postgres **已由 W1 完成（2026-11-12，本地开发实例；正式实例待位）**；剩余 HTTPS、`VITE_API_BASE`/`CORS_ORIGIN` 切云、
   去除本地存档持久化（须等服务端权威 + 实时就绪后才安全）。
 
 ---
@@ -613,7 +613,7 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - 15 阶段约 35s；`--only=check,unit`（不需要服务）/ `--only=e2e:hardening` / `--skip=e2e,smoke`；
   `--strict` 让「服务没起」变成失败（CI 用）；`--no-clean` 保留测试账号排查。
 - 编排器先探活 3001/5173，缺服务的阶段标 `SKIP` 而非失败，避免本地没起服务时一片红。
-- 跑完自动执行 `clean:e2e`，防止 dev.db 被临时账号撑大；报告写 `.verify-report.json`（已 gitignore）。
+- 跑完自动执行 `clean:e2e`，防止测试账号在数据库里残留；报告写 `.verify-report.json`（已 gitignore）。
 
 ### 18.5 已修缺陷与风控码约定
 

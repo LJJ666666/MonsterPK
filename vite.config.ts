@@ -90,22 +90,17 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', 'dist/**', 'backend/**'],
   },
+  // 不做人工分包（2026-11-12 复核定稿，取代 A1 的 manualChunks/vendor-react）。
+  // 本项目是 Capacitor 本地包：dist 整体打进 APK 的 assets/public，WebView 从本地
+  // 加载，不存在跨版本 HTTP 缓存复用；人工分包的唯一真实收益（React 生态单独成
+  // chunk 后长期命中缓存）在这里为零，代价反而是多一个 modulepreload 请求、多一层
+  // chunk 边界与配置维护成本。实测：去掉后首屏 JS 请求 2→1、产物文件 7→5；
+  // JS 总字节 770,245→770,965 B（基本持平，反而多 720 B）、gzip ≈170 kB 不变，
+  // 所以取舍依据是「缓存收益为零 + 少一次本地请求 + 零配置」，不是体积变小。
+  // 回到 Vite 默认合并策略。src/stores/useGameStore.ts 的 import("@/lib/intents")
+  // 是打破循环依赖的动态导入，属源码结构、不属构建期分包，保留。
   build: {
     sourcemap: 'hidden',
-    rollupOptions: {
-      output: {
-        // 只拆「稳定、几乎不随业务改动」的 React 生态：升级游戏逻辑时这一块的内容哈希
-        // 不变，浏览器/WebView 可复用缓存。它**不减少总下载量**，收益只在缓存命中率；
-        // 因此不再为 zustand/zod 这类几 kB 的小依赖单独成块 —— 多一个请求的开销
-        // 比它本身还大，且会把主包切得更碎。返回 undefined 走 Vite 默认合并策略。
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return;
-          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) {
-            return 'vendor-react';
-          }
-        },
-      },
-    },
   },
   plugins: [
     react({

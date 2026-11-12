@@ -88,10 +88,24 @@ if env_file.is_file():
 else:
     say("FAIL", "backend/.env missing -> cp .env.example .env then edit it")
 
-if (BACK / "prisma" / "dev.db").is_file():
-    say("OK", "backend/prisma/dev.db exists")
+# ---- database (P5-1 W1 起：Postgres 唯一真值，SQLite dev.db 已停用) ----
+db_url = ""
+for line in env_text.splitlines():
+    if line.startswith("DATABASE_URL="):
+        db_url = line.split("=", 1)[1].strip().strip('"').strip("'")
+        break
+if db_url.startswith(("postgresql://", "postgres://")):
+    say("OK", "DATABASE_URL uses postgresql provider")
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(db_url)
+        host, port = u.hostname or "127.0.0.1", u.port or 5432
+        with socket.create_connection((host, port), timeout=2):
+            say("OK", f"postgres reachable {host}:{port}")
+    except Exception as e:
+        say("WARN", f"postgres unreachable ({e}) -> start PG, then: npx prisma migrate deploy")
 else:
-    say("WARN", "dev.db missing -> run: npx prisma migrate deploy (new empty DB: re-register + grant admin)")
+    say("FAIL", "DATABASE_URL must be postgresql://... (SQLite chain archived in W1)")
 
 # ---- git ----
 head = cmd("git rev-parse HEAD")

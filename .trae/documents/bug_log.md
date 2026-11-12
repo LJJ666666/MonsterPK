@@ -1264,3 +1264,38 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   - `e2e:core_loop` 定向 **20/20（49 项）** 未复现 §47 那 3 项失败；那次没有原文，继续留 `outTail` 观察，不臆断、不改断言掩盖。
   - 全量 `MPK_FRONT_PORT=5174 npm run verify -- --strict` **47/47 `VERIFY_OK`**（round7，163.7s，0 失败 0 跳过），前端 138 / 后端 422 / 25 组 E2E / 14 组冒烟 / 文档自检 192 项 / 镜像一致；归档完成后的最终一轮数字见本轮提交末尾。
 - **口径沉淀**：服务端任何带 RNG / 成功率的动作（逃跑、捕获）在 E2E 里都不能假设单次成功；要么重试到终态，要么走确定性接口（`abandon`）。新增玩法分支写 E2E 前先查既有 helper。
+
+## 50. A1 分包复核定稿：Capacitor 本地包不做人工分包（2026-11-12）
+
+- **触发**：杰哥「之前的分包问题你按最优解去处理吧」。§46 加了 `vendor-react`/`vendor-state` 两组，§47 因「拆这么小是否必要」删掉 `vendor-state` 只留 `vendor-react`，本轮把这个问题一次性收口。
+- **复核结论（最优解 = 完全移除 `manualChunks`）**：此前两轮的理由是「React 生态单独成 chunk，业务改版时可复用长期缓存」。但本项目是 **Capacitor 本地包**：`dist/` 整体同步进 APK 的 `assets/public`，WebView 从本地文件加载，APK 升级时整个 assets 一起替换，**不存在跨版本 HTTP 缓存复用**。也就是说分包的唯一真实收益在本项目里恒为零；代价是多一个 `modulepreload`、多一层 chunk 边界、多一套需要跟着依赖变化维护的配置。§47 已证明「分包不减少总下载量」，本轮进一步证明「连体积优势也没有」。
+- **实测对比（同一份源码，`npm run build`，Vite 6.4.2；仅切换 `build.rollupOptions.output.manualChunks`）**：
+
+  | 指标 | 有 `vendor-react` | 默认单包 | 差异 |
+  |---|---|---|---|
+  | 首屏 JS 请求 | 2（script + modulepreload） | **1** | −1 |
+  | 产物文件数（含 map） | 7 | **5** | −2 |
+  | JS 总字节 | 770,245 B（589,011 + 180,527 + 707） | 770,965 B（770,293 + 672） | +720 B（基本持平） |
+  | JS gzip | ≈164 kB | ≈164 kB | 持平 |
+  | CSS | 27,068 B | 27,068 B | 不变 |
+  | `dist/index.html` | 0.91 kB 前为带 1 条 modulepreload | 0.91 kB | 少一行 |
+
+  结论要如实说：**字节没有变小，反而多 720 B**；取舍依据是「缓存收益为零 + 少一次本地请求 + 零配置」，不是体积。`intents-*.js`（约 0.67 kB）来自 `src/stores/useGameStore.ts:21` 为打破与 `lib/intents.ts` 顶层循环导入（TDZ）而写的动态 `import()`，属源码结构，不属构建期分包，保留；改成静态导入会重新引入循环依赖，收益远小于风险。
+- **改动**：`vite.config.ts` 删掉整个 `build.rollupOptions.output`，只保留 `sourcemap:'hidden'`，构建策略回到 Vite 默认；`scripts/doc_check.py` 的 A1 断言由「必须存在 `manualChunks`/`vendor-react`」改为「不得存在函数调用 + 有 §50 与实测数字」。历史条目 §46/§47 保留当时事实，不改写。构建仍有 `Some chunks are larger than 500 kB` 提示（业务代码 + `game/data.ts` 内容表），是提示不是错误，不为了消警告再引入分包。
+- **环境注意**：改 `vite.config.ts` 会让 Vite dev server 自动重启，之后必须 `curl 127.0.0.1:$MPK_FRONT_PORT` 探活再跑 verify；`MPK_FRONT_PORT` 单一真值源不变。
+- **验收**：`npm run build` exit 0（见 `.verify-logs/build-no-split.txt`），前端 `npm test` 138/138；全量 `MPK_FRONT_PORT=5174 npm run verify -- --strict` 与 W1 合并后的最终数字见本轮提交末尾。
+
+
+## 51. P5-1 W1 收官：provider 切 Postgres + 一条 PG 基线重置（2026-11-12）
+
+- **触发**：杰哥「好，那就开始 W1 了吧？之前的分包问题按最优解处理」（分包见 §50）。定稿 §4.2 把 W1 列为批次 B 第一项，前置是**一个可连的 Postgres 实例**；本机实测无 `psql`/`postgres`/`redis`/Docker，5432 与 6379 均未监听，`wsl.exe` 被宿主安全黑名单直接拒绝（不可绕过）。
+- **资源自决（工程取舍，未向杰哥要资源）**：从 npm 国内镜像取 `@embedded-postgres/windows-x64@16.15.0-beta.19`（37,871,077 B，含 `initdb.exe`/`pg_ctl.exe`/`postgres.exe` + lib/share），解压到 **`E:/Six/pg-runtime/`（NTFS、不入库、不入 git）**；`initdb -U mpk --auth=trust --encoding=UTF8 --no-locale`，单用户模式建库 `monsterpk`，端口 5432。**首次 `pg_ctl start` 的 detach 守护进程会被宿主回收**（几分钟后 5432 closed、`migrate deploy` 报 P1001），改为受管前台进程 `postgres.exe -D ... -p 5432 -h 127.0.0.1` 后稳定，和 3001/5174 同一套生命周期。正式 PG 实例到位时只需把 `backend/.env` 的 `DATABASE_URL` 换掉，schema / 迁移链零改动。
+- **切换步骤（先停 3001，硬约束）**：`Stop-Process` 掉 PID 21184（`tsx watch src/index.ts` 的子进程，父进程随之退出），确认 3001 不再重新监听后才动 schema。
+  1. `schema.prisma`：订正 `:2` 那句错的「改 provider 即可」注释、`provider = "postgresql"`、`Save` 加 `revision Int @default(0)`（W2 才把它收敛为唯一 +1 源，**W1 不改任何产品代码**）。
+  2. 把 11 条 SQLite 方言迁移整体移到 `backend/prisma/migrations_sqlite_archive/`（留 README 说明为何不是「第 12 条迁移」），`migration_lock.toml` 重置为 `postgresql`。
+  3. `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script` 生成 **217 行纯 PG DDL**（`TEXT`/`TIMESTAMP(3)`/`INTEGER`/`SERIAL`、含 `"revision" INTEGER NOT NULL DEFAULT 0`），落成唯一基线 `20261112123700_init/migration.sql`。
+  4. `migrate deploy` 成功、`generate` 成功、`migrate status` 显示 `Database schema is up to date!`（1 migration）。`.env` / `.env.example` 的 `DATABASE_URL` 改 `postgresql://...@127.0.0.1:5432/monsterpk?schema=public`。
+- **revision 回填（不跳号，有可复现证据）**：`backend/prisma/backfill_revision.sql` 用 `regexp_match(COALESCE(authority,''), '"revision"\s*:\s*([0-9]+)')` 取原值，取不到 / NULL / 坏 JSON 给 0；**不用 `authority::jsonb->>'revision'`**，因为脏数据直接 cast 会让整条停机迁移报错；`WHERE "revision" = 0` 保证重跑幂等。`backend/scripts/w1_backfill_check.mjs` 在一个事务里造 4 行假数据（rev=7 / NULL / 坏 JSON / `{}`）执行回填、断言后再跑一次验幂等，最后主动回滚 —— **`W1_BACKFILL_RESULT pass=5 fail=0`**，事后查 `w1bf_` 账号数 **0**，无脏数据残留。新库为空库时生产回填影响 0 行，属正常。
+- **定稿没列、本轮只读核对抓到的连带改造**：① `backend/tests/e2e_f17.mjs:108` 的 `PRAGMA table_info` 是 SQLite 专属 → 换 `information_schema.columns` 参数化查询（`e2e:f17` **25/25**）；② `scripts/check_home_env.py` 还在检查 `dev.db` 文件存在 → 改为校验 `DATABASE_URL` 是 `postgresql://` + TCP 探活；③ `doc_check.py` 五条「历史迁移已落盘」断言路径改指归档目录（语义不变，不是放宽）；④ 规范 / 任务表 / 路线图 / F10 台账 / HANDOFF / MEMORY 里「当前技术栈 = SQLite」的过期口径全部订正，历史条目（§34/§39 等）保留事实。
+- **验收**：切库后首轮全量 `MPK_FRONT_PORT=5174 npm run verify -- --strict` **46/47** —— 唯一失败是 `docs:doc` 的 5 条归档路径断言（原文已抓到），**其余 46 阶段（25 组 E2E / 14 组冒烟 / 前端 138 / 后端 422 / build / 镜像）在空 PG 库下全绿**。断言改指归档目录并补齐 W1 断言后，连跑两轮全量 **47/47 `VERIFY_OK`**（0 失败 0 跳过，**153.3s / 159.6s**），`doc_check` **199 项全绿**、记忆镜像 sha 一致；`prisma migrate status` 干净、`w1_backfill_check.mjs` 5/5、`e2e:f17` 25/25。
+- **边界 / 下一步**：W1 **产品代码零改动**（只动 schema / 迁移 / 测试脚本 / 工具 / 文档）；`commitState` 仍是 upsert、409 仍吃内存基线，这些是 **W2** 的事。`backend/prisma/dev.db` 保留作回滚兜底但应用不再读取。**W2 完成前不开第二实例**；W2~W5 才需要 Redis，W9 才需要域名 / HTTPS / 反代。Redis 至今不存任何影响权益的真值。

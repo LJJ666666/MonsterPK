@@ -8,7 +8,7 @@
  *
  * 做法：按 `userId` 串行排队，把「校验 + 写」整体关进临界区。
  * 单进程部署下这就足够了；W3 会换成 Redis 租约锁（改 `setLockProvider` 注入实现即可），
- * 最终由 DB 条件更新兜底（SQLite → Postgres 时 `UPDATE ... WHERE revision = ?`）。
+ * 最终由 DB 条件更新兜底（W1 已切 Postgres，W2 落地 `UPDATE ... WHERE revision = ?`）。
  *
  * 注意：**只锁路由层**，`commitState()` 本身不再取锁，否则同一次请求会自我死锁。
  *

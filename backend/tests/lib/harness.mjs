@@ -7,7 +7,7 @@
  * 约定：
  *  - 所有套件输出逐例 [PASS]/[FAIL]，末尾 `<NAME>_RESULT pass=N fail=N` + `<NAME>_OK`；
  *  - 任一失败 exit 1，可直接接 CI / `npm run verify`；
- *  - 账号统一带 RUN 后缀（6 位），测试结束调用 cleanupAccounts 清理，避免 dev.db 膨胀。
+ *  - 账号统一带 RUN 后缀（6 位），测试结束调用 cleanupAccounts 清理，避免 数据库 膨胀。
  *
  * 注意：本文件是 **测试专用**，不参与 tsc 编译（package.json 的 check 只查 src）。
  */

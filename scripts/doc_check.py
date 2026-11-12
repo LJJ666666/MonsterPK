@@ -636,6 +636,25 @@ checks = [
      "vite-plugin-trae-solo-badge" not in root_pkg_text
      and "traeBadgePlugin" not in text(ROOT / "vite.config.ts")
      and "补测执行结果（2026-11-11，12/12 全绿）" in text(DOCS / "雷电模拟器_adb操作规范_2026-11-11.md")),
+    ("A1 vite 分包落地",
+     "manualChunks" in text(ROOT / "vite.config.ts")
+     and "vendor-react" in text(ROOT / "vite.config.ts")
+     and "vendor-state" in text(ROOT / "vite.config.ts")),
+    ("A2 后端 requestId 追踪与 CORS 暴露",
+     "genReqId" in text(ROOT / "backend/src/index.ts")
+     and "X-Request-Id" in text(ROOT / "backend/src/index.ts")
+     and "exposedHeaders" in text(ROOT / "backend/src/index.ts")),
+    ("A4 ErrorBoundary 接入入口与单测",
+     "ErrorBoundary" in text(ROOT / "src/main.tsx")
+     and (ROOT / "src/components/ErrorBoundary.tsx").exists()
+     and (ROOT / "src/components/ErrorBoundary.test.tsx").exists()),
+    ("A5 登录失败限流（只计失败 / 成功清零 / 可重建临时态）",
+     (ROOT / "backend/src/lib/loginRateLimit.ts").exists()
+     and "recordFailure" in text(ROOT / "backend/src/modules/auth.ts")
+     and "LOGIN_RATE_LIMITED" in text(ROOT / "backend/tests/e2e_hardening.mjs")
+     and "P5-1" in text(ROOT / "backend/src/lib/loginRateLimit.ts")),
+    ("bug_log §46 记录 A1/A2/A4/A5 收官与 5173 端口坑",
+     "## 46." in bug_text and "A5" in bug_text and "5173" in bug_text),
 ]
 
 for name, ok, *detail in checks:

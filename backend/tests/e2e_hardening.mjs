@@ -141,6 +141,59 @@ async function main() {
   const wrongPw = await login(authAcc.username, 'definitely-wrong');
   suite.check('错误密码登录 → 401', wrongPw.status === 401, `status=${wrongPw.status}`);
 
+  // ── A2：requestId 回显 / 自动生成 / 日志注入防护 ──
+  // harness 的 api() 只回传 status/data/text，响应头断言必须走原始 fetch。
+  const rawBase = process.env.E2E_BASE || 'http://localhost:3001';
+  const ridOk = await fetch(`${rawBase}/api/health`, {
+    headers: { 'X-Request-Id': 'hd-a2-abc_123' },
+  });
+  suite.check('A2 合法 X-Request-Id 原样回显',
+    ridOk.headers.get('x-request-id') === 'hd-a2-abc_123',
+    `got=${ridOk.headers.get('x-request-id')}`);
+
+  const ridAuto = await fetch(`${rawBase}/api/health`);
+  const ridAutoVal = ridAuto.headers.get('x-request-id') || '';
+  suite.check('A2 未带 id 时自动生成合法短 id',
+    /^[A-Za-z0-9._:-]{1,64}$/.test(ridAutoVal), `got=${ridAutoVal.slice(0, 80)}`);
+
+  // 换行会被 undici 直接拒绝，这里用「含空白 + 超长」验证服务端侧的校验。
+  const forgedId = `bad id ${'x'.repeat(90)}`;
+  const ridForged = await fetch(`${rawBase}/api/health`, {
+    headers: { 'X-Request-Id': forgedId },
+  });
+  const ridForgedVal = ridForged.headers.get('x-request-id') || '';
+  suite.check('A2 非法 id 被替换，不回显原值',
+    ridForgedVal !== forgedId && /^[A-Za-z0-9._:-]{1,64}$/.test(ridForgedVal),
+    `got=${ridForgedVal.slice(0, 80)}`);
+
+  const ridCors = await fetch(`${rawBase}/api/health`, {
+    headers: { Origin: 'http://localhost:5173' },
+  });
+  suite.check('A2 CORS 暴露 X-Request-Id 给浏览器 / WebView',
+    (ridCors.headers.get('access-control-expose-headers') || '').includes('X-Request-Id'),
+    `got=${ridCors.headers.get('access-control-expose-headers')}`);
+
+  // ── A5：登录失败限流 ──
+  // 用独立的不存在账号名，组合键隔离；本用例 7 次失败远低于 IP 兜底阈值 60，
+  // 不会波及后续 25 组 E2E 与 375px 冒烟的正常登录。
+  const rlName = `hd_rl_${RUN}`;
+  const rlStatuses = [];
+  let rlLast = null;
+  for (let i = 0; i < 6; i += 1) {
+    const r = await login(rlName, 'wrong-password');
+    rlStatuses.push(r.status);
+    if (i === 5) rlLast = r;
+  }
+  suite.check('A5 前 5 次错误密码 401、第 6 次 429',
+    rlStatuses.slice(0, 5).every((s) => s === 401) && rlStatuses[5] === 429,
+    JSON.stringify(rlStatuses));
+  suite.check('A5 429 带限流码与 Retry-After',
+    rlLast?.data?.code === 'LOGIN_RATE_LIMITED' && Number(rlLast?.data?.retryAfter) > 0,
+    JSON.stringify(rlLast?.data));
+  const rlOther = await login(`hd_rl_other_${RUN}`, 'wrong-password');
+  suite.check('A5 组合键隔离：换账号仍 401，IP 兜底未误触发',
+    rlOther.status === 401, `status=${rlOther.status}`);
+
   const me = await api('/api/auth/me', { token: authAcc.token });
   suite.check('普通账号 /me 的 isAdmin=false 且 banned=false',
     me.data?.isAdmin === false && me.data?.banned === false,

@@ -63,6 +63,22 @@ export default defineConfig({
   },
   build: {
     sourcemap: 'hidden',
+    rollupOptions: {
+      output: {
+        // 只把「稳定、很少随业务改动」的依赖单独成块：升级游戏逻辑时这几块的
+        // 内容哈希不变，浏览器/WebView 可复用缓存；其余依赖仍并入主包，避免
+        // 拆得过碎造成额外请求。返回 undefined 表示走 Vite 默认合并策略。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) {
+            return 'vendor-react';
+          }
+          if (/[\\/]node_modules[\\/](zustand|use-sync-external-store|zod)[\\/]/.test(id)) {
+            return 'vendor-state';
+          }
+        },
+      },
+    },
   },
   plugins: [
     react({

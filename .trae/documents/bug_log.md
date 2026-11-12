@@ -1379,6 +1379,7 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   6. 诊断只做三件：读 env → 查端口归属进程 → 单次 curl 对照；不做分层连通性排查、不换协议 / 通道 / Git Data API。
 - **可复现核验命令（先读再动手）**：`env | grep -i proxy` → `11811`；PowerShell `Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' | Select-Object ProxyEnable,ProxyServer` → `8693`；`curl --noproxy '*' -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health` → `200`；`P=http://127.0.0.1:8693; HTTPS_PROXY=$P HTTP_PROXY=$P https_proxy=$P http_proxy=$P curl -o /dev/null -w '%{http_code}' https://github.com` → `200`。
 - **归档落点**：HANDOFF 提交规矩段、项目 MEMORY §4、用户级长期记忆、今日日志、`scripts/doc_check.py` 的 §57 断言；`.trae` 镜像由 `scripts/sync_memory.py` 同步。
+- **2026-11-12 晚推送实测补充**：沙箱程序黑名单会拦 `reg.exe`（Git Bash 报 `Permission denied` + `PROGRAM BLOCKED BY SECURITY POLICY`），**不要重试、不要换 shell 绕道启动它**；改用 `netstat -ano | grep ':8693'` 确认端口 `LISTENING`（本机 PID 49048）与 `11811`（PID 8460 `sandbox-cli.exe`）+ 单次 `curl` 对照即可完成「查端口归属」。`curl` 首次偶发 `exit 35`（TLS 握手）、复探一次 `github=200` 属正常抖动，不做分层连通性排查；随后 `git push` 一次性成功。
 
 ## 58. P5-1 W4 收官：定时器选主 + fencing + 幂等键（2026-11-12）
 

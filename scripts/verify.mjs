@@ -65,6 +65,8 @@ const STAGES = [
   { id: 'e2e:w5', name: 'E2E W5 广播与跨实例顶号（真 Redis 双实例）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:w5'], need: 'backend', timeout: 300_000 },
   // W6.2：room + quota + 结算写档 + 发奖同一事务边界；真 PG 验证双意图只推进一回合、提交后才广播、quota 不双扣。
   { id: 'e2e:w62', name: 'E2E W6.2 房间工作单元事务边界（真 PG）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:w62'], need: 'backend', timeout: 300_000 },
+  // W6.3：房间 quota 改 DB 原子计数 + 结算事务二次 count；真 PG 并发验证每日上限不超卖与超限整包回滚。
+  { id: 'e2e:w63', name: 'E2E W6.3 quota 每日上限不超卖（真 PG 并发）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:w63'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p41', name: 'E2E 顶号与共享野怪（P4-1）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p41'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p42a', name: 'E2E 只读派生榜（P4-2a）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42a'], need: 'backend', timeout: 300_000 },
   // P4-2b：房间内核 E2E（backend/tests/e2e_p42b_room.mjs），双账号掉线 / 重连 / 托管 / 全掉不扣次数。
@@ -120,7 +122,7 @@ const GROUPS = {
   check: ['front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:ux'],
   docs: ['docs:doc', 'docs:memory'],
 };

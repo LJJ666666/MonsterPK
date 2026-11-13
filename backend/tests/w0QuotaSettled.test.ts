@@ -63,7 +63,10 @@ class CopyStorage implements RoomStorage {
     return Array.from(this.rooms.values()).map((r) => JSON.parse(JSON.stringify(r)) as RoomState);
   }
   async getQuota(): Promise<{ held: number; committed: number }> { return { held: 0, committed: 0 }; }
-  async setQuota(): Promise<void> { /* 本用例不涉及 quota */ }
+  /** W6.3：本用例不涉及 quota 计数，三个原子原语给空实现保持接口完整。 */
+  async tryHoldQuota(): Promise<boolean> { return true; }
+  async settleQuota(): Promise<boolean> { return true; }
+  async dailyCommitted(): Promise<number> { return 0; }
   async quotaKeys(): Promise<string[]> { return []; }
 }
 

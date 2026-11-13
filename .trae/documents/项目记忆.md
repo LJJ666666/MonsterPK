@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52 VERIFY_OK）。下一步 **W6.3（#184 DB 计数 + 结算二次 count）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52）、**W6.3 DB 计数 ✅ 2026-11-13**（53/53）。下一步 **W6.4（#185 quota 租约 token + 幂等释放 + TTL≥30min + release 全分支）**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -27,7 +27,7 @@
 - 前端 `npm run dev -- --host 0.0.0.0 --port $MPK_FRONT_PORT --strictPort`（默认 5173，本机 5174 绕微信占端口）；后端 `cd backend && npm run dev`（3001）。换会话不自动恢复，先 `curl --noproxy '*'` 探活。
 - 校验 `npm run verify`（新增阶段改两处 `STAGES`+`GROUPS`，漏 `GROUPS` 静默少跑）。`cd backend && npm run clean:e2e`（`--dry` 只删测试前缀不删 admin）；`npm run admin`。
 - 路径用相对/`git rev-parse --show-toplevel`；remote `LJJ666666/MonsterPK.git`；node 22.22.2。新机：`cp .env.example .env`→前后端 `npm install`→`prisma migrate deploy`+`generate`→`npm run dev`。
-- Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾写验收数字）→push master→核对 `HEAD==origin/master` 且工作树干净。推送前单次 curl 实测三通道（沙箱 11811 / 系统 8693 / 直连）选 200；502 有限次重试，别做长篇诊断。
+- Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾写验收数字）→push master→核对 `HEAD==origin/master` 且工作树干净。推送失败先做一次只读探活（`git ls-remote` / `info/refs` 200 = 通道通），沙箱内最多 **5 次**原样重试（不换代理/不试直连/不改 git config）；探活也失败或 502 恒现才交杰哥本机终端（§63，11-13 23:40 上限由 1 改 5）。别做长篇诊断，收尾核对本地 tag 是否全在远端。
 - **配置分层硬约束（§57）**：沙箱层（`HTTPS_PROXY=11811`/`CODEBUDDY_*`）≠ 系统层（注册表 8693、本机 PG/Redis/JDK 路径）≠ 项目层（`MPK_FRONT_PORT`→`devConfig.mjs`；`DATABASE_URL`/`REDIS_URL`/`CORS_ORIGIN`→`backend/.env`）。沙箱值禁写仓库；覆盖 env 只用一次性前缀。**项目层是唯一可提交真值**。
 - **本机 PowerShell + GBK（§61，五条勿回退）**：① npm script 不许裸 glob（PowerShell 不展开，写 `"tests/**/*.test.ts"` 带引号交给 Node 22 glob）；② Python stdout 必须 `reconfigure(errors="replace")`（GBK 遇 ✅ 抛 `UnicodeEncodeError`）；③ 冒烟临时页写 `public/` 触发 Vite full-reload 打断 dump-dom → 保留 `server.watch.ignored: ['**/public/_*.html']`；④ 不测选主的双实例 E2E 子进程必须 `MPK_DISABLE_SWEEP=1`（SIGKILL 不执行 shutdown，残留 `lock:sweep:global` 60s TTL 挡住 :3001）；⑤ 沙箱跑冒烟不用 msedge，`EDGE_PATH` 指向 `C:\Users\Six\.cache\puppeteer\chrome-headless-shell\win64-131.0.6778.204\chrome-headless-shell-win64\chrome-headless-shell.exe`。另：`authority.expected` 追随落库值，并发测试两路候选值必须相邻递减。
 
@@ -51,7 +51,7 @@
 - #181 W6.0 数据模型与迁移 ✅（`Room`+`RoomQuotaDaily`，迁移 `20261113020739_w6_room_storage`）
 - #182 W6.1 RoomStorage 异步化 + PG 行版本 CAS ✅（零行为变更，bug_log §60）
 - #183 W6.2 room+quota+结算/发奖 收进同一事务边界 ✅（`lib/roomUnitOfWork.ts`：`AsyncLocalStorage` 事务客户端 `roomDb()` + 提交后副作用 `onRoomCommit()` + `withRoomUnit()`=房间锁+事务；结算改事务内 await、失败整包回滚；四类存储层共用 tx；`w62RoomUnit.test.ts` 8 例 + `e2e:w62` 13 项）
-- #184 W6.3 房间 `committed` 改 DB 计数 + 结算事务二次 count
+- #184 W6.3 房间 `committed` 改 DB 计数 + 结算事务二次 count ✅（`RoomQuotaDaily` 首次启用；`tryHoldQuota` 一条条件 UPDATE，`settleQuota` 二次 count→在途账→每日累计账三段裁决，超限抛 `RoomQuotaExceededError` 整包回滚；`w63RoomQuota.test.ts` 9 例 + `e2e:w63` 13 项）
 - #185 W6.4 quota 租约 token + 幂等释放 + TTL≥30min + 补齐 10 处 release 分支
 - #186 W6.5 序列化 3 障碍修复（pvpSettled/coopSettled/contributions/optional）
 - #187 W6.6 按接收者裁剪视图 + `RoomState.revision`/`Save.revision` 区分

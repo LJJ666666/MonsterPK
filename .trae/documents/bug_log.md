@@ -1477,12 +1477,13 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 
 - **现象**：W6.1（`5129aab`）与本地存档删除（`341c72a`）两阶段收官后，工具会话内累计 5 次 `git push` 全败（502 ×2、`schannel: server closed abruptly`、`127.0.0.1:8693` 未监听、直连 reset）；杰哥在本机 PowerShell 同一时刻一次 `git push origin master` 即 `402b343..341c72a`。与 §56（11-12）、11-09 那次同源，是**第三次**。
 - **复发原因**：不是没记——规矩同时写在用户级 `MEMORY.md:43/48`、`HANDOFF.md:80-81`、项目 `MEMORY.md §4`、`bug_log §56/§57`，且 `scripts/doc_check.py:880/890/898` 三条断言守着、当轮 222 项全过；上一轮甚至刚改过 HANDOFF。失效点是**动手那一刻没把规则调出来**：先重试 3 次才读 `env`，还照 §56 去试系统代理和直连，最后定性成「网络侧问题」。存储没问题，检索 / 触发有问题。
-- **订正（覆盖 §56 执行口径）**：环境类失败先读 env 分清三层；`git push` 在工具沙箱内失败**最多 1 次**，不换代理 / 不试直连 / 不做连通性排查，直接给【本机终端】完整命令；杰哥说「我这边能通」立即按环境差异处理。§56 的一次性 `HTTPS_PROXY=8693` 覆盖解法**降为历史记录，不再执行**（正是本次复发的诱因）。收尾核对新增「本地 tag 是否全部已在远端」。
+- **订正（覆盖 §56 执行口径；11-13 23:40 杰哥把上限由 1 次改为 5 次）**：环境类失败先读 env 分清三层；`git push` 在工具沙箱内失败**最多 5 次**，不换代理 / 不试直连 / 不做连通性排查，达到上限后再给【本机终端】完整命令；杰哥说「我这边能通」立即按环境差异处理。§56 的一次性 `HTTPS_PROXY=8693` 覆盖解法**降为历史记录，不再执行**（正是本次复发的诱因）。收尾核对新增「本地 tag 是否全部已在远端」。
 - **漏推 tag**：核对发现 `rollback-20261113-w61`（`5129aab`，W6.1 那次 502 后没收尾）本地有、远端无，已补推；历史遗留 `rollback-20261111-f18c-security`（`00eab5c`）一并补齐。
 - **机制分层（界面原文）**：① 「给 WorkBuddy 的指令」=「之后每次对话和任务都会默认生效」→ 常驻硬规则；② 「本地记忆与技能」=「支持用户级和项目级，让智能体在后续任务中遵循」→ 项目细节与证据；③ 「云端记忆」=「每晚自动整理更新」的偏好画像（工作背景 / 个人背景 / 当前关注 / 近期动态）→ 会被概括重写，**不放可判定的硬条件**。硬规则只进 ①，细节留 ②。
 - **新机交代**：`~/.workbuddy/app/app-config.json` 的 `personalization` 不随 git（项目内搜该指令全文 0 命中），也未证实随账号同步 → 家里那台电脑按「要粘一次」准备；HANDOFF §4.1 原样收录四条指令文案，`scripts/check_home_env.py` 加只读检查、缺则 `[WARN]` 指向 §4.1，§5 话术第 3 条亦补确认步骤。
 - **别再往 md 里堆同款文字**：加文字不解决触发；真要硬拦截得做成执行面脚本（如 `scripts/push.mjs`），本轮未做。
-- **补充判别（11-13 23:35，W6.2 推送误判；订正上条被过度套用）**：W6.2 本地提交 `12cb4b3` 后 `git push` 单次报 `Recv failure: Connection was aborted`，被直接按「环境类阻断」交本机终端；杰哥指出「你应该可以推送的」。实测 `git ls-remote origin refs/heads/master` 正常返回 `faa627c`、`curl .../info/refs?service=git-upload-pack` = `200` → **通道本身是通的**，属传输中途偶发抖动，不是 §56/§63 的代理层错配。随后未改任何代理 / 配置，一次 `git push origin master` 即 `faa627c..12cb4b3` 成功，`pre/post-w62` 两个 tag 一并补推，本地 81 个 tag 与远端 81 个全对齐（`TAG_PARITY_OK`）。**判别顺序**：push 失败 → 一次只读探活 → 200 / 有返回 = 允许原样重试 1 次；探活也失败 / 502 恒现 / env 层错配 = 交本机终端。「最多 1 次、不换代理、不试直连、不改 git config」的边界不变，只是别把偶发抖动误归类为环境类阻断。
+- **补充判别（11-13 23:35，W6.2 推送误判；订正上条被过度套用）**：W6.2 本地提交 `12cb4b3` 后 `git push` 单次报 `Recv failure: Connection was aborted`，被直接按「环境类阻断」交本机终端；杰哥指出「你应该可以推送的」。实测 `git ls-remote origin refs/heads/master` 正常返回 `faa627c`、`curl .../info/refs?service=git-upload-pack` = `200` → **通道本身是通的**，属传输中途偶发抖动，不是 §56/§63 的代理层错配。随后未改任何代理 / 配置，一次 `git push origin master` 即 `faa627c..12cb4b3` 成功，`pre/post-w62` 两个 tag 一并补推，本地 81 个 tag 与远端 81 个全对齐（`TAG_PARITY_OK`）。**判别顺序**：push 失败 → 一次只读探活 → 200 / 有返回 = 可在沙箱内原样重试（上限 5 次）；探活也失败 / 502 恒现 / env 层错配 = 达到上限后交本机终端。「最多 5 次、不换代理、不试直连、不改 git config」的边界不变，只是别把偶发抖动误归类为环境类阻断。
+- **「恒 502」与「不在沙箱提交」澄清（23:40 杰哥问）**：§56 的「恒 502」是 11-12 那次 **100% 失败**的环境类阻断（沙箱代理 `11811` 自生成 502、约 30 次全败，非 GitHub 返回），与本节 23:35 的偶发抖动是两回事；文档记的是「**push** 达到上限交本机」，**本地 `git commit` 一直在沙箱照常做**（W6.2 的 `12cb4b3` 即在沙箱提交后推送），从无「不在沙箱提交」的口径。个性化指令 23:40 由「最多 1 次」改为「最多 5 次」，本文档 / HANDOFF §1 / §4.1 已同步。
 
 ## 64. P5-1 W6.2 收官：room + quota + 结算写档 + 发奖同一事务边界（2026-11-13）
 
@@ -1493,7 +1494,21 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **锁序复核**：`withRoomUnit` 持 `room:<roomId>`，`settleCoopRoom` 内层取账号锁；不同 key 在 `LockProvider` 里是独立队列（Redis `SET NX` 同理），不构成 room→account / account→room 死锁；`applyCoopCreate` 原本 account→room 的顺序保持不变。
 - **验收**：`w62RoomUnit.test.ts` 8 例（fake runner 零 IO：同一事务客户端、提交后才跑钩子、失败钩子全丢、嵌套不开新事务、四类读写共用客户端、`skipDuplicates`、`withRoomUnit` 串行）；`e2e_w62_room_tx.mjs` 13 项（真 PG：建房 + quota hold 原子可见、并发双意图只推进 `turn=2`、提交后才广播、nonce 重放无半写、重复 settle 只扣一次）。注册 `e2e:w62` + `STAGES`/`GROUPS.e2e` 两处 + `doc_check` 4 条断言。全量 **52/52 `VERIFY_OK`**、后端单测 **461**、前端 133、14 套 375px 冒烟全绿。
 - **首轮红（已修）**：`doc_check` 的 W4 断言硬绑 `room.ts` 里的 `withRoomLock` 字符串，W6.2 换成 `withRoomUnit` 后误报；按文档解耦口径改为查 `roomUnitOfWork.ts` 的 `withRoomLock`（锁职责未变）+ `room.ts` 的 `withRoomUnit`，不绑旧函数名。全量 51/52 → 修断言后 52/52。
-- **边界（留给后续工单）**：`committed` 仍是 `RoomQuota` 行的 read-modify-write upsert，并发不超卖由 **#184 W6.3 DB 计数 + 结算二次 count** 解决；quota 租约 token / TTL / release 全分支是 **#185 W6.4**；序列化 3 障碍 **#186 W6.5**；裁剪视图与 revision 区分 **#187**；双实例 E2E **#188**。**W6.2 不宣称并发不超卖**，E2E 也刻意不做该断言（避免超前验收）。
+- **边界（当时留给后续工单，已由 W6.3 解决）**：`committed` 仍是 `RoomQuota` 行的 read-modify-write upsert，并发不超卖由 **#184 W6.3 DB 计数 + 结算二次 count** 解决（见 §65）；quota 租约 token / TTL / release 全分支是 **#185 W6.4**；序列化 3 障碍 **#186 W6.5**；裁剪视图与 revision 区分 **#187**；双实例 E2E **#188**。**W6.2 不宣称并发不超卖**，E2E 也刻意不做该断言（避免超前验收）。
+
+## 65. P5-1 W6.3 收官：房间 quota 改 DB 原子计数 + 结算事务二次 count（2026-11-13）
+
+- **工单**：#184，实施定稿 §3.3 / §4.2「W6 房间 + quota」第 2 条。W6.0 建的 `RoomQuotaDaily`（`(quotaKey, periodKey)` 唯一键）此前**全项目零使用**；W6.2 留的边界正是「`committed` 仍是 `RoomQuota` 行 read-modify-write upsert」。
+- **超卖根因（实测，不是推断）**：`roomRegistry.ts::holdQuota/finishQuota` 是「`getQuota()` → 判断 → `setQuota()` 整行覆盖」，而 `withRoomUnit()` 的锁 key 是 `roomId`；同一 `quotaKey`（`coop:<日>:<userId>`）会被**不同房间**并发写入，两个事务各读到旧值再覆盖 → 每日上限形同虚设。W6.3 单测首跑即复现：3 房并发结算只 +1 次（InMemory 在 `await` 前拿 usage 快照同样会覆盖），修法是「唯一 await 放最前、之后整段同步」以模拟 DB 条件更新的原子性。
+- **做法（工程层，零产品语义变更）**：
+  1. `RoomStorage` 接口加 `tryHoldQuota / settleQuota / dailyCommitted` 三个原子语义，`InMemoryRoomStorage` 与 `PgRoomStorage` 各实现一份；`RoomState.quota` 增 `limit?: number`（建房时由服务端 `quotaLimit()` 写入，旧房间回退 3），供结算二次 count 取上限。**不动 Prisma schema、不动 `SCHEMA_VERSION`**。按「不为兼容留后门」删除已无生产调用的 `RoomStorage.setQuota` 整行覆盖写口子（否则 W6.4 很容易误用重新引入超卖），`doc_check` 加 `setQuota(` 缺席断言防回归；`w62RoomUnit.test.ts` / `w0QuotaSettled.test.ts` 同步改用原子原语。
+  2. `PgRoomStorage::tryHoldQuota`：`createMany + skipDuplicates` 确保行存在（不触发 P2002 把事务置 aborted），再用一条 `$executeRaw` 条件更新 `UPDATE "RoomQuota" SET held=held+1 WHERE key=? AND held+committed<limit`，由 PG 行锁 + READ COMMITTED 重新判 WHERE 裁决。
+  3. `PgRoomStorage::settleQuota`：release 只做 `held=GREATEST(held-1,0)`；commit 依次「① 事务内二次 count（`RoomQuotaDaily.findUnique`）→ ② 在途账条件更新 `WHERE committed<limit` → ③ 每日累计账 `createMany skipDuplicates` + `updateMany WHERE committed<limit` 自增 1」，任一处已满即返回 false。
+  4. `finishQuota` 收到 false 抛 `RoomQuotaExceededError` → W6.2 的 `withRoomUnit` 整包回滚（room / quota / 存档 / 奖励一起撤），绝不留「在途账扣了、累计账没扣」的分叉真值。
+  5. `periodKeyForQuota()` 从 `coop:YYYY-MM-DD:<userId>` 解析建房当天，避免跨零点结算归错周期；通用键回退 `periodKeyOf(Date.now())`。
+- **验收**：`w63RoomQuota.test.ts` **9 例**（零 IO：并发 6 房只成 3 房、limit 随房间态落库、三房结算账目、release 不扣、fake 断言调用形态是条件更新而非 read-modify-write、二次 count 短路零写入且提交后 hooks 全丢）；`e2e_w63_quota.mjs` **13 项**（真 PG 并发：6 房只成 3、故障注入把 Daily 置满 → settle 被拒且 room/RoomQuota/Daily 整包回滚、恢复后并发结算 `committed=3/held=0/Daily=3`、上限满再建房被拒、重复 settle 不多扣）。注册 `e2e:w63` + `STAGES`/`GROUPS.e2e` 两处 + `doc_check` 4 条断言。后端单测 **470**、前端 133、全量 **53/53 `VERIFY_OK`**。
+- **首轮红（已修，非产品缺陷）**：E2E 漏开 WS → 6 个 create 全 `409 ROOM_WS_REQUIRED`；按 w62 套件前置补 `openWs({ token })` 后全绿。
+- **边界**：每日上限的「奖励真值」仍由 `coopReward.ts::grantOne` 的 `CoopRewardGrant.count`（`COOP_DAILY_CLEAR_LIMIT=3`）裁决，与 quota 侧的 `RoomQuotaDaily` 在同一事务内提交、当前配置下数值一致；若以后用 `ROOM_QUOTA_LIMIT` 改房间上限，需同步两处配置。超限抛错回滚是防御分支，正常 hold 已挡住，不会日常触发。quota 租约 token / TTL≥30min / release 全分支归 **#185 W6.4**。
 
 
 

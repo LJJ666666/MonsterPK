@@ -78,9 +78,10 @@ npm run verify                                 # VERIFY_OK（阶段数与数字�
 - 远端 `https://github.com/LJJ666666/MonsterPK.git`，分支 `master`。**提交号不在此固化**，用 `git log --oneline -10` 和 `git ls-remote origin refs/heads/master` 看当前事实。
 - 回滚点 tag 命名 `rollback-YYYYMMDD-<阶段>`，成对建在阶段前后并推远端；回滚用 `git reset --hard <tag>` 或 `git revert <commit>`。
 - **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 建并推回滚 tag → 确认无 `.env` / `*.db` 入库 → 中文分条 commit（末尾写验收数字）→ `git push origin master` → 核对 `HEAD == origin/master`、工作树干净，以及**本地需要保留的 tag 是否全部已在远端**（别只推最新一个，见 bug_log §62）。
-- **推送失败口径（11-13 杰哥定，取代 §56 旧解法）**：环境类失败先读 `env` 确认代理变量属于「工具会话 / 本机 / 项目」哪一层，再决定动作（三层定义见下条）。`git push` 在**工具沙箱内**失败时最多试 1 次：**不换代理、不试直连、不做连通性排查**，直接告诉杰哥改在【本机终端】执行并给出完整命令；杰哥说「我这边能通 / 网络没问题」时立刻按环境差异处理、停止重试。§56 记的「一次性 `HTTPS_PROXY=http://127.0.0.1:8693` 覆盖 env 推送」是 11-12 那次的历史解法，**保留作排查记录、不再是执行口径**（本机 `8693` 也可能未监听）；**不改全局 git config、不换协议**。同一套硬规则已写进 WorkBuddy 设置 → 个性化 → 「给 WorkBuddy 的指令」，见 §4.1。
-- **补充判别（11-13 23:35 实测订正，不推翻上条）**：上条的「最多 1 次即交本机」只适用于**环境类持续阻断**（502 恒现 / 代理层错配 / 探活本身失败）。若报错是 `Recv failure: Connection was aborted`、`schannel: server closed abruptly` 这类**传输中途中断**，先做一次只读探活：`git ls-remote origin refs/heads/master` 有返回，或 `curl -s -m 10 -o /dev/null -w '%{http_code}' https://github.com/LJJ666666/MonsterPK.git/info/refs?service=git-upload-pack` = `200` → 通道本身通，允许在沙箱内**原样重试 1 次**（仍不换代理、不试直连、不改 git config）；探活也失败才按上条交本机。W6.2 实测：探活 200 → 一次 push 即 `faa627c..12cb4b3` 成功，见 bug_log §63 补充。
-- **配置分层（11-12 杰哥定，跨机器 / 跨会话必看）**：环境类失败先分清三层，**禁止把 WorkBuddy 沙箱注入的 env 当成本机或项目配置**。① **沙箱 / 工具层**：`HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`，仅当前会话进程有效，**禁止写进仓库任何文件**；② **系统 / 本机层**：注册表 `ProxyServer` = 8693、PG / Redis / JDK 本机安装路径，可读、不得硬编码为产品默认值；③ **项目层（唯一可提交真值）**：`MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`，`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`）。规则：先核对变量归属再有限次重试；覆盖 env 只用一次性命令前缀、用完即弃；本地探活 `curl --noproxy '*'`；PG / Redis 用 `redis-cli PING` / `/api/health` 判活（HTTP `curl /` 的 000 不是判据）；诊断只做「读 env / 查端口归属 / 单次 curl 对照」。详见 bug_log §57。
+- **推送失败口径（11-13 杰哥定，23:40 把上限由 1 次改为 5 次；取代 §56 旧解法）**：环境类失败先读 `env` 确认代理变量属于「工具会话 / 本机 / 项目」哪一层，再决定动作（三层定义见下条）。`git push` 在**工具沙箱内**失败时最多试 5 次：**不换代理、不试直连、不做连通性排查**，达到上限后再告诉杰哥改在【本机终端】执行并给出完整命令；杰哥说「我这边能通 / 网络没问题」时立刻按环境差异处理、停止重试。§56 记的「一次性 `HTTPS_PROXY=http://127.0.0.1:8693` 覆盖 env 推送」是 11-12 那次的历史解法，**保留作排查记录、不再是执行口径**（本机 `8693` 也可能未监听）；**不改全局 git config、不换协议**。同一套硬规则已写进 WorkBuddy 设置 → 个性化 → 「给 WorkBuddy 的指令」，见 §4.1。
+- **补充判别（11-13 23:35 实测订正，23:40 同步 5 次上限）**：上条的「最多 5 次即交本机」只适用于**环境类持续阻断**（502 恒现 / 代理层错配 / 探活本身失败）。若报错是 `Recv failure: Connection was aborted`、`schannel: server closed abruptly` 这类**传输中途中断**，先做一次只读探活：`git ls-remote origin refs/heads/master` 有返回，或 `curl -s -m 10 -o /dev/null -w '%{http_code}' https://github.com/LJJ666666/MonsterPK.git/info/refs?service=git-upload-pack` = `200` → 通道本身通，允许在沙箱内**在 5 次额度内原样重试**（仍不换代理、不试直连、不改 git config）；探活也失败才按上条交本机。W6.2 实测：探活 200 → 一次 push 即 `faa627c..12cb4b3` 成功，见 bug_log §63 补充。
+- **「恒 502」澄清（23:40 杰哥问）**：§56 的「恒 502」特指 11-12 那次沙箱代理 `11811` 自生成 502、累计约 30 次全败的**环境类持续阻断**；**本地 `git commit` 一直在工具沙箱内照常做，只有 `git push` 达到上限才交本机终端**，文档从无「不在沙箱提交」的说法。
+- **配置分层（11-12 杰哥定，跨机器 / 跨会话必看）**：环境类失败先分清三层，**禁止把 WorkBuddy 沙箱注入的 env 当成本机或项目配置**。① **沙箱 / 工具层**：`HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`，仅当前会话进程有效，**禁止写进仓库任何文件**；② **系统 / 本机层**：注册表 `ProxyServer` = 8693、PG / Redis / JDK 本机安装路径，可读、不得硬编码为产品默认值；③ **项目层（唯一可提交真值）**：`MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`，`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`）。规则：先核对变量归属，推送失败按 §1 的「一次只读探活 + 最多 5 次原样重试」处理，不换代理 / 不试直连 / 不改 git config；覆盖 env 的 `8693` 解法仅作历史排查记录、不再是执行口径；本地探活 `curl --noproxy '*'`；PG / Redis 用 `redis-cli PING` / `/api/health` 判活（HTTP `curl /` 的 000 不是判据）；诊断只做「读 env / 查端口归属 / 单次 curl 对照」。详见 bug_log §57。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，新机器必须补**：`backend/.env`、`backend/prisma/dev.db`、`save_data.json`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。
 
@@ -201,8 +202,8 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 遇到 git push 502 / 连接被拒 / 端口不通 / 凭据失效 / 工具找不到这类环境问题：
 1. 先读 env 确认代理变量属于「工具会话」还是「本机/项目」，再决定动作；
    不许把工具沙箱的 env 当成本机或项目配置。
-2. 推送在工具沙箱内失败时最多试 1 次：不换代理、不试直连、不做连通性排查；
-   直接告诉用户改在【本机终端】执行，并给出完整命令。
+2. 推送在工具沙箱内失败时最多试 5 次：不换代理、不试直连、不做连通性排查；
+   达到上限后直接告诉用户改在【本机终端】执行，并给出完整命令。
 3. 用户说「我这边能通 / 网络没问题」时，立刻按环境差异处理，停止重试。
 4. 推送收尾核对：本地 HEAD == 远端 HEAD、工作树干净、需要保留的 tag
    是否全部已在远端（别只推最新一个）。
@@ -210,7 +211,7 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 
 `python scripts/check_home_env.py` 会读这份配置，缺了给 `[WARN]` 并指向本节（第 5 节话术第 6 步会跑它），不会静默放行。
 
-> 三层别混：**给 WorkBuddy 的指令** = 常驻硬规则；**本地记忆与技能** = 用户级 / 项目级文件（细节、命令、证据）；**云端记忆** = 服务端每晚自动整理的偏好画像，会被概括重写，**别把「最多 1 次」「不试直连」这类可判定硬条件塞进去**。
+> 三层别混：**给 WorkBuddy 的指令** = 常驻硬规则；**本地记忆与技能** = 用户级 / 项目级文件（细节、命令、证据）；**云端记忆** = 服务端每晚自动整理的偏好画像，会被概括重写，**别把「最多 5 次」「不试直连」这类可判定硬条件塞进去**。
 
 ## 5. 第 4 步：打开 WorkBuddy，第一段话术（直接复制）
 

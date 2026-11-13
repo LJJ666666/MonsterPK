@@ -41,8 +41,20 @@ export interface RoomStorage {
   delete(roomId: string): Promise<void>;
   all(): Promise<RoomState[]>;
   getQuota(key: string): Promise<QuotaUsage>;
-  setQuota(key: string, usage: QuotaUsage): Promise<void>;
   quotaKeys(): Promise<string[]>;
+  /**
+   * W6.3（#184）：原子占额 —— 仅当 `held + committed < limit` 时 `held+1`。
+   * 必须是一条 DB 条件更新，不能 read-modify-write：房间锁的 key 是 roomId，
+   * 同一 quotaKey 会被不同房间并发写入，覆盖写必然超卖。
+   */
+  tryHoldQuota(key: string, limit: number): Promise<boolean>;
+  /**
+   * W6.3（#184）：原子结算 —— `held-1`；commit 时 `committed+1` 并同步每日累计账，
+   * 两处都受 limit 条件更新裁决。返回 false 表示已达上限，调用方须让事务回滚。
+   */
+  settleQuota(key: string, commit: boolean, limit: number): Promise<boolean>;
+  /** W6.3（#184）：事务内二次 count，读每日累计账（`RoomQuotaDaily`）。 */
+  dailyCommitted(key: string): Promise<number>;
 }
 
 const emptyUsage = (): QuotaUsage => ({ held: 0, committed: 0 });
@@ -55,6 +67,8 @@ function clone<T>(v: T): T {
 export class InMemoryRoomStorage implements RoomStorage {
   private readonly rooms = new Map<string, RoomState>();
   private readonly quotas = new Map<string, QuotaUsage>();
+  /** W6.3：与 PG 的 `RoomQuotaDaily` 同语义的每日累计账（单测零 IO 用）。 */
+  private readonly daily = new Map<string, number>();
 
   async get(roomId: string): Promise<RoomState | undefined> {
     const r = this.rooms.get(roomId);
@@ -78,10 +92,36 @@ export class InMemoryRoomStorage implements RoomStorage {
   async getQuota(key: string): Promise<QuotaUsage> {
     return this.quotas.get(key) ? clone(this.quotas.get(key)!) : emptyUsage();
   }
-  async setQuota(key: string, usage: QuotaUsage): Promise<void> {
-    this.quotas.set(key, clone(usage));
-  }
   async quotaKeys(): Promise<string[]> { return Array.from(this.quotas.keys()); }
+  async tryHoldQuota(key: string, limit: number): Promise<boolean> {
+    const u = clone(this.quotas.get(key) ?? emptyUsage());
+    if (u.held + u.committed >= limit) return false;
+    u.held += 1;
+    this.quotas.set(key, u);
+    return true;
+  }
+  async dailyCommitted(key: string): Promise<number> { return this.daily.get(key) ?? 0; }
+  async settleQuota(key: string, commit: boolean, limit: number): Promise<boolean> {
+    if (!commit) {
+      const u = clone(this.quotas.get(key) ?? emptyUsage());
+      u.held = Math.max(0, u.held - 1);
+      this.quotas.set(key, u);
+      return true;
+    }
+    // 唯一一次 await 放在读 usage 之前，之后整段同步执行 —— 模拟 PG 一条条件
+    // UPDATE 的原子性。若像旧实现那样在 await 前拿 usage 快照，并发结算会互相
+    // 覆盖（W6.3 单测实测：3 房并发只 +1 次），正是本工单要消灭的超卖根因。
+    if ((await this.dailyCommitted(key)) >= limit) return false;
+    const u = clone(this.quotas.get(key) ?? emptyUsage());
+    if (u.committed >= limit) return false;
+    const daily = this.daily.get(key) ?? 0;
+    if (daily >= limit) return false;
+    u.held = Math.max(0, u.held - 1);
+    u.committed += 1;
+    this.quotas.set(key, u);
+    this.daily.set(key, daily + 1);
+    return true;
+  }
 }
 
 /** tick 的产出，供调用方广播与记录日志。 */
@@ -112,6 +152,20 @@ class RoomCasConflictError extends Error {
     this.name = 'RoomCasConflictError';
   }
 }
+
+/**
+ * W6.3（#184）：结算二次 count 发现每日上限已满。必须冒泡让 W6.2 的工作单元
+ * 整包回滚，否则会出现「RoomQuota 扣了、RoomQuotaDaily 没扣」的分叉真值。
+ */
+export class RoomQuotaExceededError extends Error {
+  constructor(key: string, limit: number) {
+    super(`ROOM_QUOTA_EXCEEDED:${key}:${limit}`);
+    this.name = 'RoomQuotaExceededError';
+  }
+}
+
+/** 旧房间态没有 limit 字段时的回退值，与 room.ts::quotaLimit() 默认值一致。 */
+const DEFAULT_QUOTA_LIMIT = 3;
 
 const MAX_SEEN_NONCES = 64;
 const ROOM_ID_MAX_LEN = 96;
@@ -262,23 +316,21 @@ export class RoomRegistry {
     if (!okStored) throw new RoomCasConflictError(room.roomId);
   }
 
-  /** quota hold：只校验余量并占一个名额，**不消耗次数**。 */
+  /**
+   * quota hold：只校验余量并占一个名额，**不消耗次数**。
+   * W6.3：交给存储层一条 DB 条件更新裁决，杜绝跨房间的 read-modify-write 覆盖。
+   */
   private async holdQuota(key: string, limit: number): Promise<boolean> {
-    const usage = await this.storage.getQuota(key);
-    if (usage.held + usage.committed >= limit) return false;
-    usage.held += 1;
-    await this.storage.setQuota(key, usage);
-    return true;
+    return this.storage.tryHoldQuota(key, limit);
   }
 
   /** commit / release 都幂等；已 committed 的房间再 abandon 不会倒扣。改传入 room，不写 room 行。 */
   private async finishQuota(room: RoomState, commit: boolean): Promise<void> {
     const q = room.quota;
     if (!q || q.state !== 'held') return;
-    const usage = await this.storage.getQuota(q.key);
-    usage.held = Math.max(0, usage.held - 1);
-    if (commit) usage.committed += 1;
-    await this.storage.setQuota(q.key, usage);
+    const limit = q.limit ?? DEFAULT_QUOTA_LIMIT;
+    const ok = await this.storage.settleQuota(q.key, commit, limit);
+    if (!ok) throw new RoomQuotaExceededError(q.key, limit);
     q.state = commit ? 'committed' : 'released';
   }
 
@@ -333,7 +385,7 @@ export class RoomRegistry {
       submitted: [],
       turnIntents: [],
       lastAction: null,
-      quota: key === undefined ? null : { key, state: 'held' },
+      quota: key === undefined ? null : { key, state: 'held', limit: params.quotaLimit ?? DEFAULT_QUOTA_LIMIT },
       allOfflineSince: seat.online ? null : params.now,
       seenNonces: [],
       endReason: null,
@@ -357,12 +409,9 @@ export class RoomRegistry {
     return ok(room);
   }
 
-  /** 建房冲突回滚时释放刚占的 hold（不扣 committed）。 */
+  /** 建房冲突回滚时释放刚占的 hold（不扣 committed）；W6.3 走原子 held-1。 */
   private async releaseHeldQuota(key: string): Promise<void> {
-    const usage = await this.storage.getQuota(key);
-    if (usage.held <= 0) return;
-    usage.held -= 1;
-    await this.storage.setQuota(key, usage);
+    await this.storage.settleQuota(key, false, Number.MAX_SAFE_INTEGER);
   }
 
   private start(room: RoomState, now: number, cfg: RoomConfig): void {

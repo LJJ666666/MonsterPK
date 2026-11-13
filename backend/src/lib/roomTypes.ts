@@ -82,6 +82,8 @@ export type RoomSeat = {
 export type RoomQuota = {
   key: string;
   state: RoomQuotaState;
+  /** W6.3：服务端建房时定下的每日上限，随房间态落库，供结算二次 count 使用；旧房间缺省回退 3。 */
+  limit?: number;
 };
 
 export type RoomAction = {

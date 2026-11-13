@@ -34,6 +34,8 @@ function fakeClient(calls: Call[], countResult = 1): PrismaClient {
     roomQuota: model('roomQuota'),
     save: model('save'),
     coopRewardGrant: model('coopRewardGrant'),
+    // W6.3：占额改走条件 UPDATE，fake 需接住模板标签调用。
+    $executeRaw: async () => { calls.push({ model: '$executeRaw', op: 'raw' }); return 1; },
   } as unknown as PrismaClient;
 }
 
@@ -116,7 +118,8 @@ test('W6.2 room + quota + 存档 + 奖励四类读写共用同一事务客户端
     assert.equal(await storage.create(room), true);
     room.revision = 2;
     assert.equal(await storage.set(room), true);
-    await storage.setQuota('w62:quota', { held: 1, committed: 0 });
+    // W6.3：旧 setQuota 整行覆盖写已删除，改用原子占额验证同一事务客户端。
+    assert.equal(await storage.tryHoldQuota('w62:quota', 3), true);
     await storage.getQuota('w62:quota');
     await (roomDb() as any).save.findUnique({ where: { userId: 'u' } });
     await (roomDb() as any).coopRewardGrant.count({ where: { userId: 'u' } });
@@ -128,7 +131,7 @@ test('W6.2 room + quota + 存档 + 奖励四类读写共用同一事务客户端
   }
   assert.equal(calls.filter((c) => c.model === 'room' && c.op === 'createMany').length, 1);
   assert.equal(calls.filter((c) => c.model === 'room' && c.op === 'updateMany').length, 1);
-  assert.equal(calls.filter((c) => c.model === 'roomQuota' && c.op === 'upsert').length, 1);
+  assert.equal(calls.filter((c) => c.model === 'roomQuota' && c.op === 'createMany').length, 1);
 });
 
 test('W6.2 建房冲突走 skipDuplicates，返回 false 而不是抛 P2002 把事务置为 aborted', async () => {

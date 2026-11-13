@@ -960,6 +960,33 @@ checks = [
      and "P5-1 W6.2 收官" in task_text
      and "W6.2 ✅ 2026-11-13" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
      and "W6.2 事务边界" in memory_text),
+    ("W6.3：房间 quota 改 DB 原子条件更新，不再 read-modify-write",
+     "tryHoldQuota" in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "tryHoldQuota" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")
+     and "$executeRaw" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")
+     and "roomQuotaDaily" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")
+     and "return this.storage.tryHoldQuota(key, limit);" in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "this.storage.settleQuota(q.key, commit, limit)" in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "setQuota(" not in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "setQuota(" not in text(ROOT / "backend/src/lib/pgRoomStorage.ts")),
+    ("W6.3：结算事务二次 count + 超限整包回滚",
+     "dailyCommitted" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")
+     and "RoomQuotaExceededError" in text(ROOT / "backend/src/lib/roomRegistry.ts")
+     and "periodKeyForQuota" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")
+     and "limit?: number" in text(ROOT / "backend/src/lib/roomTypes.ts")),
+    ("W6.3：确定性单测 / 真 PG 并发 E2E / verify 两处注册齐全",
+     (ROOT / "backend/tests/w63RoomQuota.test.ts").exists()
+     and (ROOT / "backend/tests/e2e_w63_quota.mjs").exists()
+     and "E2E_W63_OK" in text(ROOT / "backend/tests/e2e_w63_quota.mjs")
+     and "e2e:w63" in text(ROOT / "backend/package.json")
+     and "{ id: 'e2e:w63'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w63'," in text(ROOT / "scripts/verify.mjs")),
+    ("bug_log §65 / 任务表 / 定稿 / MEMORY 记录 W6.3 收官",
+     "## 65." in bug_text
+     and "W6.3 收官" in bug_text
+     and "P5-1 W6.3 收官" in task_text
+     and "W6.3 ✅ 2026-11-13" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W6.3 DB 计数" in memory_text),
 ]
 
 for name, ok, *detail in checks:

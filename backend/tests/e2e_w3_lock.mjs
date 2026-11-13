@@ -62,7 +62,7 @@ const healthAt = async (base) => {
 function spawnBackend(port, extraEnv = {}) {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: BACKEND_ROOT,
-    env: { ...process.env, PORT: String(port), ...extraEnv },
+    env: { ...process.env, PORT: String(port), MPK_DISABLE_SWEEP: '1', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });

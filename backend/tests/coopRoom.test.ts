@@ -33,7 +33,7 @@ function seeded(seed: number): Rng {
 const A = { userId: 'u_a', tokenDigest: 'digest_a', connectionId: 'conn_a' };
 const B = { userId: 'u_b', tokenDigest: 'digest_b', connectionId: 'conn_b' };
 
-function makeCoop() {
+async function makeCoop() {
   const reg = new RoomRegistry({
     storage: new InMemoryRoomStorage(),
     configFor: () => CFG,
@@ -46,9 +46,9 @@ function makeCoop() {
   ];
   const state = createCoopState({ spec, parties, rng: seeded(9) });
   assert.ok(state.ok);
-  assert.ok('value' in reg.create({ mode: 'coop', owner: A, now: 1_000, roomId: 'r1' }));
-  assert.ok('value' in reg.join({ roomId: 'r1', member: B, now: 1_000 }));
-  assert.ok('value' in reg.attachCoop('r1', state.value, 1_000));
+  assert.ok('value' in (await reg.create({ mode: 'coop', owner: A, now: 1_000, roomId: 'r1' })));
+  assert.ok('value' in (await reg.join({ roomId: 'r1', member: B, now: 1_000 })));
+  assert.ok('value' in (await reg.attachCoop('r1', state.value, 1_000)));
   return reg;
 }
 
@@ -59,7 +59,7 @@ function report() {
   };
 }
 
-test('F16 意图通道：enter / idle 走既有 room.action 字符串，flee 解析为 null', () => {
+test('F16 意图通道：enter / idle 走既有 room.action 字符串，flee 解析为 null', async () => {
   assert.deepEqual(parseCoopIntent('enter:0'), { type: 'enter', roomIndex: 0 });
   assert.deepEqual(parseCoopIntent(`enter:${COOP_ROOM_COUNT - 1}`), { type: 'enter', roomIndex: 5 });
   assert.deepEqual(parseCoopIntent('idle'), { type: 'idle' });
@@ -67,13 +67,13 @@ test('F16 意图通道：enter / idle 走既有 room.action 字符串，flee 解
   assert.equal(parseCoopIntent('enter:6'), null);
 });
 
-test('F16 房间内核：全员交齐 enter 只推进一回合，一房只放 1 人', () => {
-  const reg = makeCoop();
-  const a = reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 });
+test('F16 房间内核：全员交齐 enter 只推进一回合，一房只放 1 人', async () => {
+  const reg = (await makeCoop());
+  const a = (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 }));
   assert.ok('value' in a && a.value.advanced === false);
-  const b = reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:0', nonce: 'n2', now: 1_200 });
+  const b = (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:0', nonce: 'n2', now: 1_200 }));
   assert.ok('value' in b && b.value.advanced === true);
-  const room = reg.get('r1')!;
+  const room = (await reg.get('r1'))!;
   assert.equal(room.turn, 2);
   assert.equal(room.coop!.turn, 2);
   assert.equal(room.coop!.rooms[0].state, 'fighting');
@@ -82,11 +82,11 @@ test('F16 房间内核：全员交齐 enter 只推进一回合，一房只放 1 
   assert.equal(room.coop!.rooms[1].state, 'pending');
 });
 
-test('F16 房间内核：两人各进一间，一次推进内两间 fighting 房都结算', () => {
-  const reg = makeCoop();
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 });
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:1', nonce: 'n2', now: 1_200 });
-  const room = reg.get('r1')!;
+test('F16 房间内核：两人各进一间，一次推进内两间 fighting 房都结算', async () => {
+  const reg = (await makeCoop());
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 }));
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:1', nonce: 'n2', now: 1_200 }));
+  const room = (await reg.get('r1'))!;
   assert.equal(room.coop!.rooms[0].state, 'fighting');
   assert.equal(room.coop!.rooms[1].state, 'fighting');
   assert.equal(room.coop!.rooms[0].turn, 1);
@@ -95,12 +95,12 @@ test('F16 房间内核：两人各进一间，一次推进内两间 fighting 房
   assert.equal(room.turn, 2, '一次 advanceTurn，不是两次');
 });
 
-test('F16 超时代放：大厅座位自动 enter，不生成随机占位意图、不炸推进', () => {
-  const reg = makeCoop();
+test('F16 超时代放：大厅座位自动 enter，不生成随机占位意图、不炸推进', async () => {
+  const reg = (await makeCoop());
   const rep = report();
-  reg.tick('r1', 1_000 + CFG.roundTimeoutMs, seeded(3), rep);
+  (await reg.tick('r1', 1_000 + CFG.roundTimeoutMs, seeded(3), rep));
   assert.equal(rep.timedOut, 2, '两个座位都被代放');
-  const room = reg.get('r1')!;
+  const room = (await reg.get('r1'))!;
   assert.equal(room.turn, 2);
   assert.equal(room.coop!.rooms.filter((r) => r.state === 'fighting').length, 1);
   assert.equal(room.coop!.rooms[0].occupantSeat, 0);
@@ -108,21 +108,21 @@ test('F16 超时代放：大厅座位自动 enter，不生成随机占位意图�
   assert.equal(room.lastAction!.kind, 'timeout');
 });
 
-test('F16 全员 idle：回合照常推进，不认领任何房间也不抛异常', () => {
-  const reg = makeCoop();
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'idle', nonce: 'n1', now: 1_100 });
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'idle', nonce: 'n2', now: 1_200 });
-  const room = reg.get('r1')!;
+test('F16 全员 idle：回合照常推进，不认领任何房间也不抛异常', async () => {
+  const reg = (await makeCoop());
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'idle', nonce: 'n1', now: 1_100 }));
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'idle', nonce: 'n2', now: 1_200 }));
+  const room = (await reg.get('r1'))!;
   assert.equal(room.turn, 2);
   assert.equal(room.coop!.finished, false);
   assert.ok(room.coop!.rooms.every((r) => r.state === 'pending'));
 });
 
-test('F16 视图：房间四态对全体可见，仍不泄露队友队伍与技能 PP', () => {
-  const reg = makeCoop();
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 });
-  reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:1', nonce: 'n2', now: 1_200 });
-  const va = reg.view(reg.get('r1')!, 'u_a');
+test('F16 视图：房间四态对全体可见，仍不泄露队友队伍与技能 PP', async () => {
+  const reg = (await makeCoop());
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_a', intent: 'enter:0', nonce: 'n1', now: 1_100 }));
+  (await reg.submitIntent({ roomId: 'r1', actorUserId: 'u_b', intent: 'enter:1', nonce: 'n2', now: 1_200 }));
+  const va = reg.view((await reg.get('r1'))!, 'u_a');
   assert.equal(va.coop!.rooms.length, COOP_ROOM_COUNT);
   assert.equal(va.coop!.total, COOP_ROOM_COUNT);
   assert.equal(va.coop!.rooms[0].state, 'fighting');

@@ -125,7 +125,7 @@ export async function applyCoopCreate(params: {
       if (!params.digest || !params.connectionId) {
         return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
       }
-      const res = rooms.create({
+      const res = await rooms.create({
         roomId,
         mode: 'coop',
         owner: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
@@ -135,7 +135,7 @@ export async function applyCoopCreate(params: {
         now,
       });
       if ('code' in res) return fail(res.code, res.reason, 409);
-      publishRoom(res.value);
+      await publishRoom(res.value);
       return { ok: true, value: { room: rooms.view(res.value, params.userId) } };
     });
   });
@@ -154,7 +154,7 @@ export async function applyCoopJoin(params: {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
     }
-    const res = rooms.join({
+    const res = await rooms.join({
       roomId: params.roomId,
       member: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
       now,
@@ -165,8 +165,8 @@ export async function applyCoopJoin(params: {
     if (room.status === 'active' && !room.coop) {
       const spec = getBoss(room.coopBossId);
       if (!spec) {
-        rooms.abandon(room.roomId, now, 'boss_unavailable');
-        publishRoom(room.roomId);
+        await rooms.abandon(room.roomId, now, 'boss_unavailable');
+        await publishRoom(room.roomId);
         return fail('COOP_BOSS_UNKNOWN', '房间选定的共斗目标已失效', 409);
       }
       const ordered = [...room.seats].sort((a, b) => a.seat - b.seat);
@@ -175,23 +175,23 @@ export async function applyCoopJoin(params: {
         // 副本态按座位顺序建立，N 人通用。
         const p = await readParty(seat.userId);
         if (!p) {
-          rooms.abandon(room.roomId, now, 'party_unavailable');
-          publishRoom(room.roomId);
+          await rooms.abandon(room.roomId, now, 'party_unavailable');
+          await publishRoom(room.roomId);
           return fail('COOP_NO_PARTY', '一方没有可用队伍，无法共斗', 409);
         }
         parties.push({ userId: seat.userId, party: p.party });
       }
       const state = createCoopState({ spec, parties, rng: Math.random });
       if ('code' in state) {
-        rooms.abandon(room.roomId, now, 'party_unavailable');
-        publishRoom(room.roomId);
+        await rooms.abandon(room.roomId, now, 'party_unavailable');
+        await publishRoom(room.roomId);
         return fail(state.code, state.reason, 409);
       }
-      const attached = rooms.attachCoop(room.roomId, state.value, now);
+      const attached = await rooms.attachCoop(room.roomId, state.value, now);
       if ('code' in attached) return fail(attached.code, attached.reason, 409);
       room = attached.value;
     }
-    publishRoom(room);
+    await publishRoom(room);
     return { ok: true, value: { room: rooms.view(room, params.userId) } };
   });
 }
@@ -208,7 +208,7 @@ export async function applyCoopJoin(params: {
  * 幂等由 `room.coopSettled` 标记 + `CoopRewardGrant` 唯一键双保险。
  */
 export async function settleCoopRoom(roomId: string): Promise<void> {
-  const room = rooms.get(roomId);
+  const room = await rooms.get(roomId);
   const coop = room?.coop;
   if (!coop || !coop.finished) return;
   const result = coop.result;

@@ -316,14 +316,20 @@ export function registerRealtime(fastify: FastifyInstance): void {
 }
 
 /** 单条连接建立后的消息循环（控制消息 + 权威态快照下行）。 */
-function onConnected(
+async function onConnected(
   fastify: FastifyInstance,
   ws: any,
   userId: string,
   heartbeatMs: number,
   digest: string,
   sessionVersion?: number,
-): void {
+): Promise<void> {
+  // W6.1：本函数内有 await（reconnect / hydrate），而 ws 发射错误走 nextTick、
+  // 先于微任务执行——超大帧的 1009（WS_ERR_UNSUPPORTED_MESSAGE_LENGTH）可能赶在
+  // 后面的事件挂载之前到达。error 监听必须最先挂，否则无人接住会打死整个进程。
+  ws.on('error', () => {
+    // close 事件会紧随，注销统一放在 close 里
+  });
   const now = Date.now();
   const conn: WsConnection = {
     id: randomUUID(),
@@ -370,9 +376,14 @@ function onConnected(
   );
   fastify.log.info({ event: 'ws_connected', userId, connectionId: conn.id }, 'ws connected');
 
+  // W6.1：reconnect 已是 async（W6 存储异步化），事件监听必须先于任何 await 挂好——
+  // 客户端在 hello 后立即上行的消息/关闭可能赶在监听器挂载前到达而被静默丢弃
+  // （原同步实现天然同 tick 挂载；e2e_hardening 的 ping/限流用例实证过此回归，勿回退）。
+  attachWsHandlers(fastify, ws, conn, userId, now);
+
   // P4-2b：同一 token 同一设备才算重连 —— 座位按 (userId, tokenDigest) 匹配。
   // 换设备登录会签出新 token（sv 递增）→ 指纹不同 → 座位保持掉线、不转移。
-  const rejoined = rooms.reconnect(userId, digest, conn.id, now);
+  const rejoined = await rooms.reconnect(userId, digest, conn.id, now);
   if (rejoined.length > 0) publishRooms(rejoined);
 
   // P2-2：连接就绪后把该用户的账号单档权威快照推下去（重连等于拉最新状态）。
@@ -387,7 +398,19 @@ function onConnected(
       fastify.log.error({ event: 'session_hydrate_error', userId, err }, 'session hydrate failed');
     }
   })();
+}
 
+/**
+ * W6.1：WS 事件监听挂载。必须在 onConnected 的任何 await 之前调用——
+ * reconnect/hydrate 异步化后，晚挂载会在窗口期静默丢消息（详见调用点注释）。
+ */
+function attachWsHandlers(
+  fastify: FastifyInstance,
+  ws: any,
+  conn: { id: string; alive: boolean; lastSeenAt: number },
+  userId: string,
+  now: number,
+): void {
   let windowStart = now;
   let windowCount = 0;
 
@@ -396,7 +419,7 @@ function onConnected(
     conn.lastSeenAt = Date.now();
   });
 
-  ws.on('message', (raw: RawData) => {
+  ws.on('message', async (raw: RawData) => {
     const t = Date.now();
     if (t - windowStart >= WS_RATE_WINDOW_MS) {
       windowStart = t;
@@ -439,7 +462,7 @@ function onConnected(
 
     // P4-2b：房间上行只有「意图」与「请求重推」，都不直接写状态。
     if (msg.type === 'room.resync') {
-      const list = rooms.listForUser(userId).filter(
+      const list = (await rooms.listForUser(userId)).filter(
         (r) => msg.roomId === undefined || r.roomId === msg.roomId,
       );
       for (const r of list) {
@@ -487,16 +510,18 @@ function onConnected(
     );
   });
 
-  ws.on('close', () => {
+  ws.on('close', async () => {
     wsRegistry.remove(conn.id);
     detachConnection(conn.id);
-    // P4-2b：断线只标记座位、保留回合态；按 connectionId 精确匹配，
-    // 新连接先建好、旧连接迟到 close 时不会误标掉线。
-    const changed = rooms.markDisconnected(userId, conn.id, Date.now());
-    if (changed.length > 0) publishRooms(changed);
+    try {
+      // P4-2b：断线只标记座位、保留回合态；按 connectionId 精确匹配，
+      // 新连接先建好、旧连接迟到 close 时不会误标掉线。
+      const changed = await rooms.markDisconnected(userId, conn.id, Date.now());
+      if (changed.length > 0) publishRooms(changed);
+    } catch (err) {
+      // W6.1：CAS 重试耗尽等异常绝不允许打死进程；掉线标记下轮 sweep/心跳自然补齐。
+      fastify.log.error({ event: 'ws_close_mark_failed', userId, err }, 'ws close 标记掉线失败');
+    }
     fastify.log.info({ event: 'ws_closed', userId, connectionId: conn.id }, 'ws closed');
-  });
-  ws.on('error', () => {
-    // close 事件会紧随，注销统一放在 close 里
   });
 }

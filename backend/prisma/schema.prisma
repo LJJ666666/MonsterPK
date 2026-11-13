@@ -210,3 +210,47 @@ model AchievementGrant {
   @@unique([userId, achievementId])
   @@index([userId, grantedAt])
 }
+
+// P5-1 W6（#181）：房间共享存储真值（owner key = roomId）。
+// 整房态序列化进 `data`（RoomState JSON 文本），`revision` 提列为 CAS 基线，
+// 与 W2 的 Save.revision 同范式；pvp / coop 嵌套态随房态一起落库，反序列化副本经显式
+// load / modify / commit 写回（设计定稿 §3.6，修复「改字段靠同一引用隐式生效」的序列化三障碍）。
+// 纯新增表，不改动任何既有模型，产品代码零改动先行验收。
+model Room {
+  roomId    String   @id
+  mode      String
+  status    String
+  revision  Int      @default(1)
+  data      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([updatedAt])
+}
+
+// P5-1 W6（#181/#184）：房间 quota 每日已消耗次数真值。
+// `held`（在途）走 Redis 租约（W6.4）；`committed`（最终消耗）走本表，
+// 唯一键 (quotaKey, periodKey) 保证「每日上限」由 DB 事务内二次 count + 条件更新裁决，
+// 重启不重置、不与 Redis 真值分叉（设计定稿 §3.3）。
+model RoomQuotaDaily {
+  id        Int      @id @default(autoincrement())
+  quotaKey  String
+  periodKey String
+  committed Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([quotaKey, periodKey])
+  @@index([quotaKey, periodKey])
+}
+
+// P5-1 W6（#182）：房间 quota 在途真值（原始 held/committed，按 quotaKey 一维）。
+// 与 RoomQuotaDaily 分工：本表是「当前在途占用」活账，RoomQuotaDaily 是「每日已消耗」
+// 累计账（W6.4 每日上限用）。CAS 行版本靠 room 表承载（quota 自身无 revision 列，
+// 因为其写经 `withRoomLock(quotaKey)` 串行，且 held 只增不减、release 幂等）。
+model RoomQuota {
+  key       String @id
+  held      Int    @default(0)
+  committed Int    @default(0)
+  updatedAt DateTime @updatedAt
+}

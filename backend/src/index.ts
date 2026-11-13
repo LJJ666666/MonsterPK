@@ -130,7 +130,7 @@ fastify.get('/api/health', async () => ({
   // P4-2a：榜单是只读派生读模型，health 只报类型数与真值来源，不查库。
   rank: rankStats(),
   // P4-2b：房间状态域统计（纯内存，不查库）。
-  rooms: roomStats(),
+  rooms: await roomStats(),
   // P4-2c：Boss 讨伐（内容表 + 在途次数），不查库。
   boss: bossHealthStats(),
   content: contentStats(),
@@ -169,7 +169,15 @@ const port = Number(process.env.PORT ?? 3001);
 // 绝不带着进程内锁去接多实例流量（口径见 lib/lockBootstrap.ts）。
 initializeLockProvider()
   .then(async () => {
-    await initializeSweepLeader(getLockRedisClient(), heartbeatIntervalMs());
+    // E2E 临时实例（W2/W3/W5 这类不测选主的套件）用 MPK_DISABLE_SWEEP=1 不参与选主。
+    // 原因：它们被 SIGTERM/SIGKILL 硬杀（Windows 下等同直接杀进程，shutdown handler 不执行），
+    // lock:sweep:global 租约只能等 60s TTL 过期；这窗口内常驻 :3001 抢不回 leader，
+    // 全局 sweep + 房间 tick 停摆 → W4 的 A1/A2/F0 与 p42b 超时代放间歇红。生产不设该变量。
+    if (process.env.MPK_DISABLE_SWEEP === '1') {
+      fastify.log.warn('[W4] MPK_DISABLE_SWEEP=1：本实例不参与全局 sweep 选主（仅测试临时实例使用）');
+    } else {
+      await initializeSweepLeader(getLockRedisClient(), heartbeatIntervalMs());
+    }
     // W5：REDIS_URL 已配置（锁已是 redis 模式）时，装配跨实例广播 + 顶号；
     // 否则保持 LocalBroadcastTransport（单实例直发，行为不变）。
     const w5Client = getLockRedisClient();

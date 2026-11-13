@@ -5,6 +5,8 @@
  *
  * ② 用自定义 CopyStorage 模拟 W6 换共享存储后的序列化语义：这是设计定稿 §3.6
  * 点名的障碍，W0 先把修复钉住，避免到 W6 再回头查「为什么结算重复触发」。
+ * W6.1 起 RoomStorage 接口全异步（PG 行版本 CAS），CopyStorage 同步改为 async 实现，
+ * 断言口径与原版一致（零行为变更）。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,53 +40,64 @@ test('coopQuotaKey 同账号同日稳定、跨日变化', () => {
 class CopyStorage implements RoomStorage {
   private readonly rooms = new Map<string, RoomState>();
 
-  get(roomId: string): RoomState | undefined {
+  async get(roomId: string): Promise<RoomState | undefined> {
     const r = this.rooms.get(roomId);
     return r ? (JSON.parse(JSON.stringify(r)) as RoomState) : undefined;
   }
-  set(room: RoomState): void {
+  async create(room: RoomState): Promise<boolean> {
+    if (this.rooms.has(room.roomId)) return false;
     this.rooms.set(room.roomId, JSON.parse(JSON.stringify(room)) as RoomState);
+    return true;
   }
-  delete(roomId: string): void { this.rooms.delete(roomId); }
-  all(): RoomState[] {
+  async set(room: RoomState): Promise<boolean> {
+    this.rooms.set(room.roomId, JSON.parse(JSON.stringify(room)) as RoomState);
+    return true;
+  }
+  /** W6.1 新增原语：同 revision 写回（单线程内存版不会冲突）。 */
+  async writeBack(room: RoomState): Promise<boolean> {
+    this.rooms.set(room.roomId, JSON.parse(JSON.stringify(room)) as RoomState);
+    return true;
+  }
+  async delete(roomId: string): Promise<void> { this.rooms.delete(roomId); }
+  async all(): Promise<RoomState[]> {
     return Array.from(this.rooms.values()).map((r) => JSON.parse(JSON.stringify(r)) as RoomState);
   }
-  getQuota(): { held: number; committed: number } { return { held: 0, committed: 0 }; }
-  setQuota(): void { /* 本用例不涉及 quota */ }
-  quotaKeys(): string[] { return []; }
+  async getQuota(): Promise<{ held: number; committed: number }> { return { held: 0, committed: 0 }; }
+  async setQuota(): Promise<void> { /* 本用例不涉及 quota */ }
+  async quotaKeys(): Promise<string[]> { return []; }
 }
 
-test('create 显式初始化两个结算标记为 false', () => {
+test('create 显式初始化两个结算标记为 false', async () => {
   const ids = sequenceIds('room');
   const clock = new DeterministicClock(1_700_000_000_000);
   const reg = new RoomRegistry({ idFactory: ids });
   const roomId = ids();
-  reg.create({ roomId, mode: 'kernel', owner: OWNER, now: clock.now() });
+  await reg.create({ roomId, mode: 'kernel', owner: OWNER, now: clock.now() });
 
-  const room = reg.get(roomId);
+  const room = await reg.get(roomId);
   assert.ok(room);
   assert.equal(room.pvpSettled, false, '旧实现这里是 undefined');
   assert.equal(room.coopSettled, false);
 });
 
-test('副本语义下：旧写法丢标记，setSettledFlag 写回不丢且不 bump revision', () => {
+test('副本语义下：旧写法丢标记，setSettledFlag 写回不丢且不 bump revision', async () => {
   const reg = new RoomRegistry({ storage: new CopyStorage(), idFactory: sequenceIds('r') });
   const roomId = 'r-copy';
-  reg.create({ roomId, mode: 'kernel', owner: OWNER, now: NOW });
+  await reg.create({ roomId, mode: 'kernel', owner: OWNER, now: NOW });
 
-  const stale = reg.get(roomId);
+  const stale = await reg.get(roomId);
   assert.ok(stale);
   // 复现 W0 前的写法：直接改 rooms.get() 返回的对象。
   stale.pvpSettled = true;
-  assert.equal(reg.get(roomId)!.pvpSettled, false, '副本语义下旧写法确实丢失');
+  assert.equal((await reg.get(roomId))!.pvpSettled, false, '副本语义下旧写法确实丢失');
 
-  reg.setSettledFlag(roomId, 'pvp', true);
-  assert.equal(reg.get(roomId)!.pvpSettled, true, '显式写回后标记可见');
-  assert.equal(reg.get(roomId)!.revision, 1, '写回不得 bump revision（零行为变更）');
+  await reg.setSettledFlag(roomId, 'pvp', true);
+  assert.equal((await reg.get(roomId))!.pvpSettled, true, '显式写回后标记可见');
+  assert.equal((await reg.get(roomId))!.revision, 1, '写回不得 bump revision（零行为变更）');
 
-  reg.setSettledFlag(roomId, 'pvp', false);
-  reg.setSettledFlag(roomId, 'coop', true);
-  assert.equal(reg.get(roomId)!.pvpSettled, false);
-  assert.equal(reg.get(roomId)!.coopSettled, true);
-  assert.doesNotThrow(() => reg.setSettledFlag('not-exist', 'pvp', true));
+  await reg.setSettledFlag(roomId, 'pvp', false);
+  await reg.setSettledFlag(roomId, 'coop', true);
+  assert.equal((await reg.get(roomId))!.pvpSettled, false);
+  assert.equal((await reg.get(roomId))!.coopSettled, true);
+  await assert.doesNotReject(() => reg.setSettledFlag('not-exist', 'pvp', true));
 });

@@ -109,7 +109,7 @@ const drain = (ctx) => { if (ctx?.queue) ctx.queue.length = 0; };
 async function startSecondInstance() {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: BACKEND_ROOT,
-    env: { ...process.env, PORT: '3002' },
+    env: { ...process.env, PORT: '3002', MPK_DISABLE_SWEEP: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });

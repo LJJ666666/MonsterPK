@@ -65,6 +65,14 @@ export default defineConfig({
     // Vite 默认只监听 localhost(::1) 时 IPv4 探活返回 000 → 整套 smoke 假红；
     // Android 调试包访问宿主局域网 IP 也一样依赖 0.0.0.0。
     host: '0.0.0.0',
+    watch: {
+      // 冒烟脚本必须把 seed/probe 页放进 public/ 才能与 App 同源（读 iframe 的 document），
+      // 但 public/ 内任何文件变更都会让 Vite 发 `full-reload`：页面在 dump-dom 采样窗口
+      // 里被强制刷新 → React 挂不上 → 整批冒烟报「白屏」（<div id="root"></div> 空）。
+      // 2026-11-13 实证：dev server 日志出现 29 次 `page reload public/_*_seed.html`。
+      // 这些文件只被一次性读取、不参与 HMR，忽略其变更即可。
+      ignored: ['**/public/_*.html'],
+    },
   },
   // 别名唯一真值源（2026-11-12 偶发红修复）。
   // 原先靠 vite-tsconfig-paths 读 tsconfig.paths：该插件用「项目根目录字符串」做

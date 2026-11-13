@@ -76,8 +76,8 @@ function statusFor(code: string): number {
 }
 
 /** 按成员分别生成视图（self 随接收者变化），逐个账号广播。 */
-export function publishRoom(roomOrId: string | RoomState): number {
-  const room = typeof roomOrId === 'string' ? rooms.get(roomOrId) : roomOrId;
+export async function publishRoom(roomOrId: string | RoomState): Promise<number> {
+  const room = typeof roomOrId === 'string' ? await rooms.get(roomOrId) : roomOrId;
   if (!room) return 0;
   let sent = 0;
   for (const seat of room.seats) {
@@ -117,17 +117,17 @@ async function tickRoomCore(
 ): Promise<TickReport> {
   const report = emptyReport();
   const activeCtx = ctx === undefined ? getSweepLeader().lightContext() : ctx;
-  const revision = rooms.get(roomId)?.revision ?? 0;
+  const revision = (await rooms.get(roomId))?.revision ?? 0;
   const roomKey = `room:${roomId}:${revision}`;
   const token = activeCtx ? await activeCtx.claim(roomKey, 5_000) : null;
   if (activeCtx && !token) return report;
   try {
     if (activeCtx && !(await activeCtx.guard())) return report;
-    rooms.tick(roomId, now, Math.random, report);
+    await rooms.tick(roomId, now, Math.random, report);
     if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
       await maybeSettlePvp(roomId, activeCtx);
       await maybeSettleCoop(roomId, activeCtx);
-      publishRoom(roomId); // 提交成功才发
+      await publishRoom(roomId); // 提交成功才发
     }
     return report;
   } finally {
@@ -151,7 +151,7 @@ export async function sweepRooms(
 ): Promise<TickReport> {
   const merged = emptyReport();
   // W4：逐房套 `withRoomLock`（与意图写入同一把锁），不再无锁遍历快照。
-  for (const roomId of rooms.roomIds()) {
+  for (const roomId of await rooms.roomIds()) {
     const one = await withRoomLock(roomId, () => tickRoomCore(roomId, now, ctx));
     mergeReport(merged, one);
   }
@@ -164,15 +164,15 @@ export async function sweepRooms(
  * W4 的共享 `idem:settle:pvp:<roomId>` 双重保证（失败回滚键以允许重试）。
  */
 async function maybeSettlePvp(roomId: string, ctx: SweepContext | null): Promise<void> {
-  const room = rooms.get(roomId);
+  const room = await rooms.get(roomId);
   if (!room || !room.pvp || !room.pvp.finished || room.pvpSettled) return;
   const key = `settle:pvp:${roomId}`;
   const token = ctx ? await ctx.claim(key) : null;
   // 别的实例已领走结算：本地也置位，避免重复触发（发奖真值由 DB 唯一键裁决）。
-  rooms.setSettledFlag(roomId, 'pvp', true);
+  await rooms.setSettledFlag(roomId, 'pvp', true);
   if (ctx && !token) return;
   void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(async () => {
-    rooms.setSettledFlag(roomId, 'pvp', false);
+    await rooms.setSettledFlag(roomId, 'pvp', false);
     if (ctx && token) await ctx.releaseClaim(key, token);
   });
 }
@@ -182,14 +182,14 @@ async function maybeSettlePvp(roomId: string, ctx: SweepContext | null): Promise
  * 与 pvp 同款动态 import 规避循环依赖；幂等靠 room.coopSettled + 共享 CAS 门。
  */
 async function maybeSettleCoop(roomId: string, ctx: SweepContext | null): Promise<void> {
-  const room = rooms.get(roomId);
+  const room = await rooms.get(roomId);
   if (!room || !room.coop || !room.coop.finished || room.coopSettled) return;
   const key = `settle:coop:${roomId}`;
   const token = ctx ? await ctx.claim(key) : null;
-  rooms.setSettledFlag(roomId, 'coop', true);
+  await rooms.setSettledFlag(roomId, 'coop', true);
   if (ctx && !token) return;
   void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(async () => {
-    rooms.setSettledFlag(roomId, 'coop', false);
+    await rooms.setSettledFlag(roomId, 'coop', false);
     if (ctx && token) await ctx.releaseClaim(key, token);
   });
 }
@@ -205,8 +205,8 @@ function fail(code: string, reason: string): ViewResult {
 }
 
 /** 成员校验：非成员一律按 404 处理，不泄露房间是否存在。 */
-function memberView(roomId: string, userId: string): ViewResult {
-  const room = rooms.get(roomId);
+async function memberView(roomId: string, userId: string): Promise<ViewResult> {
+  const room = await rooms.get(roomId);
   if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
   if (!room.seats.some((s) => s.userId === userId)) {
     return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
@@ -230,7 +230,7 @@ export async function applyRoomCreate(params: {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线');
     }
-    const res = rooms.create({
+    const res = await rooms.create({
       roomId,
       mode: params.mode,
       owner: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
@@ -239,7 +239,7 @@ export async function applyRoomCreate(params: {
       now,
     });
     if ('code' in res) return fail(res.code, res.reason);
-    publishRoom(res.value);
+    await publishRoom(res.value);
     return { ok: true, value: rooms.view(res.value, params.userId) };
   });
 }
@@ -256,13 +256,13 @@ export async function applyRoomJoin(params: {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线');
     }
-    const res = rooms.join({
+    const res = await rooms.join({
       roomId: params.roomId,
       member: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
       now,
     });
     if ('code' in res) return fail(res.code, res.reason);
-    publishRoom(res.value);
+    await publishRoom(res.value);
     return { ok: true, value: rooms.view(res.value, params.userId) };
   });
 }
@@ -278,11 +278,11 @@ export async function applyRoomIntent(params: {
   return withRoomLock(params.roomId, async () => {
     // P4-2e：共斗只接受 move:/switch:；flee 等语义非法意图在入口明确 400，
     // 不靠「代放补齐」静默吞掉（房间内核 autoSubmit 的 'skip' 占位不走这里）。
-    const cur = rooms.get(params.roomId);
+    const cur = await rooms.get(params.roomId);
     if (cur?.mode === 'coop' && !parseCoopIntent(params.intent)) {
       return { ok: false, code: 'COOP_INTENT_INVALID', reason: '共斗意图不合法（只支持 enter: / move: / switch: / idle）' };
     }
-    const res = rooms.submitIntent({
+    const res = await rooms.submitIntent({
       roomId: params.roomId,
       actorUserId: params.userId,
       intent: params.intent,
@@ -292,7 +292,7 @@ export async function applyRoomIntent(params: {
     if ('code' in res) return fail(res.code, res.reason);
     await maybeSettlePvp(params.roomId, getSweepLeader().lightContext());
     await maybeSettleCoop(params.roomId, getSweepLeader().lightContext());
-    publishRoom(res.value.room);
+    await publishRoom(res.value.room);
     return { ok: true, value: rooms.view(res.value.room, params.userId) };
   });
 }
@@ -307,7 +307,7 @@ export async function applyRoomAutopilot(params: {
   now?: number;
 }): Promise<ViewResult> {
   return withRoomLock(params.roomId, async () => {
-    const res = rooms.offerAutopilot({
+    const res = await rooms.offerAutopilot({
       roomId: params.roomId,
       actorUserId: params.userId,
       targetSeat: params.targetSeat,
@@ -316,7 +316,7 @@ export async function applyRoomAutopilot(params: {
       now: params.now ?? Date.now(),
     });
     if ('code' in res) return fail(res.code, res.reason);
-    publishRoom(res.value);
+    await publishRoom(res.value);
     return { ok: true, value: rooms.view(res.value, params.userId) };
   });
 }
@@ -326,11 +326,11 @@ export async function applyRoomSettle(params: {
   roomId: string; userId: string; now?: number;
 }): Promise<ViewResult> {
   return withRoomLock(params.roomId, async () => {
-    const gate = memberView(params.roomId, params.userId);
+    const gate = await memberView(params.roomId, params.userId);
     if ('code' in gate) return gate;
-    const res = rooms.settle(params.roomId, params.now ?? Date.now());
+    const res = await rooms.settle(params.roomId, params.now ?? Date.now());
     if ('code' in res) return fail(res.code, res.reason);
-    publishRoom(res.value);
+    await publishRoom(res.value);
     return { ok: true, value: rooms.view(res.value, params.userId) };
   });
 }
@@ -340,19 +340,19 @@ export async function applyRoomAbandon(params: {
   roomId: string; userId: string; now?: number;
 }): Promise<ViewResult> {
   return withRoomLock(params.roomId, async () => {
-    const gate = memberView(params.roomId, params.userId);
+    const gate = await memberView(params.roomId, params.userId);
     if ('code' in gate) return gate;
-    const res = rooms.abandon(params.roomId, params.now ?? Date.now(), 'manual');
+    const res = await rooms.abandon(params.roomId, params.now ?? Date.now(), 'manual');
     if ('code' in res) return fail(res.code, res.reason);
-    publishRoom(res.value);
+    await publishRoom(res.value);
     return { ok: true, value: rooms.view(res.value, params.userId) };
   });
 }
 
 /** WS 掉线 / 重连后的广播接线，由 realtime.ts 调用。 */
-export function publishRooms(roomIds: string[]): number {
+export async function publishRooms(roomIds: string[]): Promise<number> {
   let sent = 0;
-  for (const id of new Set(roomIds)) sent += publishRoom(id);
+  for (const id of new Set(roomIds)) sent += await publishRoom(id);
   return sent;
 }
 
@@ -392,7 +392,7 @@ export async function roomRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** 我所在的房间列表（resync 兜底）。 */
   fastify.get('/api/room', guard, async (req: any, reply) => {
-    const list = rooms.listForUser(req.user.userId)
+    const list = (await rooms.listForUser(req.user.userId))
       .map((r) => rooms.view(r, req.user.userId));
     return reply.send({ ok: true, rooms: list });
   });
@@ -401,7 +401,7 @@ export async function roomRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/room/quota/:key', guard, async (req: any, reply) => {
     const key = String(req.params?.key ?? '');
     if (!/^[A-Za-z0-9_:\-]{1,64}$/.test(key)) return invalid(reply, '次数键不合法');
-    return reply.send({ ok: true, key, usage: rooms.quotaUsage(key) });
+    return reply.send({ ok: true, key, usage: await rooms.quotaUsage(key) });
   });
 
   fastify.post('/api/room/create', guard, async (req: any, reply) => {
@@ -436,12 +436,12 @@ export async function roomRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/room/:roomId', guard, async (req: any, reply) => {
     const p = paramsSchema.safeParse(req.params);
     if (!p.success) return invalid(reply, '房间标识不合法');
-    const gate = memberView(p.data.roomId, req.user.userId);
+    const gate = await memberView(p.data.roomId, req.user.userId);
     if ('code' in gate) return replyResult(reply, gate);
     // 惰性推进：读一次也让服务端按真实时间处理超时与全掉解散。
     // W4：tickRoom 内部已套 withRoomLock，这里不再嵌套（进程内锁非重入会自锁）。
     await tickRoom(p.data.roomId);
-    return replyResult(reply, memberView(p.data.roomId, req.user.userId));
+    return replyResult(reply, await memberView(p.data.roomId, req.user.userId));
   });
 
   fastify.post('/api/room/:roomId/action', guard, async (req: any, reply) => {

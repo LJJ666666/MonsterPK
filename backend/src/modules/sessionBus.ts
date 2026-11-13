@@ -12,6 +12,7 @@ import { GameSessionRegistry, type SessionStats } from '../lib/gameSession';
 import { BattleRegistry } from '../lib/battleSession';
 import { WildRegistry } from '../lib/wildRegistry';
 import { RoomRegistry } from '../lib/roomRegistry';
+import { PgRoomStorage } from '../lib/pgRoomStorage';
 import { BossQuotaLedger } from '../lib/bossQuota';
 import { LocalBroadcastTransport, type BroadcastTransport } from '../lib/broadcastTransport';
 
@@ -23,8 +24,9 @@ export const gameSessions = new GameSessionRegistry();
 export const battles = new BattleRegistry();
 /** 按区域的共享野怪实例池（P4-1b），跨账号共享同一份实例。 */
 export const wilds = new WildRegistry();
-/** P4-2b 房间状态域（roomId）：纯逻辑 + 可替换 storage，P5-1 迁共享存储时只换 adapter。 */
-export const rooms = new RoomRegistry();
+/** P4-2b 房间状态域（roomId）：纯逻辑 + 可替换 storage，P5-1 迁共享存储时只换 adapter。
+ *  W6.1 起默认注入 Postgres 实现（行版本 CAS，多实例共享真值）；测试可传 InMemoryRoomStorage。 */
+export const rooms = new RoomRegistry({ storage: new PgRoomStorage() });
 /**
  * P4-2c Boss 每日次数的「在途闸」：只记已开局未结算的名额，
  * 已用次数真值在 `BossDamageEvent`（进程重启不会重置次数）。

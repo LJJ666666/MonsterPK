@@ -98,14 +98,14 @@ export async function applyPvpCreate(params: {
       if (!params.digest || !params.connectionId) {
         return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
       }
-      const res = rooms.create({
+      const res = await rooms.create({
         roomId,
         mode: 'pvp',
         owner: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
         now,
       });
       if ('code' in res) return fail(res.code, res.reason, 409);
-      publishRoom(res.value);
+      await publishRoom(res.value);
       return { ok: true, value: { room: rooms.view(res.value, params.userId) } };
     });
   });
@@ -126,7 +126,7 @@ export async function applyPvpJoin(params: {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
     }
-    const res = rooms.join({
+    const res = await rooms.join({
       roomId: params.roomId,
       member: { userId: params.userId, tokenDigest: params.digest, connectionId: params.connectionId },
       now,
@@ -142,8 +142,8 @@ export async function applyPvpJoin(params: {
         const partyA = await readParty(a.userId);
         const partyB = await readParty(b.userId);
         if (!partyA || !partyB) {
-          rooms.abandon(room.roomId, now, 'party_unavailable');
-          publishRoom(room.roomId);
+          await rooms.abandon(room.roomId, now, 'party_unavailable');
+          await publishRoom(room.roomId);
           return fail('PVP_NO_PARTY', '一方没有可用队伍，无法对战', 409);
         }
         const state = createPvpState({
@@ -152,18 +152,18 @@ export async function applyPvpJoin(params: {
           now,
         });
         if ('code' in state) {
-          rooms.abandon(room.roomId, now, 'party_unavailable');
-          publishRoom(room.roomId);
+          await rooms.abandon(room.roomId, now, 'party_unavailable');
+          await publishRoom(room.roomId);
           return fail(state.code, state.reason, 409);
         }
-        const attached = rooms.attachPvp(room.roomId, state.value, now);
+        const attached = await rooms.attachPvp(room.roomId, state.value, now);
         if ('code' in attached) {
           return fail(attached.code, attached.reason, 409);
         }
         room = attached.value;
       }
     }
-    publishRoom(room);
+    await publishRoom(room);
     return { ok: true, value: { room: rooms.view(room, params.userId) } };
   });
 }
@@ -176,7 +176,7 @@ export async function applyPvpJoin(params: {
  * 这里再按 `finished` 判断，重复调用也不重复结算（队伍已回写后 HP 不再变化）。
  */
 export async function settlePvpRoom(roomId: string): Promise<void> {
-  const room = rooms.get(roomId);
+  const room = await rooms.get(roomId);
   if (!room?.pvp || !room.pvp.finished) return;
   const pvp = room.pvp;
 

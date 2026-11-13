@@ -79,7 +79,7 @@ const rowOf = async (userId) => dbA.save.findUnique({ where: { userId } });
 async function startSecondInstance() {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: BACKEND_ROOT,
-    env: { ...process.env, PORT: String(SECOND_PORT) },
+    env: { ...process.env, PORT: String(SECOND_PORT), MPK_DISABLE_SWEEP: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -246,9 +246,15 @@ async function main() {
     let dbBranchHits = d0DbHit ? 1 : 0;
     let allRoundsOk = true;
     for (let round = 1; round <= 4; round += 1) {
+      // 两条分支必须相邻且逐轮递减：服务端每次成功写入会把 authority.expected
+      // 同步成落库值（反作弊：金币减少后不能凭空涨回），所以只要提交值高于上一轮
+      // 落库值就会被 AUTHORITY_MISMATCH 400 先拦下来，走不到 CAS 的 409。
+      // 原写法用 1200-round / 1100-round 差 100，一旦 1100 那条赢了，
+      // 下一轮 1200 那条必然 400（2026-11-13 verify 实证：裁决值 1099 = 1100-1）。
+      // 现在两条相邻，任一方赢都不会让下一轮的值超过 expected。
       const [ra, rb] = await Promise.all([
         rawPut(accD.token, validSave({ money: 1200 - round }), dRev),
-        rawPutAt(SECOND_BASE, accD.token, validSave({ money: 1100 - round }), dRev),
+        rawPutAt(SECOND_BASE, accD.token, validSave({ money: 1199 - round }), dRev),
       ]);
       const row = await rowOf(uidD);
       const oneWinner = [ra.status, rb.status].sort()[0] === 200 && [ra.status, rb.status].sort()[1] === 409;
@@ -268,7 +274,7 @@ async function main() {
       allRoundsOk && dFinal?.revision === 5,
       `allRoundsOk=${allRoundsOk} finalRev=${dFinal?.revision}`);
     suite.check('D5 冲突请求未污染存档：落库内容属于最后一轮赢家',
-      [1200 - 4, 1100 - 4].includes(JSON.parse(dFinal.data).money),
+      [1200 - 4, 1199 - 4].includes(JSON.parse(dFinal.data).money),
       `money=${JSON.parse(dFinal.data).money} revision=${dFinal?.revision}`);
 
     // ——— E：revision 严格 +1 不跳号，authority JSON 是列的只读镜像 ———

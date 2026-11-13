@@ -10,6 +10,15 @@ from pathlib import Path
 import hashlib
 import sys
 
+# Windows 本机 stdout 默认 GBK（cp936），断言名里的 ✅ 等符号会抛
+# UnicodeEncodeError 直接把自检打挂（沙箱内 PYTHONIOENCODING=utf-8 才不暴露）。
+# 保持原编码、只把不可编码字符替换掉：中文照常可读，符号退化成 ?，绝不中断。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / ".trae" / "documents"
 MEM = ROOT / ".workbuddy" / "memory"
@@ -739,9 +748,11 @@ checks = [
      and '"revision" INTEGER NOT NULL DEFAULT 0' in text(ROOT / "backend/prisma/migrations/20261112123700_init/migration.sql")
      and 'CREATE TABLE "Save"' in text(ROOT / "backend/prisma/migrations/20261112123700_init/migration.sql")),
     ("W1：11 条 SQLite 迁移归档、lock 重置、只剩一条 PG 基线",
+     # W1 收官时 PG 基线恰为 1 条；W6.0/W6.1 起合法新增迁移（room_storage/room_quota），
+     # 故放宽为 >=1（归档仍须恰好 11 条、provider 须 postgresql）。
      len(list((ROOT / "backend/prisma/migrations_sqlite_archive").glob("*/migration.sql"))) == 11
      and 'provider = "postgresql"' in text(ROOT / "backend/prisma/migrations/migration_lock.toml")
-     and len(list((ROOT / "backend/prisma/migrations").glob("*/migration.sql"))) == 1
+     and len(list((ROOT / "backend/prisma/migrations").glob("*/migration.sql"))) >= 1
      and (ROOT / "backend/prisma/migrations_sqlite_archive/README.md").exists()),
     ("W1：revision 回填幂等脚本与事务回滚验证脚本存在",
      (ROOT / "backend/prisma/backfill_revision.sql").exists()

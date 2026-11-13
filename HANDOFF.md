@@ -77,7 +77,8 @@ npm run verify                                 # VERIFY_OK（阶段数与数字�
 
 - 远端 `https://github.com/LJJ666666/MonsterPK.git`，分支 `master`。**提交号不在此固化**，用 `git log --oneline -10` 和 `git ls-remote origin refs/heads/master` 看当前事实。
 - 回滚点 tag 命名 `rollback-YYYYMMDD-<阶段>`，成对建在阶段前后并推远端；回滚用 `git reset --hard <tag>` 或 `git revert <commit>`。
-- **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 建并推回滚 tag → 确认无 `.env` / `*.db` 入库 → 中文分条 commit（末尾写验收数字）→ `git push origin master` → 核对 `HEAD == origin/master` 且工作树干净。**若 push 恒 502 而浏览器能开 GitHub**：`HTTPS_PROXY` 多半被钉在 WorkBuddy 沙箱代理 `127.0.0.1:11811`（`sandbox-cli.exe`），系统代理端口读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyServer`（本机 `8693`），用一次性 `HTTPS_PROXY=http://127.0.0.1:8693 HTTP_PROXY=... git push origin master` 覆盖即可；**不改全局 git config、不换协议**（bug_log §56）。
+- **提交规矩（11-07 杰哥定，每次固定执行、不用再问）**：验收通过 → 建并推回滚 tag → 确认无 `.env` / `*.db` 入库 → 中文分条 commit（末尾写验收数字）→ `git push origin master` → 核对 `HEAD == origin/master`、工作树干净，以及**本地需要保留的 tag 是否全部已在远端**（别只推最新一个，见 bug_log §62）。
+- **推送失败口径（11-13 杰哥定，取代 §56 旧解法）**：环境类失败先读 `env` 确认代理变量属于「工具会话 / 本机 / 项目」哪一层，再决定动作（三层定义见下条）。`git push` 在**工具沙箱内**失败时最多试 1 次：**不换代理、不试直连、不做连通性排查**，直接告诉杰哥改在【本机终端】执行并给出完整命令；杰哥说「我这边能通 / 网络没问题」时立刻按环境差异处理、停止重试。§56 记的「一次性 `HTTPS_PROXY=http://127.0.0.1:8693` 覆盖 env 推送」是 11-12 那次的历史解法，**保留作排查记录、不再是执行口径**（本机 `8693` 也可能未监听）；**不改全局 git config、不换协议**。同一套硬规则已写进 WorkBuddy 设置 → 个性化 → 「给 WorkBuddy 的指令」，见 §4.1。
 - **配置分层（11-12 杰哥定，跨机器 / 跨会话必看）**：环境类失败先分清三层，**禁止把 WorkBuddy 沙箱注入的 env 当成本机或项目配置**。① **沙箱 / 工具层**：`HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`，仅当前会话进程有效，**禁止写进仓库任何文件**；② **系统 / 本机层**：注册表 `ProxyServer` = 8693、PG / Redis / JDK 本机安装路径，可读、不得硬编码为产品默认值；③ **项目层（唯一可提交真值）**：`MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`，`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`）。规则：先核对变量归属再有限次重试；覆盖 env 只用一次性命令前缀、用完即弃；本地探活 `curl --noproxy '*'`；PG / Redis 用 `redis-cli PING` / `/api/health` 判活（HTTP `curl /` 的 000 不是判据）；诊断只做「读 env / 查端口归属 / 单次 curl 对照」。详见 bug_log §57。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，新机器必须补**：`backend/.env`、`backend/prisma/dev.db`、`save_data.json`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。
@@ -168,9 +169,10 @@ cd "$REPO/backend" && npm run admin -- grant <你的用户名>
 
 | 层 | 存放位置 | 随 git？ | 换机器怎么办 |
 |---|---|---|---|
-| 云端 profile / 历史对话 | WorkBuddy 账号 | 跟账号 | **用同一个 WorkBuddy 账号登录**即自动注入；要找回旧讨论用 `conversation_search` |
+| 云端记忆（偏好画像） | WorkBuddy 账号 | 跟账号 | **用同一个 WorkBuddy 账号登录**即自动注入（每晚自动整理，只装身份 / 偏好 / 当前关注，不放硬规则）；要找回旧讨论用 `conversation_search` |
 | 项目级工作记忆 | `<项目>/.workbuddy/memory/` + `.trae/documents/` | ✅ | clone 后自动在，**用 WorkBuddy 打开该项目目录**即注入 |
 | 用户级长期记忆 | `C:\Users\<用户名>\.workbuddy\` | ❌ | 手动搬下面 4 个文件，或用第 5 节话术兜底 |
+| **WorkBuddy 个性化指令** | `C:\Users\<用户名>\.workbuddy\app\app-config.json` 的 `personalization` | ❌ | **按「要粘一次」准备**（未证实随账号同步）：设置 → 个性化 → 「给 WorkBuddy 的指令」，文案见 §4.1 |
 
 用户级 4 个文件（`<用户名>` 与 `user-*-personal` 目录名以**本机实际生成**的为准）：
 
@@ -185,6 +187,30 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 
 > **兜底**：就算这 4 个文件没带，第 5 节话术里已写全称呼、语气和硬约束，新会话照样能进入状态。
 
+### 4.1 换机器必补：WorkBuddy 个性化指令
+
+落点 `C:\Users\<用户名>\.workbuddy\app\app-config.json` 的 `personalization` 字段；路径是**设置 → 个性化 → 给 WorkBuddy 的指令**。它**不随 git**（项目目录里搜这段指令全文 0 命中），也**未证实随账号同步** → 家里那台电脑按「要粘一次」准备：登录同一账号后先点开看一眼，四条已在就省了，不在就原样粘贴。
+
+为什么单独交代：该指令「之后每次对话和任务都会默认生效」，是**常驻**的；而 HANDOFF / bug_log / 项目记忆都是需要被读取检索的文件。11-13 的推送事故里规矩同时在 5 处、doc_check 222 项全过，仍因动手那一刻没调出来而重犯（bug_log §63）。硬规则放常驻指令，端口 / 注册表路径 / 命令等项目细节留本文档。
+
+原样粘贴（**别写死端口**，家里代理环境不同也适用；开头「触发范围」那句比 1~4 条更关键，别漏）：
+
+```text
+【环境类失败先分层，别在工具沙箱里硬试】
+遇到 git push 502 / 连接被拒 / 端口不通 / 凭据失效 / 工具找不到这类环境问题：
+1. 先读 env 确认代理变量属于「工具会话」还是「本机/项目」，再决定动作；
+   不许把工具沙箱的 env 当成本机或项目配置。
+2. 推送在工具沙箱内失败时最多试 1 次：不换代理、不试直连、不做连通性排查；
+   直接告诉用户改在【本机终端】执行，并给出完整命令。
+3. 用户说「我这边能通 / 网络没问题」时，立刻按环境差异处理，停止重试。
+4. 推送收尾核对：本地 HEAD == 远端 HEAD、工作树干净、需要保留的 tag
+   是否全部已在远端（别只推最新一个）。
+```
+
+`python scripts/check_home_env.py` 会读这份配置，缺了给 `[WARN]` 并指向本节（第 5 节话术第 6 步会跑它），不会静默放行。
+
+> 三层别混：**给 WorkBuddy 的指令** = 常驻硬规则；**本地记忆与技能** = 用户级 / 项目级文件（细节、命令、证据）；**云端记忆** = 服务端每晚自动整理的偏好画像，会被概括重写，**别把「最多 1 次」「不试直连」这类可判定硬条件塞进去**。
+
 ## 5. 第 4 步：打开 WorkBuddy，第一段话术（直接复制）
 
 > 先在 WorkBuddy 里把**工作目录切换 / 打开到本项目目录**，再发下面这段话。
@@ -198,7 +224,8 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
    给可复现证据（命令输出、哈希、日志原文），不接受「应该是因为」；
    不要半成品，做不到或不确定就直接说。
 3. 如果本机 ~/.workbuddy 下没有用户级记忆，请把第 2 条的偏好写进本机用户级
-   MEMORY.md，之后长期遵守。
+   MEMORY.md，之后长期遵守；并确认设置 → 个性化 → 「给 WorkBuddy 的指令」里
+   §4.1 那四条已在（没带过来就原样粘一次，check_home_env.py 会用 WARN 提示）。
 4. 复述三件事，确认记忆已加载：
    ① 当前做到哪一步、下一步候选是什么（等杰哥排期，别自己开工）；
    ② SCHEMA_VERSION 与后端 EXPECTED_SAVE_VERSION 为什么必须同步递增；

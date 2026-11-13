@@ -142,6 +142,22 @@ if all(p.is_file() for p in user_files) and personal:
 else:
     say("WARN", "user-level memory incomplete -> see HANDOFF.md section 4 (or paste the hello prompt)")
 
+# ---- WorkBuddy personalization (NOT in git; may not roam across machines) ----
+# Hard rules live in Settings > Personalization > "Instructions for WorkBuddy",
+# stored at ~/.workbuddy/app/app-config.json (personalization). Project docs are
+# only read on demand, so a missing instruction silently loses the push guardrail.
+app_cfg = home / "app" / "app-config.json"
+try:
+    import json
+    cfg = json.loads(app_cfg.read_text(encoding="utf-8", errors="ignore"))
+    blob = json.dumps(cfg.get("personalization", {}), ensure_ascii=False)
+    if "环境类失败先分层" in blob and "不换代理、不试直连" in blob:
+        say("OK", "personalization: env-failure guardrail present")
+    else:
+        say("WARN", "personalization guardrail missing -> HANDOFF.md section 4.1")
+except Exception:
+    say("WARN", "personalization app-config.json missing/unreadable -> HANDOFF.md 4.1")
+
 # ---- deliverables ----
 for name, p in (("HANDOFF.md", ROOT / "HANDOFF.md"),
                 ("doc_check.py", ROOT / "scripts" / "doc_check.py"),

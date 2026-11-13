@@ -19,7 +19,7 @@
  *  - 不动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 战斗公式 / 四张派生榜 /
  *    Boss 伤害榜；共斗伤害不写 `BossDamageEvent`。
  */
-import { prisma } from '../lib/prisma';
+import { roomDb, isRoomUnitActive } from '../lib/roomUnitOfWork';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { digestOf, type AuthorityState } from '../lib/authority';
 import { readSave } from './saveRead';
@@ -57,18 +57,18 @@ async function grantOne(p: {
   nowIso: string;
 }): Promise<GrantOutcome> {
   const grantKey = coopClearGrantKey(p.roomId, p.userId);
-  const existing = await prisma.coopRewardGrant.findUnique({ where: { grantKey } });
+  const existing = await roomDb().coopRewardGrant.findUnique({ where: { grantKey } });
   if (existing) return { state: 'skipped', detail: 'already' };
 
   // 每日通关上限：落库记录是真值（同一场重复结算已由上一步跳过）。
-  const used = await prisma.coopRewardGrant.count({
+  const used = await roomDb().coopRewardGrant.count({
     where: { userId: p.userId, periodKey: p.periodKey },
   });
   if (used >= COOP_DAILY_CLEAR_LIMIT) return { state: 'skipped', detail: 'limit' };
 
   let recordId: number;
   try {
-    const created = await prisma.coopRewardGrant.create({
+    const created = await roomDb().coopRewardGrant.create({
       data: {
         roomId: p.roomId,
         userId: p.userId,
@@ -88,7 +88,7 @@ async function grantOne(p: {
   try {
     const row = await readSave(p.userId);
     if (!row) {
-      await prisma.coopRewardGrant.delete({ where: { id: recordId } });
+      await roomDb().coopRewardGrant.delete({ where: { id: recordId } });
       return { state: 'skipped', detail: 'no_save' };
     }
     const raw = applyPlayReward(row.raw, COOP_CLEAR_REWARD, p.nowIso);
@@ -106,13 +106,17 @@ async function grantOne(p: {
       authority,
       source: 'action',
     });
-    await prisma.coopRewardGrant.update({
+    await roomDb().coopRewardGrant.update({
       where: { id: recordId },
       data: { revision: committed.revision },
     });
     return { state: 'granted', detail: 'ok' };
-  } catch {
-    await prisma.coopRewardGrant.delete({ where: { id: recordId } }).catch(() => undefined);
+  } catch (e) {
+    // W6.2：事务内占位 / 写档 / 回填 revision 由同一事务原子提交，失败必须冒泡
+    // 让整个工作单元回滚；此时手动 delete 既多余（事务已 aborted）又会吞掉错误，
+    // 导致「房间已结算、奖励没发」的半状态。
+    if (isRoomUnitActive()) throw e;
+    await roomDb().coopRewardGrant.delete({ where: { id: recordId } }).catch(() => undefined);
     return { state: 'failed', detail: 'failed' };
   }
 }

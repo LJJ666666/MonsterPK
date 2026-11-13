@@ -43,6 +43,7 @@ import {
   publishRooms, sweepRooms, applyRoomIntent, applyRoomAutopilot,
 } from './room';
 import { tokenDigest } from '../lib/roomAuth';
+import { runInRoomUnit } from '../lib/roomUnitOfWork';
 import { getSweepLeader, guardedCommit, type SweepContext } from '../lib/sweepLeader';
 import { publishTakeover, shutdownBroadcast } from '../lib/connectionControl';
 import {
@@ -383,8 +384,11 @@ async function onConnected(
 
   // P4-2b：同一 token 同一设备才算重连 —— 座位按 (userId, tokenDigest) 匹配。
   // 换设备登录会签出新 token（sv 递增）→ 指纹不同 → 座位保持掉线、不转移。
-  const rejoined = await rooms.reconnect(userId, digest, conn.id, now);
-  if (rejoined.length > 0) publishRooms(rejoined);
+  // W6.2：多房掉线/重连写与 room.state 广播一起纳入工作单元，提交成功才发。
+  await runInRoomUnit(async () => {
+    const ids = await rooms.reconnect(userId, digest, conn.id, now);
+    if (ids.length > 0) await publishRooms(ids);
+  });
 
   // P2-2：连接就绪后把该用户的账号单档权威快照推下去（重连等于拉最新状态）。
   void (async () => {
@@ -516,8 +520,10 @@ function attachWsHandlers(
     try {
       // P4-2b：断线只标记座位、保留回合态；按 connectionId 精确匹配，
       // 新连接先建好、旧连接迟到 close 时不会误标掉线。
-      const changed = await rooms.markDisconnected(userId, conn.id, Date.now());
-      if (changed.length > 0) publishRooms(changed);
+      await runInRoomUnit(async () => {
+        const ids = await rooms.markDisconnected(userId, conn.id, Date.now());
+        if (ids.length > 0) await publishRooms(ids);
+      });
     } catch (err) {
       // W6.1：CAS 重试耗尽等异常绝不允许打死进程；掉线标记下轮 sweep/心跳自然补齐。
       fastify.log.error({ event: 'ws_close_mark_failed', userId, err }, 'ws close 标记掉线失败');

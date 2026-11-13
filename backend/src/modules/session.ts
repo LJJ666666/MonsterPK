@@ -6,7 +6,7 @@
  * 客户端不能通过 WS 写状态——上行只有 ping / session.resync（请求重推）。
  */
 import type { FastifyInstance } from 'fastify';
-import { prisma } from '../lib/prisma';
+import { roomDb, onRoomCommit } from '../lib/roomUnitOfWork';
 import { parseAuthority, serializeAuthority, type AuthorityState } from '../lib/authority';
 import { buildSnapshot, type SessionSource, type SessionSnapshot } from '../lib/gameSession';
 import {
@@ -20,7 +20,7 @@ export { RevisionConflictError } from '../lib/saveCas';
 
 /** 连接建立时从 DB 恢复该用户的账号单档权威态，并返回要推给这条连接的快照。 */
 export async function hydrateForUser(userId: string, connectionId: string): Promise<SessionSnapshot[]> {
-  const rec = await prisma.save.findUnique({ where: { userId } });
+  const rec = await roomDb().save.findUnique({ where: { userId } });
   const state = gameSessions.hydrate(
     userId,
     rec
@@ -70,7 +70,7 @@ export type CurrentState = {
  * 只读、不 hydrate，避免冲突探测凭空建会话。
  */
 export async function currentState(userId: string): Promise<CurrentState | null> {
-  const rec = await prisma.save.findUnique({ where: { userId } });
+  const rec = await roomDb().save.findUnique({ where: { userId } });
   if (!rec) return null;
   return {
     revision: rec.revision,
@@ -96,11 +96,11 @@ function prismaSaveCasStore(): SaveCasStore {
 
   return {
     async find(userId) {
-      const rec = await prisma.save.findUnique({ where: { userId } });
+      const rec = await roomDb().save.findUnique({ where: { userId } });
       return rec ? toRow(rec) : null;
     },
     async updateIfRevision(userId, baseRevision, write) {
-      const res = await prisma.save.updateMany({
+      const res = await roomDb().save.updateMany({
         where: { userId, revision: baseRevision },
         data: {
           data: write.data,
@@ -114,7 +114,7 @@ function prismaSaveCasStore(): SaveCasStore {
       return res.count;
     },
     async create(userId, write) {
-      await prisma.save.create({
+      await roomDb().save.create({
         data: {
           userId,
           data: write.data,
@@ -192,16 +192,20 @@ export async function commitState(
       clientId: input.clientId,
       schemaVersion: input.schemaVersion,
     };
-    const state = gameSessions.apply(userId, {
-      data: input.data,
-      schemaVersion: input.schemaVersion,
-      clientId: input.clientId,
-      authority: { ...input.authority, revision: nextRevision },
-      source: input.source,
-      updatedAt: patch.updatedAt.getTime(),
+    // W6.2：内存权威态与 WS 广播属于「提交后副作用」。放在事务内执行会在回滚时
+    // 污染内存 / 让客户端看到不存在的状态，故统一挂到工作单元的 after-commit 钩子。
+    onRoomCommit(() => {
+      const state = gameSessions.apply(userId, {
+        data: input.data,
+        schemaVersion: input.schemaVersion,
+        clientId: input.clientId,
+        authority: { ...input.authority, revision: nextRevision },
+        source: input.source,
+        updatedAt: patch.updatedAt.getTime(),
+      });
+      // 广播给该账号所有在线连接（含发起端；前端用 revision 幂等忽略自己的回显）。
+      broadcastToUser(userId, encodeServerMessage(buildSnapshot(state)));
     });
-    // 广播给该账号所有在线连接（含发起端；前端用 revision 幂等忽略自己的回显）。
-    broadcastToUser(userId, encodeServerMessage(buildSnapshot(state)));
     return { saved, revision: nextRevision };
   }
 

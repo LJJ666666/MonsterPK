@@ -1,7 +1,7 @@
 /**
  * P4-2b 房间内核：REST 路由 + WS 意图共用的服务层。
  *
- * 权威模型：房间是第四个状态域，owner key = `roomId`，所有写经 `withRoomLock()` 串行；
+ * 权威模型：房间是第四个状态域，owner key = `roomId`，所有写经 `withRoomUnit()` 串行；
  * 客户端只发意图（REST 或 WS `room.action`）、只收 `room.state` 全量快照。
  * **WS 上行绝不写状态**：意图经服务端裁决后由 RoomRegistry 写入，房间态不落个人档。
  *
@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { rooms, wsRegistry, broadcastToUser } from './sessionBus';
 import { encodeServerMessage } from '../lib/wsProtocol';
-import { withRoomLock } from '../lib/slotLock';
+import { withRoomUnit, onRoomCommit } from '../lib/roomUnitOfWork';
 import { getSweepLeader, type SweepContext } from '../lib/sweepLeader';
 import { tokenDigest } from '../lib/roomAuth';
 import type { TickReport } from '../lib/roomRegistry';
@@ -79,15 +79,17 @@ function statusFor(code: string): number {
 export async function publishRoom(roomOrId: string | RoomState): Promise<number> {
   const room = typeof roomOrId === 'string' ? await rooms.get(roomOrId) : roomOrId;
   if (!room) return 0;
-  let sent = 0;
-  for (const seat of room.seats) {
-    const view = rooms.view(room, seat.userId);
-    sent += broadcastToUser(
-      seat.userId,
-      encodeServerMessage({ type: 'room.state', room: view }),
-    );
-  }
-  return sent;
+  // W6.2：视图先按接收者算好，真正发送挂到工作单元的 after-commit 钩子。
+  // 事务回滚时客户端不会收到基于未提交状态的快照；非事务上下文立即发送。
+  const messages = room.seats.map((seat) => ({
+    userId: seat.userId,
+    payload: encodeServerMessage({ type: 'room.state', room: rooms.view(room, seat.userId) }),
+  }));
+  onRoomCommit(() => {
+    for (const m of messages) broadcastToUser(m.userId, m.payload);
+  });
+  // 返回「本次将投递的成员数」（实际发送在提交后，不阻塞事务）。
+  return messages.length;
 }
 
 const emptyReport = (): TickReport => ({
@@ -103,7 +105,7 @@ function mergeReport(into: TickReport, from: TickReport): void {
 }
 
 /**
- * W4 房间推进核心（调用方必须已持 `withRoomLock`）。
+ * W4 房间推进核心（调用方必须已持 `withRoomUnit`）。
  *
  * 幂等门 `idem:room:<roomId>:<revision>` 是**短期 claim + 用完释放**：
  * 两个实例在同一 revision 上并发 tick 只有 1 个能推进；推进完 revision 就变了，
@@ -125,6 +127,8 @@ async function tickRoomCore(
     if (activeCtx && !(await activeCtx.guard())) return report;
     await rooms.tick(roomId, now, Math.random, report);
     if (report.changedRoomIds.includes(roomId) || report.abandoned.includes(roomId)) {
+      // W6.2：结算写档 / 发奖与上面的 room + quota 写入在同一个事务内 await 完成，
+      // 任何一步抛错 → 整个工作单元回滚 → settled 标记与 quota 一起撤销，可重试。
       await maybeSettlePvp(roomId, activeCtx);
       await maybeSettleCoop(roomId, activeCtx);
       await publishRoom(roomId); // 提交成功才发
@@ -141,7 +145,13 @@ export async function tickRoom(
   now = Date.now(),
   ctx?: SweepContext | null,
 ): Promise<TickReport> {
-  return withRoomLock(roomId, () => tickRoomCore(roomId, now, ctx));
+  try {
+    return await withRoomUnit(roomId, () => tickRoomCore(roomId, now, ctx));
+  } catch (e) {
+    // 事务已整体回滚（room / quota / 存档 / 奖励），惰性读不因此 500。
+    console.warn(`[W6.2] 房间工作单元回滚 room=${roomId}:`, e);
+    return emptyReport();
+  }
 }
 
 /** 定时扫描：超时 / 托管 / 全员掉线 / TTL 全在服务端推进，客户端无法触发时间。 */
@@ -150,18 +160,18 @@ export async function sweepRooms(
   ctx?: SweepContext | null,
 ): Promise<TickReport> {
   const merged = emptyReport();
-  // W4：逐房套 `withRoomLock`（与意图写入同一把锁），不再无锁遍历快照。
+  // W4：逐房套 `withRoomUnit`（房间锁 + 同一事务边界），不再无锁遍历快照。
   for (const roomId of await rooms.roomIds()) {
-    const one = await withRoomLock(roomId, () => tickRoomCore(roomId, now, ctx));
-    mergeReport(merged, one);
+    mergeReport(merged, await tickRoom(roomId, now, ctx));
   }
   return merged;
 }
 
 /**
  * P4-2d：房间刚分出胜负（pvp 结束 → settled）时，触发写双方档。
- * 动态 import 避免 room ↔ pvp 模块顶层循环依赖；幂等由 room.pvpSettled 标记 +
- * W4 的共享 `idem:settle:pvp:<roomId>` 双重保证（失败回滚键以允许重试）。
+ * W6.2：改为事务内 `await` 结算（原 fire-and-forget 让写档 / 发奖落在事务之外，
+ * 无法与 room + quota 共用原子边界）。失败必须冒泡 → 工作单元整体回滚 settled
+ * 标记与 quota，Redis 长期 claim 一并释放，下次 tick 可以重试。
  */
 async function maybeSettlePvp(roomId: string, ctx: SweepContext | null): Promise<void> {
   const room = await rooms.get(roomId);
@@ -171,10 +181,13 @@ async function maybeSettlePvp(roomId: string, ctx: SweepContext | null): Promise
   // 别的实例已领走结算：本地也置位，避免重复触发（发奖真值由 DB 唯一键裁决）。
   await rooms.setSettledFlag(roomId, 'pvp', true);
   if (ctx && !token) return;
-  void import('./pvp').then((m) => m.settlePvpRoom(roomId)).catch(async () => {
-    await rooms.setSettledFlag(roomId, 'pvp', false);
+  try {
+    const m = await import('./pvp');
+    await m.settlePvpRoom(roomId);
+  } catch (e) {
     if (ctx && token) await ctx.releaseClaim(key, token);
-  });
+    throw e;
+  }
 }
 
 /**
@@ -188,10 +201,13 @@ async function maybeSettleCoop(roomId: string, ctx: SweepContext | null): Promis
   const token = ctx ? await ctx.claim(key) : null;
   await rooms.setSettledFlag(roomId, 'coop', true);
   if (ctx && !token) return;
-  void import('./coop').then((m) => m.settleCoopRoom(roomId)).catch(async () => {
-    await rooms.setSettledFlag(roomId, 'coop', false);
+  try {
+    const m = await import('./coop');
+    await m.settleCoopRoom(roomId);
+  } catch (e) {
     if (ctx && token) await ctx.releaseClaim(key, token);
-  });
+    throw e;
+  }
 }
 
 export function roomStats() {
@@ -226,7 +242,7 @@ export async function applyRoomCreate(params: {
 }): Promise<ViewResult> {
   const now = params.now ?? Date.now();
   const roomId = randomUUID();
-  return withRoomLock(roomId, async () => {
+  return withRoomUnit(roomId, async () => {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线');
     }
@@ -252,7 +268,7 @@ export async function applyRoomJoin(params: {
   now?: number;
 }): Promise<ViewResult> {
   const now = params.now ?? Date.now();
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线');
     }
@@ -275,7 +291,7 @@ export async function applyRoomIntent(params: {
   nonce: string;
   now?: number;
 }): Promise<ViewResult> {
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     // P4-2e：共斗只接受 move:/switch:；flee 等语义非法意图在入口明确 400，
     // 不靠「代放补齐」静默吞掉（房间内核 autoSubmit 的 'skip' 占位不走这里）。
     const cur = await rooms.get(params.roomId);
@@ -306,7 +322,7 @@ export async function applyRoomAutopilot(params: {
   nonce?: string;
   now?: number;
 }): Promise<ViewResult> {
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     const res = await rooms.offerAutopilot({
       roomId: params.roomId,
       actorUserId: params.userId,
@@ -325,7 +341,7 @@ export async function applyRoomAutopilot(params: {
 export async function applyRoomSettle(params: {
   roomId: string; userId: string; now?: number;
 }): Promise<ViewResult> {
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     const gate = await memberView(params.roomId, params.userId);
     if ('code' in gate) return gate;
     const res = await rooms.settle(params.roomId, params.now ?? Date.now());
@@ -339,7 +355,7 @@ export async function applyRoomSettle(params: {
 export async function applyRoomAbandon(params: {
   roomId: string; userId: string; now?: number;
 }): Promise<ViewResult> {
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     const gate = await memberView(params.roomId, params.userId);
     if ('code' in gate) return gate;
     const res = await rooms.abandon(params.roomId, params.now ?? Date.now(), 'manual');
@@ -439,7 +455,7 @@ export async function roomRoutes(fastify: FastifyInstance): Promise<void> {
     const gate = await memberView(p.data.roomId, req.user.userId);
     if ('code' in gate) return replyResult(reply, gate);
     // 惰性推进：读一次也让服务端按真实时间处理超时与全掉解散。
-    // W4：tickRoom 内部已套 withRoomLock，这里不再嵌套（进程内锁非重入会自锁）。
+    // W4：tickRoom 内部已套 withRoomUnit，这里不再嵌套（进程内锁非重入会自锁）。
     await tickRoom(p.data.roomId);
     return replyResult(reply, await memberView(p.data.roomId, req.user.userId));
   });

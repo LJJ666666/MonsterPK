@@ -11,7 +11,7 @@
  *
  * 注意：本文件是「IO 边界」，roomRegistry.ts 仍保持零 IO（只认 RoomStorage 接口）。
  */
-import { prisma } from './prisma';
+import { roomDb } from './roomUnitOfWork';
 import type { QuotaUsage, RoomState } from './roomTypes';
 
 /** 深拷贝，避免 `get` 返回的副本被调用方改了之后，绕开 `set` 静默污染存储（§3.6 序列化障碍之一）。 */
@@ -24,7 +24,7 @@ const emptyUsage = (): QuotaUsage => ({ held: 0, committed: 0 });
 export class PgRoomStorage {
   /** 加载房间；返回独立副本（revision 取自 data 内的字段，与列保持一致）。 */
   async get(roomId: string): Promise<RoomState | undefined> {
-    const row = await prisma.room.findUnique({ where: { roomId } });
+    const row = await roomDb().room.findUnique({ where: { roomId } });
     if (!row) return undefined;
     const room = JSON.parse(row.data) as RoomState;
     return room;
@@ -32,21 +32,20 @@ export class PgRoomStorage {
 
   /** 插入新房间；已存在返回 false（调用方据此返回 ROOM_EXISTS）。 */
   async create(room: RoomState): Promise<boolean> {
-    try {
-      await prisma.room.create({
-        data: {
-          roomId: room.roomId,
-          mode: room.mode,
-          status: room.status,
-          revision: room.revision,
-          data: JSON.stringify(room),
-        },
-      });
-      return true;
-    } catch (e: any) {
-      if (e?.code === 'P2002') return false; // 唯一约束冲突（并发建同名房）
-      throw e;
-    }
+    // W6.2：事务内不能靠 `create` + catch P2002 —— PG 一条语句报错会把整个事务
+    // 置为 aborted，后续 quota 回滚写全部失败。`skipDuplicates` 走 ON CONFLICT
+    // DO NOTHING，不产生语句错误，并发建同名房只体现在 count=0。
+    const res = await roomDb().room.createMany({
+      data: [{
+        roomId: room.roomId,
+        mode: room.mode,
+        status: room.status,
+        revision: room.revision,
+        data: JSON.stringify(room),
+      }],
+      skipDuplicates: true,
+    });
+    return res.count === 1;
   }
 
   /**
@@ -55,7 +54,7 @@ export class PgRoomStorage {
    */
   async set(room: RoomState): Promise<boolean> {
     const base = room.revision - 1;
-    const res = await prisma.room.updateMany({
+    const res = await roomDb().room.updateMany({
       where: { roomId: room.roomId, revision: base },
       data: {
         revision: room.revision,
@@ -67,7 +66,7 @@ export class PgRoomStorage {
   }
 
   async delete(roomId: string): Promise<void> {
-    await prisma.room.deleteMany({ where: { roomId } });
+    await roomDb().room.deleteMany({ where: { roomId } });
   }
 
   /**
@@ -75,7 +74,7 @@ export class PgRoomStorage {
    * 供 `setSettledFlag` 这类 W0 钉住「不 bump revision」的写回使用；冲突返回 false。
    */
   async writeBack(room: RoomState): Promise<boolean> {
-    const res = await prisma.room.updateMany({
+    const res = await roomDb().room.updateMany({
       where: { roomId: room.roomId, revision: room.revision },
       data: { data: JSON.stringify(room) },
     });
@@ -84,18 +83,18 @@ export class PgRoomStorage {
 
   /** 全量加载（sweep 用）；副本隔离，调用方改了不影响存储。 */
   async all(): Promise<RoomState[]> {
-    const rows = await prisma.room.findMany();
+    const rows = await roomDb().room.findMany();
     return rows.map((r) => JSON.parse(r.data) as RoomState);
   }
 
   async getQuota(key: string): Promise<QuotaUsage> {
-    const row = await prisma.roomQuota.findUnique({ where: { key } });
+    const row = await roomDb().roomQuota.findUnique({ where: { key } });
     if (!row) return emptyUsage();
     return { held: row.held, committed: row.committed };
   }
 
   async setQuota(key: string, usage: QuotaUsage): Promise<void> {
-    await prisma.roomQuota.upsert({
+    await roomDb().roomQuota.upsert({
       where: { key },
       create: { key, held: usage.held, committed: usage.committed },
       update: { held: usage.held, committed: usage.committed },
@@ -103,7 +102,7 @@ export class PgRoomStorage {
   }
 
   async quotaKeys(): Promise<string[]> {
-    const rows = await prisma.roomQuota.findMany({ select: { key: true } });
+    const rows = await roomDb().roomQuota.findMany({ select: { key: true } });
     return rows.map((r) => r.key);
   }
 }

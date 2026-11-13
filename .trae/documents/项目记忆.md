@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅。下一步 **W6.2（#183 事务边界）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52 VERIFY_OK）。下一步 **W6.3（#184 DB 计数 + 结算二次 count）**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -33,6 +33,7 @@
 
 ## 5. 本机环境（PG / Redis）
 - **PG = Windows 服务 `PostgreSQL16`**（账户 `NT AUTHORITY\NetworkService` 绕开 PG16 admin 检查，`StartType=Automatic`，127.0.0.1:5432，`pg_ctl.exe runservice -N PostgreSQL16 -D E:\Six\pg-runtime\data -w -o "-p 5432"`），会话结束不回收。管理命令在**本机**跑：`Start-Service PostgreSQL16` / `sc.exe start` / `net start`；⚠️ PowerShell 里 `sc` 是 `Set-Content` 别名，**必须写 `sc.exe`**。
+- **环境启动约定（杰哥 2026-11-13 定，跨机器通用）**：PG / Redis 由杰哥双击 `D:/Six/start-mpk-runtime.bat`（仓库外、幂等：已运行则 skip）启动；tx 开工前只探活（5432 / 6379、`health`），发现缺失**明确告知杰哥去启动**，不要自行注册系统服务或拉前台进程顶替。脚本旧版会打印老实例的 `PONG` 造成「假生效」，已加固为逐项 `OK/FAILED`。
 - 沙箱与本机**同一网络命名空间**（实测），"本机 PG → 沙箱后端"走得通；`postgres.exe` 直启被 admin 检查拒（exit 1）。
 - Redis `E:/Six/redis-runtime/redis-server.exe --port 6379` 后台起（会话结束被回收），`redis-cli PING` 判活。后端 `.env`：`DATABASE_URL=postgresql://mpk@127.0.0.1:5432/monsterpk`、`REDIS_URL=redis://127.0.0.1:6379`、`PORT=3001`；health 报 `lock/sweep/broadcast` 模式。
 
@@ -49,7 +50,7 @@
 ## 8. W6 路线（房间+quota 共享存储迁移，评级 L；#181~#188）
 - #181 W6.0 数据模型与迁移 ✅（`Room`+`RoomQuotaDaily`，迁移 `20261113020739_w6_room_storage`）
 - #182 W6.1 RoomStorage 异步化 + PG 行版本 CAS ✅（零行为变更，bug_log §60）
-- #183 W6.2 room+quota+结算/发奖 收进同一事务边界
+- #183 W6.2 room+quota+结算/发奖 收进同一事务边界 ✅（`lib/roomUnitOfWork.ts`：`AsyncLocalStorage` 事务客户端 `roomDb()` + 提交后副作用 `onRoomCommit()` + `withRoomUnit()`=房间锁+事务；结算改事务内 await、失败整包回滚；四类存储层共用 tx；`w62RoomUnit.test.ts` 8 例 + `e2e:w62` 13 项）
 - #184 W6.3 房间 `committed` 改 DB 计数 + 结算事务二次 count
 - #185 W6.4 quota 租约 token + 幂等释放 + TTL≥30min + 补齐 10 处 release 分支
 - #186 W6.5 序列化 3 障碍修复（pvpSettled/coopSettled/contributions/optional）

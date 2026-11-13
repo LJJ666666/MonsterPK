@@ -1483,5 +1483,16 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **新机交代**：`~/.workbuddy/app/app-config.json` 的 `personalization` 不随 git（项目内搜该指令全文 0 命中），也未证实随账号同步 → 家里那台电脑按「要粘一次」准备；HANDOFF §4.1 原样收录四条指令文案，`scripts/check_home_env.py` 加只读检查、缺则 `[WARN]` 指向 §4.1，§5 话术第 3 条亦补确认步骤。
 - **别再往 md 里堆同款文字**：加文字不解决触发；真要硬拦截得做成执行面脚本（如 `scripts/push.mjs`），本轮未做。
 
+## 64. P5-1 W6.2 收官：room + quota + 结算写档 + 发奖同一事务边界（2026-11-13）
+
+- **工单**：#183，实施权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md` §3.6 / §4.2「W6 房间 + quota」第 1 条。W6.1 已把 `RoomStorage` 异步化 + PG 行版本 CAS，但 `bump()`（room 行）、`finishQuota()`（RoomQuota 行）、`commitState()`（Save 行）、`grantCoopClearReward()`（CoopRewardGrant 行）仍是**四次各自自动提交**；`maybeSettlePvp/Coop` 还是 `void import(...).then(...)` fire-and-forget，结算写档根本不在房间推进的调用栈里。崩在中间即留下「房间 settled 但奖励没发」或「quota 扣了但房间没结算」。
+- **做法（工程实现层，零产品语义变更）**：新增 `lib/roomUnitOfWork.ts` —— `AsyncLocalStorage` 保存当前 `prisma.$transaction` 的 tx 客户端，`roomDb()` 让四个存储层共用它；`onRoomCommit()` 把内存权威态 apply 与 WS 广播挂到**提交成功后**（事务回滚时钩子全部丢弃）；`withRoomUnit(roomId)` = 房间锁 + 同一事务，嵌套复用外层事务，事务 `maxWait=5s / timeout=15s`。
+- **四个存储层接入**：`pgRoomStorage.ts`（`create` 改 `createMany + skipDuplicates`，避免事务内 P2002 把 PG 事务置为 aborted）、`session.ts` 的 CAS store、`saveRead.ts`（**事务内必须读 DB**：内存 apply 已延后，读内存会拿旧档覆盖同事务前一次写，典型场景是共斗「回写队伍」后再「发通关奖励」）、`coopReward.ts`（事务内 `commitState` 失败必须冒泡让整包回滚，原来 catch 后手删占位记录会吞错）。
+- **结算链 await 化**：`maybeSettlePvp/Coop` 改 `await import()` + `await settle*Room()`，失败冒泡 → 事务回滚 → `setSettledFlag` 与 quota 一起撤销 → Redis 长期 claim 释放、下轮 tick 可重试；`settleCoopRoom` 两个 catch 与 `grantOne` 的 catch 在 `isRoomUnitActive()` 时一律 throw。`publishRoom` 的 `room.state` 广播也改为 after-commit；`realtime.ts` 的掉线 / 重连多房写同样纳入工作单元。`tickRoom` / `sweepRooms` 对事务失败记日志降级，不把惰性读打成 500、不中断其它房间的 sweep。
+- **锁序复核**：`withRoomUnit` 持 `room:<roomId>`，`settleCoopRoom` 内层取账号锁；不同 key 在 `LockProvider` 里是独立队列（Redis `SET NX` 同理），不构成 room→account / account→room 死锁；`applyCoopCreate` 原本 account→room 的顺序保持不变。
+- **验收**：`w62RoomUnit.test.ts` 8 例（fake runner 零 IO：同一事务客户端、提交后才跑钩子、失败钩子全丢、嵌套不开新事务、四类读写共用客户端、`skipDuplicates`、`withRoomUnit` 串行）；`e2e_w62_room_tx.mjs` 13 项（真 PG：建房 + quota hold 原子可见、并发双意图只推进 `turn=2`、提交后才广播、nonce 重放无半写、重复 settle 只扣一次）。注册 `e2e:w62` + `STAGES`/`GROUPS.e2e` 两处 + `doc_check` 4 条断言。全量 **52/52 `VERIFY_OK`**、后端单测 **461**、前端 133、14 套 375px 冒烟全绿。
+- **首轮红（已修）**：`doc_check` 的 W4 断言硬绑 `room.ts` 里的 `withRoomLock` 字符串，W6.2 换成 `withRoomUnit` 后误报；按文档解耦口径改为查 `roomUnitOfWork.ts` 的 `withRoomLock`（锁职责未变）+ `room.ts` 的 `withRoomUnit`，不绑旧函数名。全量 51/52 → 修断言后 52/52。
+- **边界（留给后续工单）**：`committed` 仍是 `RoomQuota` 行的 read-modify-write upsert，并发不超卖由 **#184 W6.3 DB 计数 + 结算二次 count** 解决；quota 租约 token / TTL / release 全分支是 **#185 W6.4**；序列化 3 障碍 **#186 W6.5**；裁剪视图与 revision 区分 **#187**；双实例 E2E **#188**。**W6.2 不宣称并发不超卖**，E2E 也刻意不做该断言（避免超前验收）。
+
 
 

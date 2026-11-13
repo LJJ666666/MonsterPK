@@ -15,7 +15,8 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { withRoomLock, withSlotLock, slotLockKey } from '../lib/slotLock';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
+import { withRoomUnit } from '../lib/roomUnitOfWork';
 import { createPvpState } from '../game/pvp';
 import { rooms } from './sessionBus';
 import { publishRoom } from './room';
@@ -94,7 +95,7 @@ export async function applyPvpCreate(params: {
 
   return withSlotLock(slotLockKey(params.userId), async () => {
     const roomId = `pvp_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
-    return withRoomLock(roomId, async () => {
+    return withRoomUnit(roomId, async () => {
       if (!params.digest || !params.connectionId) {
         return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
       }
@@ -122,7 +123,7 @@ export async function applyPvpJoin(params: {
   now?: number;
 }): Promise<PvpResult<{ room: any }>> {
   const now = params.now ?? Date.now();
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
     }

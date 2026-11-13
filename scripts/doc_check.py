@@ -909,7 +909,9 @@ checks = [
      and "initializeSweepLeader" in text(ROOT / "backend/src/index.ts")
      and "getSweepDiagnostics" in text(ROOT / "backend/src/index.ts")
      and "sessionVersion" in text(ROOT / "backend/src/lib/wsRegistry.ts")
-     and "withRoomLock" in text(ROOT / "backend/src/modules/room.ts")),
+     # W6.2 起房间写入统一走 withRoomUnit；房间锁本身仍由 slotLock 的 withRoomLock 提供。
+     and "withRoomUnit" in text(ROOT / "backend/src/modules/room.ts")
+     and "withRoomLock" in text(ROOT / "backend/src/lib/roomUnitOfWork.ts")),
     ("W4：确定性单测 / 真 Redis E2E / verify 三处注册齐全",
      (ROOT / "backend/tests/w4SweepLeader.test.ts").exists()
      and (ROOT / "backend/tests/e2e_w4_sweep.mjs").exists()
@@ -927,6 +929,37 @@ checks = [
      and "50/50" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
      and "W4 ✅ 2026-11-12" in text(ROOT / ".trae/documents/未来规划与技术债_2026-11-07.md")
      and "P5-1 W4 ✅" in memory_text),
+
+    # ─── W6.2（#183）：room + quota + 结算写档 + 发奖同一事务边界 ───
+    ("W6.2：工作单元 / 事务客户端 / 提交后副作用落地",
+     (ROOT / "backend/src/lib/roomUnitOfWork.ts").exists()
+     and all(k in text(ROOT / "backend/src/lib/roomUnitOfWork.ts") for k in (
+         "AsyncLocalStorage", "roomDb", "onRoomCommit", "runInRoomUnit",
+         "withRoomUnit", "withRoomLock", "$transaction"))
+     and all("roomDb()" in text(ROOT / f"backend/src/{p}") for p in (
+         "lib/pgRoomStorage.ts", "modules/session.ts",
+         "modules/saveRead.ts", "modules/coopReward.ts"))
+     and "onRoomCommit" in text(ROOT / "backend/src/modules/session.ts")
+     and "onRoomCommit" in text(ROOT / "backend/src/modules/room.ts")
+     and "skipDuplicates" in text(ROOT / "backend/src/lib/pgRoomStorage.ts")),
+    ("W6.2：结算改为事务内 await，杜绝 fire-and-forget 脱离边界",
+     "await import('./coop')" in text(ROOT / "backend/src/modules/room.ts")
+     and "await import('./pvp')" in text(ROOT / "backend/src/modules/room.ts")
+     and "isRoomUnitActive()" in text(ROOT / "backend/src/modules/coop.ts")
+     and "isRoomUnitActive()" in text(ROOT / "backend/src/modules/coopReward.ts")),
+    ("W6.2：确定性单测 / 真 PG E2E / verify 两处注册齐全",
+     (ROOT / "backend/tests/w62RoomUnit.test.ts").exists()
+     and (ROOT / "backend/tests/e2e_w62_room_tx.mjs").exists()
+     and "E2E_W62_OK" in text(ROOT / "backend/tests/e2e_w62_room_tx.mjs")
+     and "e2e:w62" in text(ROOT / "backend/package.json")
+     and "{ id: 'e2e:w62'" in text(ROOT / "scripts/verify.mjs")
+     and "'e2e:w62'," in text(ROOT / "scripts/verify.mjs")),
+    ("bug_log §64 / 任务表 / 定稿 / MEMORY 记录 W6.2 收官",
+     "## 64." in bug_text
+     and "W6.2 收官" in bug_text
+     and "P5-1 W6.2 收官" in task_text
+     and "W6.2 ✅ 2026-11-13" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
+     and "W6.2 事务边界" in memory_text),
 ]
 
 for name, ok, *detail in checks:

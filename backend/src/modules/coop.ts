@@ -4,7 +4,7 @@
  * 权威模型（后端规范 §30）：
  *  - **不新增状态域**：六房态挂房间态（owner key = `roomId`），复用 P4-2b 的
  *    掉线 / 超时 / 托管 / 座位 / quota 三段式；`mode='coop'` 沿用既有内核。
- *  - **每房敌人 HP 是房间真值**：`withRoomLock()` 串行，全员交齐才 `advanceTurn` 一次，
+ *  - **每房敌人 HP 是房间真值**：`withRoomUnit()` 串行，全员交齐才 `advanceTurn` 一次，
  *    一次推进内遍历所有 `fighting` 房间各结算一回合，随后广播 `room.state` 全量快照。
  *  - 战斗过程走 `room.action` / `POST /api/room/:roomId/action` 既有意图通道
  *    （`enter:<0..5>` / `move:` / `switch:` / `idle`），本模块只负责「建房 / 加入 / 结算写档」。
@@ -17,7 +17,8 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { withRoomLock, withSlotLock, slotLockKey } from '../lib/slotLock';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
+import { withRoomUnit, isRoomUnitActive } from '../lib/roomUnitOfWork';
 import { createCoopState, contributionOf, COOP_DAILY_CLEAR_LIMIT } from '../game/coop';
 import { getBoss } from '../game/boss';
 import { periodKeyOf } from '../game/period';
@@ -121,7 +122,7 @@ export async function applyCoopCreate(params: {
 
   return withSlotLock(slotLockKey(params.userId), async () => {
     const roomId = `coop_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
-    return withRoomLock(roomId, async () => {
+    return withRoomUnit(roomId, async () => {
       if (!params.digest || !params.connectionId) {
         return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
       }
@@ -150,7 +151,7 @@ export async function applyCoopJoin(params: {
   now?: number;
 }): Promise<CoopApiResult<{ room: any }>> {
   const now = params.now ?? Date.now();
-  return withRoomLock(params.roomId, async () => {
+  return withRoomUnit(params.roomId, async () => {
     if (!params.digest || !params.connectionId) {
       return fail('ROOM_WS_REQUIRED', '进入房间需要实时通道在线', 409);
     }
@@ -244,6 +245,9 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
         });
       });
     } catch (e) {
+      // W6.2：事务内失败必须冒泡让整个工作单元回滚；吞掉会留下「房间已结算、
+      // 某一成员档没回写」的半状态。事务外保持「只记日志、不阻断响应」原口径。
+      if (isRoomUnitActive()) throw e;
       console.warn(`[F16] 回写队伍状态失败 room=${roomId} seat=${seat}:`, e);
     }
 
@@ -257,6 +261,7 @@ export async function settleCoopRoom(roomId: string): Promise<void> {
           result,
         });
       } catch (e) {
+        if (isRoomUnitActive()) throw e;
         console.warn(`[F16] 通关奖励发放失败 room=${roomId} seat=${seat}:`, e);
       }
     }

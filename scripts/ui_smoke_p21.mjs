@@ -52,7 +52,13 @@ function probeHtml(route) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body data-probe="PENDING"><iframe id="app" src="${route}" style="width:375px;height:812px;border:0"></iframe><script>
   var f=document.getElementById('app');
   f.addEventListener('load',function(){
-    setTimeout(function(){
+    // P5：本地存档删除后，页面要先 GET /api/save 才渲染，WS 握手与首条
+    // session.state 快照都排在这之后。--virtual-time-budget 会把 setTimeout
+    // 瞬间快进（真实时间几乎不流逝），原来固定 4000ms 的等待因此不可靠。
+    // 改成「边等边挂真实请求」：每个请求让 Chromium 的 pauseIfNetworkFetchesPending
+    // 生效，给真实网络留落地时间，采样语义（等页面稳定）保持不变。
+    var beat = 0;
+    function sample(){
       var out={ok:false};
       try{
         var d=f.contentDocument;
@@ -60,7 +66,7 @@ function probeHtml(route) {
         var root=d.getElementById('root');
         out={scrollWidth:d.documentElement.scrollWidth,textLen:t.length,
              mounted:!!(root&&root.children.length>0),
-             hasAccount:t.indexOf('账号')>=0,hasSync:t.indexOf('同步')>=0,
+             hasAccount:t.indexOf('账号')>=0,hasSync:t.indexOf('提交')>=0,
              hasWs:t.indexOf('实时通道')>=0,
              wsOnline:t.indexOf('实时通道已连接')>=0,
              wsUnauth:t.indexOf('实时连接未授权')>=0,
@@ -70,7 +76,14 @@ function probeHtml(route) {
              title:d.title};
       }catch(e){out.error=String(e)}
       document.body.setAttribute('data-probe',encodeURIComponent(JSON.stringify(out)));
-    },4000);
+    }
+    function tick(){
+      try{ fetch('http://localhost:3001/api/health?t='+Date.now(),{cache:'no-store'}).catch(function(){}); }catch(e){}
+      beat++;
+      if(beat<60) return setTimeout(tick,50);
+      sample();
+    }
+    tick();
   });
   </script></body></html>`;
 }
@@ -110,10 +123,8 @@ async function main() {
   });
   check('建立云端基线存档', putRes.status === 200, String(putRes.status));
 
-  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
-    localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
     </script></body></html>`, 'utf8');
 
   const seedDom = runEdge(`${BASE}/_p21_seed.html`);
@@ -128,7 +139,7 @@ async function main() {
     check(`${label} React 已挂载且非白屏`, p.mounted === true && p.textLen > 50, JSON.stringify(p));
     check(`${label} 375px 无横向溢出`, Number.isFinite(p.scrollWidth) && p.scrollWidth <= 375, JSON.stringify(p));
     if (label === 'Start 首页') {
-      check('Start 显示账号条与同步状态行', p.hasAccount === true && p.hasSync === true, JSON.stringify(p));
+      check('Start 显示账号条与提交状态行', p.hasAccount === true && p.hasSync === true, JSON.stringify(p));
       check('Start 显示实时通道状态行', p.hasWs === true, JSON.stringify(p));
       check('Start 实时通道已连接（WS 握手并收到 hello）',
         p.wsOnline === true && p.wsUnauth === false, JSON.stringify(p));

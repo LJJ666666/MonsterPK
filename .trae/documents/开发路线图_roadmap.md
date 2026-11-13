@@ -9,7 +9,7 @@
 | ---- | --------------------------------------------------------- |
 | 核心循环 | 战斗 → 捕获 → 养成 → 收集 → 离线挂机 已闭环                              |
 | 内容规模 | 幻兽 40 / 技能 294 / 道具 22 / 地点 7 / 野外区域 14 / 进化链 22          |
-| 存档   | localStorage 自动存档（3 槽）+ 导入导出 + 版本迁移                       |
+| 存档   | 服务端唯一真值（单档 + 行版本 CAS）；本地不保留任何副本（2026-11-13 起）              |
 | 移动端  | 移动优先布局，Capacitor/Android 目录与打包文档齐备                        |
 | 性能   | 冷启动 FCP ≈ 1.05 s（4x 降速 + Fast 3G），交互 < 50 ms，无长任务（详见性能基线） |
 | 主要短板 | 缺少阶段目标（图鉴里程碑）、训练师战与携带道具，内容距 200 只仍有较大缺口                   |
@@ -20,10 +20,9 @@
 
 ### 1) 存档与数据驱动
 
-- [x] 自动存档（localStorage）+ 导入/导出：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)、[Start.tsx](file:///workspace/src/pages/Start.tsx)
+- [x] 自动存档：已演进为**服务端唯一真值**（`GET/PUT /api/save` + 行版本 CAS）；早年的 localStorage 存档与 3 槽位已于 2026-11-13 删除
 - [x] 核心数据类型：幻兽/技能/道具/战斗/地点 [types.ts](file:///workspace/src/game/types.ts)
 - [x] 静态内容库：幻兽、技能、主题遭遇、道具、地点 [data.ts](file:///workspace/src/game/data.ts)
-- [x] 三存档槽位
 
 ### 2) 回合制战斗
 
@@ -90,7 +89,7 @@
 
 > ⚠️ **编号体系说明（2026-11-04）**：本节的 `P0 / P1 / P2` 是**单机内容开发**的阶段编号（图鉴里程碑 / 内容扩充 / 对手与长期目标），与联网改造任务表 `开发任务优先级_2026-11-04.md` 的 `P0~P5`（联网地基 / 服务端权威 / 实时传输 / 服务端模拟 / 多人玩法 / 上线去本地）**是两套完全不同的体系，不要混用**。  
 > **联网改造的排期与优先级以任务表为唯一准绳**；本节仅描述内容侧待办。  
-> 另：杰哥已拍板最终形态为**服务端权威 + 实时多人同玩**，本地存档为过渡态，将在服务端权威 + 实时就绪后去除（见任务表「北极星方向」）。因此本节涉及存档/数值的内容待办，实施时需按「服务端权威」口径重新评估落点（数值与随机判定应放服务端）。
+> 另：杰哥已拍板最终形态为**服务端权威 + 实时多人同玩**，本地存档为过渡态。**该过渡已于 2026-11-13 完成**——本地存档（persist / 自动上传 / 离线队列 / LWW 冲突策略 / rebase）全部删除，存档只有服务端一份真值。本节涉及存档/数值的待办仍须按「服务端权威」口径评估落点（数值与随机判定必须在服务端）。
 
 ### P0：让核心循环产生策略与目标
 
@@ -119,7 +118,7 @@
 
 ### 🐞 已知遗留缺口（本仓库已落地功能相关的待修项）
 
-- [ ] **存档版本迁移脱钩**：`SAVE_VERSION` 仍停在 `0.1.0`，与 persist `version=9` 已脱钩；新增持久化字段需**同时递增两者**并补 migrate 分支：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)
+- [x] ~~**存档版本迁移脱钩**~~：已随本地存档删除而消失（2026-11-13）。现由 `SCHEMA_VERSION`（前端）与 `EXPECTED_SAVE_VERSION`（后端）两处常量对齐，前端不再有 migrate。
 - [ ] **道具进化全链路未完成**：`EvolutionCondition` 已支持 `item`，进化石已在商店售卖，但 `useItemOutsideBattle` 只处理 `kind === "heal"`，进化石买了用不了：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)、[EvolutionModal.tsx](file:///workspace/src/components/EvolutionModal.tsx)
 - [ ] **关键道具无效**：`amulet_coin`（金钱翻倍）、`exp_share`（经验分享）已在商店售卖但无任何效果代码：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)
 
@@ -171,13 +170,13 @@
 
 ## 🌐 联网后端（2026-11-03 新增；2026-11-04 更新）
 
-杰哥拍板：App 框架保持 React+Capacitor 不动；联网走**自建 Node+TS 后端**（非 Supabase）。**2026-11-04 追加拍板：最终形态 = 服务端权威 + 实时多人同玩**（WebSocket 实时传输，战斗/捕获/经济由服务端结算，客户端只发意图、收状态）；本地存档为过渡态，待服务端权威 + 实时就绪后去除，仅保留登录态/设置等本地非游戏状态。
+杰哥拍板：App 框架保持 React+Capacitor 不动；联网走**自建 Node+TS 后端**（非 Supabase）。**2026-11-04 追加拍板：最终形态 = 服务端权威 + 实时多人同玩**（WebSocket 实时传输，战斗/捕获/经济由服务端结算，客户端只发意图、收状态）；本地存档为过渡态，**已于 2026-11-13 移除**（现在只有登录态 / 主题等非游戏状态留在本地）。
 
 - **技术栈**：Fastify 4 + @fastify/jwt + @fastify/cors + Prisma 5 + **Postgres 16（P5-1 W1 起）** + bcryptjs + zod + tsx；独立目录 `backend/`，与前端解耦。
 - **数据模型**：`User`(用户名唯一 + `role`/`bannedAt`/`banReason`) + `Save`(userId+slot 复合唯一，data 存完整存档 JSON、`schemaVersion`、`clientId`、`updatedAt`；每用户 3 槽) + `BanRecord`(封号审计)。迁移 `20261105101951_add_account_moderation` 已应用。
 - **API**：`POST /api/auth/register|login`（返回 JWT，含 `exp`；已封号 403）、`GET /api/auth/me`（返回 `isAdmin`/`banned`）、`GET|PUT /api/save?slot=1|2|3`（PUT 做结构+数值校验 → 风控决策 → 服务端时钟钳制 → upsert）、`GET /api/health`。
 - **风控（P1-1 / P1-1b 已完成）**：`saveValidator.ts` 校验数值契约、`antiCheat.ts` 分 `allow/reject/ban`（**改档即封号 + 弹窗登出**，管理员放行测试菜单数据，格式/旧档问题只 400 不封号）、`serverClock.ts` 把未来时间戳钳制为服务端时间（**改系统时间不生效、不封号**）；管理员由 `ADMIN_USERNAMES` 或 `User.role` 服务端判定，用 `npm run admin -- grant <用户名>` 授权。
-- **前端现状**（对核心 store 零侵入）：`src/lib/api.ts` / `auth.ts` / `pages/Auth.tsx`（路由守卫强制登录）；**P0-3 已改自动云同步**（`lib/sync.ts` 防抖上传 + 离线队列 + 登录按冲突策略恢复），**P0-5 已移除手动备份 UI**；`<BanGate/>` 全局封号弹窗、`useIsAdmin()` 控制测试菜单显隐。**注意：这套 localStorage 自动同步是过渡桥接方案，P3 客户端变瘦终端后退役。**
+- **前端现状**（对核心 store 零侵入）：`src/lib/api.ts` / `auth.ts` / `pages/Auth.tsx`（路由守卫强制登录）；**P0-3 那套 localStorage 自动云同步已于 2026-11-13 整体删除**（现由 `saveBootstrap` + `intents` 提交取代），**P0-5 已移除手动备份 UI**；`<BanGate/>` 全局封号弹窗、`useIsAdmin()` 控制测试菜单显隐。
 - **启动联调**：`cd backend && npm install && npm run dev`（端口 3001），前端 `npm run dev`（5173）；`npm run admin -- grant <用户名>` 授权管理员；CORS 已放行 5173；register→me→PUT→GET 端到端已验证通过。
 - **当前缺口与下一步**：数值校验已能挡「明显改档」，但**关键随机（捕获/经济/挂机）仍在客户端**，GG 修改器在合法区间内微调、加速器改节奏、把系统时间往过去调刷资源、外挂伪造结算都还拦不住；也无 WebSocket 实时层。**下一步首推 P1-2 关键随机与结算上移服务端**（服务端时钟 + RNG + 结算），P3 服务端模拟才彻底根治。详见任务表「六、反作弊与风控需求」。
 - 详见项目记忆 `.workbuddy/memory/MEMORY.md` 第 8、9、10 节。

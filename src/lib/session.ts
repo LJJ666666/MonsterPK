@@ -1,16 +1,16 @@
 /**
- * P2-2 前端在线权威态接入：收服务端快照 → 幂等应用 → 抑制回传 → 供 UI 展示。
+ * P2-2 前端在线权威态接入：收服务端快照 → 幂等应用 → 供 UI 展示。
  *
  * 约束：
- *  - 只应用 revision 严格更新的快照；本端 PUT 成功后已记下 revision，
- *    所以自己的回显不会被重复应用（也不会触发自动同步回环）；
+ *  - 只应用 revision 严格更新的快照；本端提交成功后已记下 revision，
+ *    所以自己的回显不会被重复应用；
  *  - 意图在途（发意图 → commitIntent）期间的快照先暂存，结束后再补应用；
- *  - 应用快照会写 store，必须先调 suppressNextUpload() 再 importSaveJson()；
- *  - 本模块不持有游戏真值，P3 瘦终端化后仍可复用。
+ *  - 应用快照就是写 store：P5 起 store 只是服务端真值的渲染副本，没有本地存档，
+ *    写完也没有任何东西需要「回传」，早年那个 suppressNextUpload 已随自动上传一起删除；
+ *  - 本模块不持有游戏真值。
  */
 import { useEffect, useState } from "react";
 import { useGameStore } from "@/stores/useGameStore";
-import { suppressNextUpload } from "./sync";
 import {
   SESSION_STATE_EVENT, type SessionStateMessage,
   shouldApplySnapshot, noteRevision, isIntentInFlight, deferSnapshot,
@@ -68,8 +68,6 @@ export function handleSessionState(m: SessionStateMessage): ApplyOutcome {
 
 function applySnapshot(m: SessionStateMessage): ApplyOutcome {
   if (!shouldApplySnapshot(m)) return "ignored";
-  // zustand.subscribe 同步触发；先抑制再写 store，否则会把远端快照又 PUT 回去。
-  suppressNextUpload();
   // P3-1c：权威快照不是换存档，不能打断正在进行的战斗。
   // 战斗态本来就不进存档，结算时快照到达恰恰是战斗结束的那一刻——
   // 若在这里清 battle，Arena 会直接从结算画面跳回「尚未开始遭遇」。

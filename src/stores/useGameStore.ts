@@ -1,8 +1,6 @@
 import { create } from "zustand";
-import { persist, StateStorage, createJSONStorage } from "zustand/middleware";
 import { ITEM_SPECS, STARTERS } from "@/game/data";
 import type { BattleState, EncounterTheme, ItemId, SaveData, LocationId, MoveId } from "@/game/types";
-import { SCHEMA_VERSION, migrateSaveState } from "@/stores/saveVersion";
 import type { IntentResult } from "@/lib/intents";
 import { battleApi, canUseServerBattle, toBattleState, toFailure, type ActionInput, type ServerBattleView } from "@/lib/battleApi";
 import { api } from "@/lib/api";
@@ -70,13 +68,8 @@ async function runServerBattleAction(
 /** 结算后主动拉一次存档（WS 快照的 HTTP 兜底）。失败静默：下一场开局仍以服务端为准。 */
 async function refreshSaveFromServer(): Promise<void> {
   try {
-    const [{ api }, { suppressNextUpload }] = await Promise.all([
-      import("@/lib/api"),
-      import("@/lib/sync"),
-    ]);
     const cloud = await api.getSave();
     if (!cloud?.data) return;
-    suppressNextUpload();
     useGameStore.getState().importSaveJson(cloud.data, { keepBattle: true });
   } catch {
     /* 拉不到就等 WS 快照 */
@@ -84,15 +77,12 @@ async function refreshSaveFromServer(): Promise<void> {
 }
 
 /**
- * P3-2：把服务端写操作返回的整包存档应用回本地。
+ * P3-2：把服务端写操作返回的整包存档应用回 store。
  *
- * 为什么不走 PUT 校验链路：服务端已经在 `commitState` 里落库并广播了自己的权威态，
- * 本地这份只是渲染副本。先 `suppressNextUpload()` 抑制一次自动上传，避免刚写完
- * 又原样传回去（那会多一次 revision 和一次广播）。
+ * 存档没有本地副本（服务端是唯一真值），这里只是把权威快照贴上来给 UI 渲染，
+ * 不存在「写完再原样回传一次」的问题，也就不需要再抑制任何上传。
  */
 async function applyServerSave(data: string): Promise<void> {
-  const { suppressNextUpload } = await import("@/lib/sync");
-  suppressNextUpload();
   useGameStore.getState().importSaveJson(data, { keepBattle: true });
 }
 
@@ -121,7 +111,6 @@ type GameState = {
     playerName: string,
     starterSpecId: (typeof STARTERS)[number],
   ) => Promise<{ ok: boolean; reason?: string }>;
-  resetSave: () => void;
   travelTo: (locationId: LocationId) => Promise<{ ok: boolean; reason?: string }>;
   importSaveJson: (
     json: string,
@@ -197,43 +186,15 @@ function pushLog(battle: BattleState, lines: string[]) {
  *
  * 2026-11-07（P3-2）：本地「改存档」的业务逻辑也全部删除——治疗、战斗外道具、
  * 进化、学招、队伍整理、移动都改调 `/api/game/*`，由服务端判定并写档。
- * 现在前端只剩三类写本地状态的入口：新建/导入存档（rebase 明确授权）、
- * 服务端快照应用（importSaveJson）、测试菜单开关（纯 UI 标记，随开局上报给服务端判定）。
+ *
+ * 2026-11-13（P5）：**本地存档彻底删除**。store 不再挂 persist，也不再往
+ * localStorage 写任何存档副本——`save` 只是服务端权威快照的渲染副本，
+ * 刷新后由 `saveBootstrap` 从 `GET /api/save` 拉回。
+ * 现在写 store 的只剩两类入口：服务端返回/广播的权威快照（importSaveJson）、
+ * 测试菜单开关（纯 UI 标记，随开局上报给服务端判定）。
  */
 
-const customStorage: StateStorage = {
-  getItem: async (name: string): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/save');
-      if (res.ok) {
-        const text = await res.text();
-        return text || null;
-      }
-    } catch (e) {
-      console.warn('Failed to fetch remote save, falling back to local', e);
-    }
-    return localStorage.getItem(name);
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    localStorage.setItem(name, value);
-    try {
-      await fetch('/api/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value })
-      });
-    } catch (e) {
-      console.warn('Failed to sync save to server', e);
-    }
-  },
-  removeItem: async (name: string): Promise<void> => {
-    localStorage.removeItem(name);
-  },
-};
-
-export const useGameStore = create<GameState>()(
-  persist(
-    (set, get) => ({
+export const useGameStore = create<GameState>()((set, get) => ({
       save: null,
       battle: null,
       
@@ -265,10 +226,6 @@ export const useGameStore = create<GameState>()(
         if (!res.ok) return { ok: false, reason: "reason" in res ? res.reason : "创建存档失败" };
         await applyServerSave(res.data);
         return { ok: true };
-      },
-
-      resetSave: () => {
-        set({ save: null, battle: null });
       },
 
       travelTo: async (locationId) => {
@@ -607,19 +564,5 @@ export const useGameStore = create<GameState>()(
           set({ save: { ...save, inventory, lastSavedAt: nowIso() } });
         });
       }
-    }),
-    {
-      name: "beast-journal-save",
-      storage: createJSONStorage(() => customStorage),
-      partialize: (s) => ({ save: s.save }),
-      version: SCHEMA_VERSION,
-      migrate: (persistedState: any, version: number) => migrateSaveState(persistedState, version),
-      // 与 migrateSaveState 的输出形状对齐：无论历史数据带了多少旧字段，只把单档 save 合进当前状态。
-      merge: (persistedState: any, currentState: any) => ({
-        ...currentState,
-        save: persistedState?.save ?? null,
-      }),
-    }
-  )
-);
+    }));
 

@@ -189,7 +189,7 @@ model Save {
 
 - `saveValidator.ts` **不再**因「时间戳晚于服务器」产生 `TIMESTAMP_FUTURE` 违规；只检查时间格式是否可解析。
 - `serverClock.ts` 把 `lastSavedAt` / `idle.startedAt` 中晚于 `now + 5min` 的值改写为服务器时间，
-  再落库。效果：改时间拿不到额外收益，也无法凭未来时间永远赢 P0-3 的 last-write-wins 冲突决策。
+  再落库。效果：改时间拿不到额外收益，也抢不到更「新」的存档时间戳。
 - 全程 `200` 放行、不封号、不写告警，只写一条 `save_clock_clamped` info 日志留痕。
 - ⚠️ **边界**：把时间往「过去」调以刷挂机收益，客户端写 `startedAt` 时服务端无从判断，
   必须等 **P1-2 把挂机结算上移服务端**（服务端自己记录 `startedAt`、按服务端时钟算 delta）才能根治。
@@ -302,16 +302,16 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 
 - 前端 `src/lib/api.ts` 的 `API_BASE` 默认 `http://localhost:3001`，生产用 `VITE_API_BASE` 覆盖。
 - 前端 `src/lib/auth.ts` 只做 token 的本地解码/有效性判断（不校验签名，签名由后端 JWT 守卫负责）。
-- 存档同步为**自动**（P0-3：`src/lib/sync.ts` 防抖上传 + 离线队列 + 登录按冲突策略恢复），手动备份 UI 已于 P0-5 移除。**该方案是过渡桥接**，P3 客户端变瘦终端后退役。
-- **P1-1 联动**：`src/lib/syncErrors.ts` 把 4xx（除 429）判为 permanent，`sync.ts` 三处上传路径
-  不再把被拒档放进离线队列；`Start.tsx` error 相位展示后端中文原因，窄屏自动换行。
+- **存档只有服务端一份真值**（P5，2026-11-13 起）：前端 `zustand/persist` 本地副本、防抖自动上传、离线重传队列、登录时 last-write-wins 冲突恢复、rebase 授权标记**全部删除**。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
+- `src/lib/sync.ts` 现在只做三件事：探测写入基线版本（`ensureWriteRevision`）、把服务端裁定结果按 nonce 提交（`commitIntent`）、409 就地切到服务端快照（`recoverFromConflict`）。**没有自动上传，也没有「重传」概念**——失败如实报错，不排队。
+- **P1-1 联动**：`src/lib/syncErrors.ts` 把 4xx（除 429）判为 permanent；`Start.tsx` error 相位展示后端中文原因，窄屏自动换行。
 - **P1-1b 联动**：
   - `api.ts` 遇 `403 + code=ACCOUNT_BANNED` 广播 `mpk:banned`（与 401 的 `mpk:unauthorized` 分开）。
   - `App.tsx` 的 `<BanGate/>` 在 `<Routes>` 之外全局监听，弹「你已被封号」+ 后端原因，
     确认后 `clearToken()` + 跳 `/auth`；小 `max-w` + `overflow-auto` + 长文案换行适配 375px。
   - `src/lib/admin.ts` 的 `useIsAdmin()` 从 `/api/auth/me` 取 `isAdmin`；
     `Camp.tsx` 测试菜单、`Start.tsx` 管理员标识仅管理员可见。**这只是 UI 收敛，不是安全边界**。
-  - 403 属 permanent，不入离线队列，不会重复触发弹窗风暴。
+  - 403 属 permanent，直接报错不重试，不会重复触发弹窗风暴。
 
 ---
 
@@ -319,14 +319,14 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 
 > 编号以任务表为准；本节只列后端相关项。P0 五项、P1-1、P1-1b 均已完成。
 
-- ✅ **P0-3 自动云同步**：登录按冲突策略自动恢复、防抖自动 PUT、离线队列重传、同步状态 UI（过渡桥接）。
+- ✅ **P0-3 云同步（已整体删除，2026-11-13）**：当年那套「登录按冲突策略恢复 + 防抖自动 PUT + 离线队列重传 + 同步状态 UI」是本地存档时代的过渡桥接，已被服务端唯一真值取代；`syncPolicy.ts`/`rebase.ts` 连同单测一并删除。
 - ✅ **P1-1 服务端存档数值校验**：`saveValidator.ts` 分级校验 + 告警日志 + 前端 4xx 分流。
 - ✅ **P1-1b 管理员权限 + 封号风控 + 服务端时钟**：见 §5、§13。
 - ✅ **P1-2 关键随机与结算上移服务端**：见 §14；捕获判定、金币/道具/挂机结算均由服务端裁决，挂机 `startedAt` 用服务端时钟。
 - ✅ **P2-1 WebSocket 实时通道 + P2-2 GameSession 在线权威态**：见 §15 / §16；状态写入收敛到 `commitState()`，客户端只收 `session.state` 快照。
 - ⬜ **P3 服务端模拟（下一步 P3-1）**：战斗/捕获/挂机中间态上移服务端，客户端变瘦终端（此时才真正防住 GG 修改器 / 加速器）。
 - ⬜ **P5 上线与去本地**：SQLite → Postgres **已由 W1 完成（2026-11-12，本地开发实例；正式实例待位）**；剩余 HTTPS、`VITE_API_BASE`/`CORS_ORIGIN` 切云、
-  去除本地存档持久化（须等服务端权威 + 实时就绪后才安全）。
+  去除本地存档持久化（须等服务端权威 + 实时就绪后才安全）。**后半项已完成（2026-11-13）**：本地存档全部删除，详见 §12 与 bug_log §62。
 
 ---
 
@@ -362,7 +362,7 @@ headless Edge **20/20 `PROBE_OK`**（普通账号无测试菜单 / 管理员可�
 - **P3-1**：① 客户端只发意图（`用 X 技能` / `丢球`），服务端结算并广播；
   ② `rules.ts`/`idle.ts`/`gen.ts` 核心逻辑服务端化，客户端不持有可改写的游戏真值；
   ③ **GG 修改器改内存无效**、**加速器改节奏无效**（回合计时由服务端）；
-  ④ 配合 P3-2 瘦终端后，P5-2 才安全去除本地存档持久化。
+  ④ 配合 P3-2 瘦终端后，P5-2 才安全去除本地存档持久化。**已完成 2026-11-13**（服务端权威 + 实时就绪后删除）。
 
 ### 13.4 误封防线与运维
 
@@ -716,10 +716,12 @@ P3-1c 第一版留了「网络层失败 → 本地战斗」的降级。评估后
 
 **1. 收益侧本来就走不通，但代价很实在。** 本地战斗打完会把存档改富（经验、金钱、
 捕获、首通区域），而服务端 `expected` 还是战前摘要 → `compareDigest` 判定变富 →
-400 `AUTHORITY_MISMATCH`。`classifyUploadError` 把 4xx 判为 **permanent**、不入离线队列，
-但**本地那份富档还在**：下一次、下下一次自动上传全部 400。
-玩家看到的是「打完了、UI 给了奖励、联网后档案回滚，而且之后一直同步不上」。
+400 `AUTHORITY_MISMATCH`。`classifyUploadError` 把 4xx 判为 **permanent**、不重试，
+但**本地那份富档还在**：下一次、下下一次提交全部 400。
+玩家看到的是「打完了、UI 给了奖励、联网后档案回滚，而且之后一直提交不上」。
 这不是安全漏洞，是比漏洞更常见的数据可靠性故障。
+> 注：本段写于本地存档时代（当时有离线队列与自动上传）。两者已随本地存档于 2026-11-13 删除，
+> 但结论不变——仍然不做任何本地战斗降级。
 
 **2. 它撑不起「离线也能玩」的承诺。** 断网时意图也发不出去，奖励、捕获、首通全都无效，
 玩家实际上只能打一场不算数的仗。与其假装能玩，不如明确告知。
@@ -874,7 +876,7 @@ P3-2 之后所有「改存档」的判断都在服务端，但兜底通路 `PUT 
 
 - 缺版本 → `400 REVISION_REQUIRED`；版本小于服务端当前版本 → `409 REVISION_CONFLICT`。
 - **语义是 server-wins**：先落库的赢，后到的一方拿服务端快照切过去。
-  不做 last-write-wins 合并，也不做字段级 merge —— 那需要操作日志，留给 P4。
+  不做字段级 merge —— 那需要操作日志，代价远大于收益。
 - 校验位置在**风控之前**：版本冲突是并发信号，不该先跑一遍反作弊判定。
   同理，意图通道的 CAS 放在**消费 nonce 之前**，冲突不吃掉一次性 nonce。
 
@@ -958,8 +960,8 @@ P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 
 - `src/lib/sessionState.ts` 的 `isSessionSuspended()` 是硬闸：
   `api.request` 在最前面拦截**所有**非 `/api/auth/` 请求（含 GET），
   本地未上传的改动不会被偷偷同步上去。逐个调用点加判断不可靠，统一在传输层拦。
-- `App.tsx::SessionGate` 收到事件 → `setSessionSuspended(true)` + `stopAutoSync()`
-  （清 debounce / 离线队列 / 待探测态）+ `stopRealtime()` + 弹窗。
+- `App.tsx::SessionGate` 收到事件 → `setSessionSuspended(true)` + `stopWriteChannel()`
+  （复位提交相位与版本探测器）+ `stopRealtime()` + 弹窗。
   **弹窗期间不清 token**，保证提示一定看得到；点「重新登录」才 `clearToken()` 并跳登录页。
 - `ws.ts` 记 `replacedToken`：本地还是这枚 token 时 `startRealtime()` 直接拒绝建连，
   防「不点弹窗直接刷新」把新设备顶掉。重新登录换了 token 自然解除。
@@ -969,7 +971,7 @@ P4-1 拆两批：1a 顶号（会话代次 + 单连接 + 只读下线态）、1b 
 1. **P2-2 同账号多端广播**：顶号后同账号只有一条连接，`broadcastToUser` 退化为单连接推送。
    `e2e:p22` 的「两条连接都收到快照」改为「顶号 + 唯一活跃连接收广播 + 旧连接不再收」。
 2. **P4-0 双端 CAS**：同账号不再有两台设备，`e2e:p4` C 段从「两条登录」改为
-   「同一会话的旧版本重放 / 乱序请求」。CAS 仍有价值（网络重传、双击提交、离线队列重放），
+   「同一会话的旧版本重放 / 乱序请求」。CAS 仍有价值（网络重传、双击提交、客户端重试），
    但不再是「多端互斥」的主要防线——那个位置由顶号接管。
 3. `e2e:p21` 的「第 4 条 429」改为「第 2 条顶掉第 1 条」；`e2e:hardening` 同步改。
    **不要加兼容开关让旧用例继续绿**：语义变了就改用例，留着 429 分支只会掩盖真相。
@@ -1751,7 +1753,7 @@ Boss 伤害榜 / `rules.ts` 战斗公式 / 1v1（F15 冻结）/ P4-3。
 ### 31.1 产品口径（杰哥 11-10 拍板，钉死）
 
 1. **不本地存储**：`SaveData` **不加** `playerLevel` / `playerExp` / `badges` / `achievements`
-   任何字段。`SCHEMA_VERSION`(=10)、`EXPECTED_SAVE_VERSION`(=10)、前端 persist migrate
+   任何字段。`SCHEMA_VERSION`(=11)、`EXPECTED_SAVE_VERSION`(=11)、存档结构
    **一律不动**。旧台账「必须联动三处」是初版方案残留，作废；等级真值全部在服务端独立表。
 2. **人物等级来源不是打怪经验**，而是 `基础等级 + 徽章等级加成总和`。
    11-07 旧设想的「账号经验 / 升级公式 / 同源同额」取消。
@@ -1960,7 +1962,7 @@ model AchievementGrant {
    敌方 elite/rare 叠加时 420 会偶发全灭，下一场开局 `PARTY_FAINTED`，
    全量验收曾出现 42/44 红灯；纯用例确定性，产品逻辑零改动（bug_log §38）。
 
-**边界**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 存档结构 / 前端 persist migrate
+**边界**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` / 存档结构
 **依然零改动**；`gainExp()` 本身不改（只在调用侧判定），Boss / 副本 / 1v1 的
 F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **不回溯补发徽章**：
 徽章正式来源是演武堂挑战（F18），旧版首通不等于打赢演武堂，不白送等级。
@@ -2009,7 +2011,7 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   文件名 `slotLock.ts`、函数名 `withSlotLock` 保留历史命名，语义已是**账号级**。
 - `SCHEMA_VERSION` 10→**11**，前端 `migrateSaveState` 补 10→11 分支把
   `{save1,save2,save3,slot}` 收敛成 `{ save }`；后端 `EXPECTED_SAVE_VERSION`=**11**。
-  历史 v1~v10 迁移分支保留（要认识旧三槽输入），但现行 persist 结构只有 `{ save }`。
+  前端已无 migrate（v1~v11 那套随本地存档于 2026-11-13 删除），现行 store 结构是单档 `{ save }`。
 - `SessionStats.slots` 字段名暂留（E2E 依赖），单档后其值恒等于在线会话数，
   不再按槽位解读。
 

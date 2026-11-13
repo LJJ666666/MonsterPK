@@ -1444,4 +1444,34 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **验收（本轮最终）**：`MPK_FRONT_PORT=5174 EDGE_PATH=<chrome-headless-shell> npm run verify` → **51 通过 / 0 失败 / 0 跳过，453.0s，`VERIFY_OK`**；14 套 UI 冒烟全绿（p21 15 / p31c 15 / p41 13 / p42a 17 / p42c 19 / p42d 15 / p42e 16 / f01f02 17 / f16 15 / f04 15 / f18a 9 / f18b 15 / f18c 18 / ux 26）、后端 453 单测、docs 222、记忆镜像 sha256 一致。
 - **教训**：沙箱里全绿 ≠ 本机能跑。凡「依赖 shell 语义（glob / 引号 / 编码）」或「依赖进程时序」的断言，都要在 PowerShell + GBK 下过一遍；本次 5 项里有 3 项属此类。
 
+## 62. 本地存档全栈删除（P5 过渡态收尾，2026-11-13）
+
+- **杰哥口径**：「本地存档相关的都可以删掉，无论是逻辑还是文件，包括 md 里面曾经记录的『铁律』『方案』，那些都是早期的。」
+- **删除理由（先确认了它们真是死的，不是还在用的）**：
+  - `useGameStore` 的 `customStorage` 实际是**坏代码**——`getItem` 用裸 `fetch('/api/save')`（无 Authorization → 后端 `authenticate` 直接 401），`setItem` 用 `POST /api/save`（后端只有 `PUT /api/save` → 404）。所以它名义上「云端优先、本地兜底」，实际每次读写都只落到 `localStorage`：既没同步到云端，还白送一次必然失败的请求。
+  - `rebase.ts` 的 `markRebase()` **全仓零调用**，只剩 `sync.ts` 里 `takeRebase()` 读一个永远 false 的标记。
+  - `resetSave()` 只 `set({ save: null })`，服务端那份还在——刷新（`GET /api/save`）就回来，「重新开始」按钮是个假动作。
+- **删除清单**：
+  - 前端逻辑：`useGameStore` 的 `persist` 中间件 + `customStorage` + `migrate`/`merge`/`partialize`/`version`；`saveVersion.ts` 的整条 `migrateSaveState`（v1→v11 逐级补字段，约 140 行）；`syncPolicy.ts`（LWW 决策纯函数）及其单测；`rebase.ts`；`sync.ts` 的 `startAutoSync`/`stopAutoSync`/`scheduleUpload`/`flush`/`offlineQueue`/`flushQueue`/`cancelPendingUpload`/`suppressNextUpload`/`syncOnLogin`/`getSyncDiagnostics`；`session.ts` 与 `useGameStore` 的 `suppressNextUpload` 调用（3 处）；`App.tsx` 的 `SyncBootstrap`；`Auth.tsx` 的 `syncOnLogin`；`Start.tsx` 的 `resetSave` 假按钮改为走服务端 `new_game` 覆盖。
+  - 前端文件：`src/lib/syncPolicy.ts`、`src/lib/syncPolicy.test.ts`、`src/lib/rebase.ts`、`src/stores/saveVersion.test.ts`、`scripts/ui_smoke_p12.mjs`（P1-2 期旧冒烟，早被 `ui_smoke_p21` 取代且不在 verify 内）。
+  - 冒烟 seed：14 个脚本里的 `localStorage.setItem('beast-journal-save', …)` 与 `const persist = …` 全部去掉，只注入 `mpk_token`；云端基线仍由 `PUT /api/save` 建立。
+- **新增（删了本地副本就必须有它，否则刷新后页面是空的）**：
+  - `src/lib/saveBootstrap.ts`：登录态下 `GET /api/save` → `setRevision` + `importSaveJson(keepBattle)`；404 记 revision=0（下次提交即新建）。
+  - `App.tsx::BootGate`：登录态且在拉到档之前只渲染「正在读取服务端存档…」，不渲染路由——否则 Start 会先闪一屏「开始新旅程」、Camp 会因空档误判跳回首页。**未登录直接放行**（登录页不需要存档）。`BootGate` 内**先调 `startRealtime()` 再发 GET**：实时通道不依赖存档，WS 建连不能被存档请求推迟（见下一节的新坑）。
+  - `Auth.tsx` 登录成功后 `await bootstrapSave()` 再 `navigate("/")`（`BootGate` 在未登录时已放行，不会再跑第二次）。
+- **新坑（本轮引入并修掉，勿回退）：`--virtual-time-budget` 快进冲掉真实网络**。
+  - 现象：`npm run verify --only=smoke` 批量跑时 `p42d` 11/4、`p42e` 12/4，但**单独跑同一条脚本 15/15 全绿**。失败项全部收在 `timeout:waiting`，页面停在弹窗态并显示「进入房间需要实时通道在线」。
+  - 根因：`--dump-dom` + `--virtual-time-budget=40000` 会把 `setTimeout(50)` 瞬间快进（240 轮 ≈ 12s 虚拟时间可能只对应几十毫秒真实时间）。本地存档时代页面首帧就是同步 hydrate，WS 在建连那一刻就发起、赶在快进前握完手；加上 `BootGate` 的 GET 之后 WS 发起变晚，快进直接跨过握手窗口 → 点「创建房间」时还没连上。单独跑时因进程/缓存状态不同侥幸躲过（再次印证「偶发红不能靠重跑掩盖」）。
+  - 修法：① `BootGate` 里 `startRealtime()` 与 `bootstrapSave()` 并行发起；② `p42d`/`p42e` 的 `waitFor` 每 4 轮挂一个真实 `fetch('http://localhost:3001/api/health')`，让 Chromium 的 `pauseIfNetworkFetchesPending` 生效，给真实网络留落地时间。修后两条各 15/15、16/16。
+- **文档同步清理**：`MEMORY.md`（顺带从 13388 → 10095 字节，删掉已被后续阶段取代的历史细节，保留硬约束+索引+进度+验收锚点）、`.trae/documents/项目记忆.md`（镜像）、`HANDOFF.md` 三处、`后端开发规范_backend.md` 九处、`技术架构-原创抓怪回合制RPG.md`（§1 图 / §2 / §4 / §5 从「无后端 + localStorage」改为现行架构）、`开发路线图_roadmap.md` 六处、`未来规划与技术债` 两处、`PRD` 一处。
+- **保留但订正口径**：后端 `saveValidator` 对 `version < EXPECTED_SAVE_VERSION` 仍是 `warn('VERSION_OLD')`（不 reject）——那是服务端的纵深防御，与客户端有没有 migrate 无关；规范里「将由客户端迁移」的说法已删。
+- **新坑 2（同源，务必别再犯）：`session.state` 监听晚于 WS 推送 → 首条快照被静默丢掉**。
+  - 现象：`p21` 的「Start 收到服务端权威快照（rev=N）」红，页面显示「在线权威态：等待服务端快照」，但「实时通道已连接」。
+  - 根因：`SessionBootstrap`（注册 `mpk:session-state` window 监听）挂在 Router 内，被 `BootGate` 一起挡住；而 WS 是在 `BootGate` 里并行发起的 → 服务端 `hydrateForUser` 推的第一条快照到达时还没有监听者，`window.dispatchEvent` 对空监听直接丢弃（事件不排队）。
+  - 修法：`BootGate` effect 里**先 `startSessionSync()` 再 `startRealtime()`**（两者都是幂等的，Router 内再调不会重复注册）。这条与 W6.1 后端「`attachWsHandlers` 必须在任何 await 之前挂载」是同一类 bug 的两侧。
+  - 顺带把 `p21` 探针的固定 `setTimeout(4000)` 改成「60 次带真实 `fetch` 的心跳后再采样」——`--virtual-time-budget` 会把 4000ms 瞬间快进，固定延时的语义在有异步首屏之后就不成立了。
+- **验收（本轮最终）**：`MPK_FRONT_PORT=5174 EDGE_PATH=<chrome-headless-shell> npm run verify` → **51 通过 / 0 失败 / 0 跳过，266.7s，`VERIFY_OK`**；前端单测 133（删掉 syncPolicy 7 例 + saveVersion 4 例后仍全绿）、后端 453、14 套 UI 冒烟全绿（15/15/13/17/19/15/16/17/15/15/9/15/18/26）、docs 222、记忆镜像 sha256 一致。
+- **口径沉淀**：前端写档只剩两个入口——服务端快照 `importSaveJson`（含 WS `session.state`）与意图通道 `intents.ts`。**不要再引入任何本地缓存真值**。
+
+
 

@@ -71,11 +71,17 @@ function buttons() {
 function once(label, fn) {
   return function () { if (completed[label]) return; completed[label] = true; fn(); };
 }
+function keepAlive() {
+  // --virtual-time-budget 会把 50ms 定时器瞬间快进，真实网络（存档 GET、WS 握手）
+  // 反而没有落地机会。挂一个真实请求，触发 Chromium 的 pauseIfNetworkFetchesPending。
+  try { fetch('http://localhost:3001/api/health?t=' + Date.now(), { cache: 'no-store' }).catch(function () {}); } catch (e) {}
+}
 function waitFor(label, cond, next, tries) {
   if (completed[label]) return;
   tries = tries || 0;
   if (cond()) return next();
   if (tries > 240) { out.errors.push('timeout:' + label); return finish(); }
+  if (tries % 4 === 0) keepAlive();
   var d = doc();
   if (d) {
     var ob = new MutationObserver(function () {
@@ -179,10 +185,8 @@ async function main() {
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
-    localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
     </script></body></html>`, 'utf8');
   const seedDom = runEdge(`${BASE}/_p42d_seed.html`);
   check('seed 注入登录态', seedDom.includes('SEEDED'), seedDom.slice(0, 120));

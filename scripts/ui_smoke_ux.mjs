@@ -1,13 +1,14 @@
 /**
  * 回归 C：全局状态提示与弹窗 UX 冒烟（375px headless Edge，2026-11-11）。
  *
- * 既有 14 个 UI 冒烟都验证「某功能弹窗能开、375px 不溢出」，但没有一组覆盖：
- *   - Start 页的云同步态 / 实时通道态 / 在线权威态三种状态文案与长文案换行；
+ * 既有 UI 冒烟都验证「某功能弹窗能开、375px 不溢出」，但没有一组覆盖：
+ *   - Start 页的提交态 / 实时通道态 / 在线权威态三种状态文案与长文案换行；
  *   - 全局封号弹窗、顶号弹窗（App.tsx 里挂在 Routes 之外，需派发事件才能复现）；
  *   - 弹窗「可滚动 + 可关闭」这条 UX 契约。
  * 本套件补这三块，不重复各功能弹窗的内容断言。
  *
- * 范式与 ui_smoke_f18a/b/c 一致：seed HTML 注入 localStorage，probe HTML 用 iframe
+ * 范式与 ui_smoke_f18a/b/c 一致：seed HTML 只注入登录 token（本地存档已删除，
+ * 页面自己 GET /api/save 拿档），probe HTML 用 iframe
  * + 固定延时时间线驱动 SPA，结果写进 body[data-probe] 由 --dump-dom 回传。
  *
  * 运行：node scripts/ui_smoke_ux.mjs（需要 5173 + 3001 同时在线）
@@ -143,7 +144,7 @@ f.addEventListener('load', function () {
   }, once('start', function () {
     var t = txt();
     out.step = 'start';
-    out.hasSyncText = t.indexOf('同步') >= 0;
+    out.hasSyncText = t.indexOf('提交') >= 0;
     out.hasWsText = t.indexOf('实时通道') >= 0;
     out.hasAuthorityText = t.indexOf('在线权威态') >= 0;
     out.hasJourneyText = t.indexOf('继续旅程') >= 0 || t.indexOf('开始新旅程') >= 0;
@@ -214,7 +215,7 @@ f.addEventListener('load', function () {
             setTimeout(function () {
               var t2 = txt();
               out.replacedTitle = t2.indexOf('账号已在其他设备登录') >= 0;
-              out.replacedExplain = t2.indexOf('本设备尚未同步的改动不会被保存') >= 0;
+              out.replacedExplain = t2.indexOf('本设备此后的任何操作都不会生效') >= 0;
               out.replacedBtn = !!byText('重新登录');
               out.replacedDialogs = doc().querySelectorAll('[role="alertdialog"]').length;
               out.replacedScrollWidth = overflow();
@@ -275,10 +276,8 @@ async function main() {
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
-    localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
     </script></body></html>`, 'utf8');
   const seedDom = runEdge(`${BASE}/_ux_seed.html`);
   check('seed 注入登录态', seedDom.includes('SEEDED'), seedDom.slice(0, 120));
@@ -289,7 +288,7 @@ async function main() {
   const a = parseProbe(domA);
   check('探针 A 回传（Start 页渲染完成）', !!a && a.step === 'start', brief(a) ?? domA.slice(0, 200));
   if (!a) return report();
-  check('Start 页显示云同步状态文案', a.hasSyncText === true, brief(a));
+  check('Start 页显示提交状态文案', a.hasSyncText === true, brief(a));
   check('Start 页显示实时通道状态文案', a.hasWsText === true, brief(a));
   check('Start 页显示在线权威态文案（P2-2 rev 快照）', a.hasAuthorityText === true, brief(a));
   check('Start 页主操作按钮可见（有存档 → 继续旅程）', a.hasJourneyText === true, brief(a));

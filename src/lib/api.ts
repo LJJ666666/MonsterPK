@@ -79,7 +79,9 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
  * `revision` 是必填的基线版本（CAS）：不匹配时服务端返回 409 REVISION_CONFLICT，
  * 客户端据此切回服务端版本，而不是静默覆盖别人的进度。
  */
-export type PutExtra = { revision: number; intentNonce?: string; rebase?: boolean };
+// 整包提交的附加标记。`rebase` 已随本地存档删除（2026-11-13）：
+// 新建/重置存档走 `/api/actions/new_game`，不再由客户端打重建基线标记。
+export type PutExtra = { revision: number; intentNonce?: string };
 
 export const api = {
   health: () => request("/api/health"),
@@ -105,7 +107,6 @@ export const api = {
         revision: extra.revision,
         ...(clientId ? { clientId } : {}),
         ...(extra.intentNonce ? { intentNonce: extra.intentNonce } : {}),
-        ...(extra.rebase ? { rebase: true } : {}),
       }),
     }),
   /** P1-2：发意图给服务端裁决，返回 { ok, nonce, result }；结果不可由客户端伪造。 */

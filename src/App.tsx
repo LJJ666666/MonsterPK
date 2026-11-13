@@ -18,7 +18,8 @@ import MechanicsModal from "@/components/MechanicsModal";
 import MoveChartModal from "@/components/MoveChartModal";
 import { isLoggedIn, clearToken } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, BANNED_EVENT } from "@/lib/api";
-import { startAutoSync, stopAutoSync } from "@/lib/sync";
+import { stopWriteChannel } from "@/lib/sync";
+import { bootstrapSave } from "@/lib/saveBootstrap";
 import { startRealtime, stopRealtime } from "@/lib/ws";
 import { startSessionSync } from "@/lib/session";
 import { SESSION_REPLACED_EVENT } from "@/lib/sessionReplaced";
@@ -112,7 +113,7 @@ function SessionGate() {
     const onReplaced = (e: Event) => {
       const detail = (e as CustomEvent<{ reason?: string }>).detail;
       setSessionSuspended(true);
-      stopAutoSync();
+      stopWriteChannel();
       stopRealtime();
       setReason(detail?.reason || "账号已在其他设备登录，本设备已下线");
     };
@@ -133,7 +134,7 @@ function SessionGate() {
           账号已在其他设备登录
         </div>
         <p className="mt-3 text-sm leading-relaxed text-[color:var(--text)]">
-          为保证存档只有一份服务端真值，本设备已下线。本设备尚未同步的改动不会被保存。
+          为保证存档只有一份服务端真值，本设备已下线。本设备此后的任何操作都不会生效。
         </p>
         <p className="mt-2 break-words text-xs leading-relaxed text-[color:var(--muted)]">{reason}</p>
         <div className="mt-5">
@@ -152,12 +153,49 @@ function SessionGate() {
   );
 }
 
-// 启动自动云同步：订阅 store 变更做防抖上传、监听网络恢复重传。无 UI，仅副作用。
-function SyncBootstrap() {
+/**
+ * 启动加载闸门（P5）：本地存档已删除，登录态下 store 是空的，必须先问一次
+ * `GET /api/save` 才知道这个账号有没有档。加载完成前不渲染路由——
+ * 否则 Start 会先闪一屏「开始新旅程」、Camp 会因空档误判而跳回首页。
+ * 未登录直接放行：登录页不需要存档。
+ */
+function BootGate({ children }: { children: ReactNode }) {
+  const [booted, setBooted] = useState(!isLoggedIn());
   useEffect(() => {
-    startAutoSync();
-  }, []);
-  return null;
+    if (booted) return;
+    let alive = true;
+    // 顺序有讲究：先把 session.state 的 window 事件监听挂上，再建 WS。
+    // WS 连上后服务端会立刻 hydrate 并推第一条权威快照；如果监听晚于它到达
+    // （Router 内的 SessionBootstrap 此时还没渲染），这条快照会被静默丢掉，
+    // Start 的「在线权威态」就永远停在「等待服务端快照」。
+    startSessionSync();
+    startRealtime();
+    // 存档 GET 与建连并行：实时通道不依赖存档，不能被存档请求推迟
+    // （房间/对战入口都要求「实时通道在线」）。
+    void bootstrapSave().finally(() => {
+      if (alive) setBooted(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [booted]);
+
+  if (!booted) {
+    return (
+      <div
+        className="flex h-[100dvh] w-full items-center justify-center bg-[color:var(--bg)]"
+        data-boot="loading"
+      >
+        <div className="text-center">
+          <div className="font-display text-sm tracking-[0.2em] text-[color:var(--accent)]">
+            兽域手记
+          </div>
+          <div className="mt-3 text-xs text-[color:var(--muted)]">正在读取服务端存档…</div>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
 }
 
 // 启动实时通道（P2-1）：只建连/保活/重连。依赖路由是为了登录/登出后重新建连。
@@ -183,52 +221,53 @@ export default function App() {
   const [showMoveChart, setShowMoveChart] = useState(false);
 
   return (
-    <Router>
-      <UnauthorizedListener />
-      <BanGate />
-      <SessionGate />
-      <SyncBootstrap />
-      <SessionBootstrap />
-      <RealtimeBootstrap />
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <Start />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/camp"
-          element={
-            <RequireAuth>
-              <Camp onShowMechanics={() => setShowMechanics(true)} onShowMoveChart={() => setShowMoveChart(true)} />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/arena"
-          element={
-            <RequireAuth>
-              <Arena onShowMechanics={() => setShowMechanics(true)} onShowMoveChart={() => setShowMoveChart(true)} />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/auth"
-          element={
-            <GuestOnly>
-              <Auth />
-            </GuestOnly>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-      <MoveLearnerModal />
-      <EvolutionModal />
-      {showMechanics && <MechanicsModal onClose={() => setShowMechanics(false)} />}
-      {showMoveChart && <MoveChartModal onClose={() => setShowMoveChart(false)} />}
-    </Router>
+    <BootGate>
+      <Router>
+        <UnauthorizedListener />
+        <BanGate />
+        <SessionGate />
+        <SessionBootstrap />
+        <RealtimeBootstrap />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Start />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/camp"
+            element={
+              <RequireAuth>
+                <Camp onShowMechanics={() => setShowMechanics(true)} onShowMoveChart={() => setShowMoveChart(true)} />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/arena"
+            element={
+              <RequireAuth>
+                <Arena onShowMechanics={() => setShowMechanics(true)} onShowMoveChart={() => setShowMoveChart(true)} />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/auth"
+            element={
+              <GuestOnly>
+                <Auth />
+              </GuestOnly>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <MoveLearnerModal />
+        <EvolutionModal />
+        {showMechanics && <MechanicsModal onClose={() => setShowMechanics(false)} />}
+        {showMoveChart && <MoveChartModal onClose={() => setShowMoveChart(false)} />}
+      </Router>
+    </BootGate>
   );
 }

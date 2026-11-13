@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import BrandMark from "@/components/BrandMark";
 import { api, API_BASE } from "@/lib/api";
 import { setToken } from "@/lib/auth";
-import { syncOnLogin } from "@/lib/sync";
+import { bootstrapSave } from "@/lib/saveBootstrap";
 
 type Mode = "login" | "register";
 type FieldErrors = { username?: string; password?: string; confirm?: string };
@@ -114,8 +114,9 @@ export default function Auth() {
           ? await api.login(username.trim(), password)
           : await api.register(username.trim(), password);
       setToken(res.token);
-      // 登录后按冲突策略自动恢复云端存档（last-write-wins），结果通过同步状态 UI 展示
-      void syncOnLogin();
+      // 登录后立刻把服务端存档拉下来（本地没有任何副本，这是唯一的来源）。
+      // 必须等它完成再跳转，否则 Start 会先闪一屏「开始新旅程」。
+      await bootstrapSave();
       if (remember) localStorage.setItem(LAST_USER_KEY, username.trim());
       else localStorage.removeItem(LAST_USER_KEY);
       navigate("/", { replace: true });

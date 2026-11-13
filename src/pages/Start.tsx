@@ -7,7 +7,7 @@ import { MONSTER_SPECS, STARTERS } from "@/game/data";
 import { useGameStore } from "@/stores/useGameStore";
 import { api } from "@/lib/api";
 import { clearToken } from "@/lib/auth";
-import { useSyncStatus } from "@/lib/sync";
+import { useSyncStatus, type SyncPhase } from "@/lib/sync";
 import { useIsAdmin } from "@/lib/admin";
 import { useWsStatus, type WsPhase } from "@/lib/ws";
 import { useSessionStatus } from "@/lib/session";
@@ -21,19 +21,17 @@ const cloudText: Record<CloudState, string> = {
   unreachable: "无法连接服务器",
 };
 
-// 自动同步状态展示文案与配色（P0-3）
-const syncText: Record<string, string> = {
-  idle: "同步未启动",
-  syncing: "正在同步到云端…",
-  synced: "已同步到云端",
-  offline: "离线，将自动重传",
-  error: "同步出错",
+// 写通道状态（意图裁决结果的提交相位）：只在玩家执行操作时变化。
+const syncText: Record<SyncPhase, string> = {
+  idle: "提交通道未启用",
+  submitting: "正在提交到服务端…",
+  committed: "已提交至服务端",
+  error: "提交出错",
 };
-const syncColor: Record<string, string> = {
+const syncColor: Record<SyncPhase, string> = {
   idle: "bg-[color:var(--muted)]",
-  syncing: "bg-[color:var(--accent)]",
-  synced: "bg-[color:var(--ok)]",
-  offline: "bg-[color:var(--danger)]",
+  submitting: "bg-[color:var(--accent)]",
+  committed: "bg-[color:var(--ok)]",
   error: "bg-[color:var(--danger)]",
 };
 // 实时通道状态（P2-1）：只显示连接相位，与存档同步状态分开，便于分别排障。
@@ -56,7 +54,7 @@ const wsColor: Record<WsPhase, string> = {
 
 export default function Start() {
   const navigate = useNavigate();
-  const { save, newGame, resetSave } = useGameStore();
+  const { save, newGame } = useGameStore();
   const activeSave = save;
 
   const [open, setOpen] = useState(false);
@@ -64,7 +62,6 @@ export default function Start() {
   const [playerName, setPlayerName] = useState("旅行者");
   const [starter, setStarter] = useState<(typeof STARTERS)[number]>(STARTERS[0]);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [cloud, setCloud] = useState<CloudState>("checking");
   const { phase, info } = useSyncStatus();
@@ -200,8 +197,8 @@ export default function Start() {
           <span>{cloudText[cloud]}</span>
         </div>
 
-        {/* 自动同步状态（P0-3）：显示实时同步相位。
-            P1-1：error 相位附带服务端中文拒绝原因；长文案需换行，保持移动端不横向溢出。 */}
+        {/* 写通道状态：意图裁决结果的提交相位。
+            error 相位附带服务端中文拒绝原因；长文案需换行，保持移动端不横向溢出。 */}
         <div className="mt-2 flex items-start gap-2 text-xs text-[color:var(--muted)]">
           <span
             className={[
@@ -210,7 +207,7 @@ export default function Start() {
             ].join(" ")}
           />
           <span className="min-w-0 break-words leading-relaxed">
-            {phase === "error" && info ? `同步出错：${info}` : (syncText[phase] ?? "同步未启动")}
+            {phase === "error" && info ? `提交出错：${info}` : (syncText[phase] ?? "提交通道未启用")}
           </span>
         </div>
 
@@ -244,7 +241,6 @@ export default function Start() {
           </span>
         </div>
 
-        {msg && <div className="mt-4 text-xs text-[color:var(--ok)]">{msg}</div>}
         {err && <div className="mt-4 text-xs text-[color:var(--danger)]">{err}</div>}
 
         {/* 次要操作折叠收纳，不占主界面 */}
@@ -260,7 +256,7 @@ export default function Start() {
           {accountOpen && (
             <div className="mt-4 flex flex-col gap-3">
               <div className="text-[11px] leading-relaxed text-[color:var(--muted)] opacity-80">
-                进度已自动同步到云端（当前账号：{username || "旅行者"}）。换设备登录即可继续。
+                进度只保存在你的账号下（当前账号：{username || "旅行者"}），换设备登录即可继续。
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <PixelButton tone="muted" size="sm" onClick={logout}>
@@ -271,10 +267,10 @@ export default function Start() {
                   size="sm"
                   disabled={!activeSave}
                   onClick={() => {
-                    if (confirm("确定重新开始吗？当前本地进度会被清空（云端备份不受影响）。")) {
-                      resetSave();
-                      setMsg("已清空本地进度");
-                      setErr(null);
+                    // P5：本地存档已删除，「清空内存」不再有任何意义（服务端那份才是真值，
+                    // 刷新就回来）。重开必须走服务端 new_game 覆盖，这里换个入口而已。
+                    if (confirm("确定重新开始吗？当前存档会被新档覆盖，无法撤销。")) {
+                      setOpen(true);
                     }
                   }}
                 >

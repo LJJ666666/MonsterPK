@@ -39,7 +39,7 @@
 | 全局代理环境下 `git fetch` 报 502 / `schannel: server closed abruptly` | 多半是 git 默认 HTTP/2 与代理不兼容，不是断网 | `git config --local http.version HTTP/1.1`（只写本机 `.git/config`，不入库）；先拿 GitHub API 或 `git ls-remote` 确认远端真实 HEAD（bug_log §33） |
 | 用 `curl http://127.0.0.1:5173/` 探活得到 502 | 全局 `HTTP(S)_PROXY` 连 localhost 也拦，是**假失败** | `curl --noproxy '*' ...`、用 Python socket 直连（自检脚本即如此），或看 `netstat` |
 | 改 `src/game/data.ts` 漏了 `};` | 后续 `export` 会落进对象字面量内部，报 `Unexpected keyword 'export'` | 改完立刻 `npm run check` |
-| 新增持久化字段不升版本 | 老档 migrate 会丢字段 | 递增 `SCHEMA_VERSION`（同时是 persist `version`）并补 migrate 分支，后端 `EXPECTED_SAVE_VERSION` 同步改 |
+| 新增持久化字段不升版本 | 服务端 `EXPECTED_SAVE_VERSION` 不符会拒整包 | 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）并同步 `backend/src/lib/saveValidator.ts`；**前端已无 migrate**（随本地存档删除），结构校验只在服务端 |
 | 用 `crypto.randomUUID()` / 靠类型收窄判别联合 | 旧 WebView 没有该 API；项目 `strict:false`、`noUnusedLocals:false`，tsc 不收窄 | 统一用 `rules.ts` 的 `uuid()`；判别用 `'code' in result`；所有 Hook 必须在组件顶层 |
 | 不看风格就改前端、引 CDN | 视觉规范在 `.impeccable.md`（复古像素 / 野外手记，内联 SVG、零 CDN） | 移动端优先：375px 实测 `scrollWidth`，弹窗小 `max-w` + `overflow-auto` + `max-h` |
 | 提交跳过流程 | 出问题没有回滚点，或误把密钥推上远端 | 验收 → 建 `rollback-YYYYMMDD-<阶段>` tag 并推远端 → `git add -A` 确认无 `.env` / `*.db` → 中文分条 commit（末尾写验收数字）→ push master → 核对 `HEAD == origin/master` 且工作树干净 |
@@ -259,7 +259,7 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 - **全局 `HTTP(S)_PROXY` 连 `127.0.0.1` 也拦**，`curl` 探活得到假 502：用 `curl --noproxy '*'`、Python socket 直连或 `netstat`（bug_log §33.2）。
 - `backend/src/lib/env.ts` 的 `.env` 路径曾算错，导致 `JWT_SECRET` 长期回落硬编码默认密钥；改配置相关代码必须实测 `process.env.XXX` 有值。
 - 改 Prisma schema 前先停 :3001（Windows 下 `query_engine-windows.dll.node` 文件锁）。
-- 新增持久化字段 → 递增 `SCHEMA_VERSION` + persist `version` + migrate 分支，后端 `EXPECTED_SAVE_VERSION` 同步改，否则新档全被拒；**两处当前值以 `src/stores/saveVersion.ts` 与 `backend/src/lib/saveValidator.ts` 为准**（F17 单档化已把 10→11，别照抄历史数字）。
+- 新增持久化字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `EXPECTED_SAVE_VERSION` 同步改，否则服务端按版本契约拒档；**前端已无 migrate**（v1→v11 那套随本地存档删除，见 bug_log §62）；两处当前值以源码为准，别照抄历史数字。
 - 禁用 `crypto.randomUUID()`（旧 WebView 没有），统一用 `rules.ts` 的 `uuid()`；所有 Hook 必须在组件顶层。
 - `strict:false` 下 `if (!parsed.ok)` 判别联合收窄会失效，改用 `'code' in parsed`。
 - 同一文件同一轮发多条 Edit 会互相覆盖：每个文件每轮只发一条，改完立刻校验；批量改动用一次性精确替换脚本。
@@ -275,7 +275,7 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 
 **P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / P2-1 ✅ / P2-2 ✅ / P3-1a·b·c ✅ / P3-2 ✅ / P4-0 ✅ / P4-1 ✅ / P4-2a·b·c·d·e ✅（五阶段全部完成）/ 台账 F01·F02 ✅ + F14 ✅ + F16 ✅（2026-11-09 偿还）+ F04 ✅（2026-11-10 偿还）。** **F15 1v1 零产出冻结**（仅供娱乐，未来排位赛再设计榜单/奖励）；**F16 共斗 6 房副本已实现并偿还**（规范 §30，世界 Boss 不排期）。**F17 单档化已实现并偿还**（2026-11-10，规范 §32，第 11 条迁移把 `SCHEMA_VERSION` 10→11）；**F18 地图内容 a/b/c/d 全部 ✅**（地图锁 / 演武堂 / 地图首领 / 正式剧情 21 beat），核心循环串联 E2E 与 F18-a/b/c 375px 冒烟已补齐；F04 已偿还，等级真值在服务端独立表、**不动 `SCHEMA_VERSION`**；**下一步：等杰哥排期，接手只做只读核对**；**P4-3（交易 / 赠送）当前冻结**（所有资产不可交易，无可交付标的）。硬门槛：野怪 / 房间 / 锁均为单进程内存态，P5-1 前统一迁共享存储。完整时间线见任务表「进度记录」。
 
-北极星方向：**服务端权威 + WebSocket 实时多人同玩**，客户端瘦终端只发意图、收状态、渲染；本地存档是 P3/P5 前的过渡桥接。
+北极星方向：**服务端权威 + WebSocket 实时多人同玩**，客户端瘦终端只发意图、收状态、渲染。**本地存档已于 2026-11-13 全部删除**（zustand persist / localStorage 副本 / LWW 冲突策略 / 离线重传队列 / rebase 标记），存档只有服务端一份真值，刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 
 反作弊口径：测试菜单级数据只放行管理员；他人改档一律拦截 + 封号弹窗 + 强制登出；**改系统时间不封号，只要求「不生效」**。权威摘要不符 / 增量不符一律 400 + 中文原因，不封号。
 

@@ -181,10 +181,8 @@ async function main() {
   });
   check('建立云端基线存档', put.status === 200, `${put.status}`);
 
-  const persist = JSON.stringify({ state: { save }, version: 11 });
   fs.writeFileSync(SEED, `<!doctype html><html><head><meta charset="utf-8"></head><body>SEEDED<script>
     localStorage.setItem('mpk_token',${JSON.stringify(token)});
-    localStorage.setItem('beast-journal-save',${JSON.stringify(persist)});
     </script></body></html>`, 'utf8');
   const seedDom = runEdge(`${BASE}/_p42a_seed.html`);
   check('seed 注入登录态', seedDom.includes('SEEDED'), seedDom.slice(0, 120));

@@ -1482,6 +1482,7 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **机制分层（界面原文）**：① 「给 WorkBuddy 的指令」=「之后每次对话和任务都会默认生效」→ 常驻硬规则；② 「本地记忆与技能」=「支持用户级和项目级，让智能体在后续任务中遵循」→ 项目细节与证据；③ 「云端记忆」=「每晚自动整理更新」的偏好画像（工作背景 / 个人背景 / 当前关注 / 近期动态）→ 会被概括重写，**不放可判定的硬条件**。硬规则只进 ①，细节留 ②。
 - **新机交代**：`~/.workbuddy/app/app-config.json` 的 `personalization` 不随 git（项目内搜该指令全文 0 命中），也未证实随账号同步 → 家里那台电脑按「要粘一次」准备；HANDOFF §4.1 原样收录四条指令文案，`scripts/check_home_env.py` 加只读检查、缺则 `[WARN]` 指向 §4.1，§5 话术第 3 条亦补确认步骤。
 - **别再往 md 里堆同款文字**：加文字不解决触发；真要硬拦截得做成执行面脚本（如 `scripts/push.mjs`），本轮未做。
+- **补充判别（11-13 23:35，W6.2 推送误判；订正上条被过度套用）**：W6.2 本地提交 `12cb4b3` 后 `git push` 单次报 `Recv failure: Connection was aborted`，被直接按「环境类阻断」交本机终端；杰哥指出「你应该可以推送的」。实测 `git ls-remote origin refs/heads/master` 正常返回 `faa627c`、`curl .../info/refs?service=git-upload-pack` = `200` → **通道本身是通的**，属传输中途偶发抖动，不是 §56/§63 的代理层错配。随后未改任何代理 / 配置，一次 `git push origin master` 即 `faa627c..12cb4b3` 成功，`pre/post-w62` 两个 tag 一并补推，本地 81 个 tag 与远端 81 个全对齐（`TAG_PARITY_OK`）。**判别顺序**：push 失败 → 一次只读探活 → 200 / 有返回 = 允许原样重试 1 次；探活也失败 / 502 恒现 / env 层错配 = 交本机终端。「最多 1 次、不换代理、不试直连、不改 git config」的边界不变，只是别把偶发抖动误归类为环境类阻断。
 
 ## 64. P5-1 W6.2 收官：room + quota + 结算写档 + 发奖同一事务边界（2026-11-13）
 

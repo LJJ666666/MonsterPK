@@ -91,10 +91,13 @@ export async function runGlobalSweep(
   heartbeatMs: number,
   ctx?: SweepContext | null,
 ): Promise<void> {
+  // W6.4：回收因进程长期挂起 / 重启而未能及时释放的 Boss 在途租约（token 已过期），
+  // 避免开局后服务异常挂起导致名额永久泄漏。与战斗回收都按 token 幂等，互不干扰。
+  bossQuota.reapExpired(now);
   if (!ctx) {
     sweepSessions(now);
     for (const st of battles.sweepExpired(now)) {
-      if (st.bossQuotaKey) bossQuota.release(st.bossQuotaKey);
+      if (st.bossQuotaToken) bossQuota.release(st.bossQuotaToken);
     }
     for (const areaId of wilds.sweep(now)) {
       const spec = wilds.getAreaSpec(areaId);
@@ -109,9 +112,9 @@ export async function runGlobalSweep(
   // 每个被回收的 Boss 战只放行一次 quota.release；重复 sweep 不会把名额多还。
   const expired = battles.sweepExpired(now);
   for (const st of expired) {
-    if (!st.bossQuotaKey) continue;
-    const key = st.bossQuotaKey;
-    await guardedCommit(ctx, `quota:release:${st.id}`, () => { bossQuota.release(key); });
+    if (!st.bossQuotaToken) continue;
+    const token = st.bossQuotaToken;
+    await guardedCommit(ctx, `quota:release:${st.id}`, () => { bossQuota.release(token); });
   }
 
   // wilds.sweep 本身会补怪，必须整段只由一个 leader 在一个 bucket 内跑一次；

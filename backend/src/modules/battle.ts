@@ -116,14 +116,14 @@ async function settleBossRun(
   userId: string,
   state: BattleState,
 ) {
-  const quotaKey = state.bossQuotaKey ?? null;
+  const quotaToken = state.bossQuotaToken ?? null;
   const now = Date.now();
   const dayKey = dayKeyOf(now);
   const bossId = state.bossId as string;
   const damage = Math.max(0, Math.floor(state.damageDealt ?? 0));
 
   if (state.result === 'fled') {
-    if (quotaKey) bossQuota.release(quotaKey);
+    if (quotaToken) bossQuota.release(quotaToken);
     const spec = getBoss(bossId);
     const limit = spec ? bossDailyLimit(spec) : 0;
     return {
@@ -161,7 +161,7 @@ async function settleBossRun(
         'boss damage event insert failed');
     }
   }
-  if (quotaKey) bossQuota.commit(quotaKey);
+  if (quotaToken) bossQuota.commit(quotaToken);
 
   const agg = await prisma.bossDamageEvent.aggregate({
     where: { userId, bossId, periodKey: dayKey },
@@ -526,9 +526,9 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
     battles.drop(userId);
     // P4-2c / F18-c：放弃 Boss / 地图首领战 = 不扣次数（release 在途名额），也不写伤害事件。
-    // 按 quotaKey 释放即可，boss 与 mapBoss 共用 bossQuota；mapBoss 战 state 只有 mapBossId 没有 bossId，
-    // 原 `state.bossId &&` 守卫会让 mapBoss 战的在途名额泄漏（每天白丢次数），故去掉该守卫。
-    if (state.bossQuotaKey) bossQuota.release(state.bossQuotaKey);
+    // 按 bossQuotaToken 释放即可，boss 与 mapBoss 共用 bossQuota；mapBoss 战 state 只有 mapBossId 没有 bossId，
+    // 原 `state.bossId &&` 守卫会让 mapBoss 战的在途名额泄漏（每天白丢次数），故用 token 而非常量守卫。
+    if (state.bossQuotaToken) bossQuota.release(state.bossQuotaToken);
     // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。
     const released = wilds.release(parsed.data.battleId, Date.now());
     for (const areaId of released) {

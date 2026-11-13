@@ -70,8 +70,10 @@ export type BattleState = {
   gymId?: string | null;
   /** F18-c 地图首领：有值即为地图首领战；禁止捕获；胜利经 `applyPlayReward` 发掉落（不上榜）。 */
   mapBossId?: string | null;
-  /** 开局时占用的次数键（含日期与账号）。结算/放弃时用它精确释放，跨午夜也不会漏。 */
+  /** 开局时占用的次数键（含日期与账号）。仅作可读标识，释放/结算一律走 token。 */
   bossQuotaKey?: string | null;
+  /** W6.4：hold 返回的租约 token，是释放/结算的唯一权威句柄；迟到/重复释放都是 no-op（防 ABA）。 */
+  bossQuotaToken?: string | null;
   /** 本场对敌方造成的累计伤害（服务端按敌方 HP 差累计，客户端上报无效）。 */
   damageDealt: number;
 };
@@ -158,7 +160,7 @@ export function createBattle(params: {
    * P4-2c：单人 Boss 战。给了 spec 就不再走随机遭遇：
    * 敌方由内容表生成，`areaName` / `theme` 以 Boss 定义为准（路由层不会再传错）。
    */
-  boss?: { spec: BossSpec; quotaKey?: string };
+  boss?: { spec: BossSpec; quotaKey?: string; quotaToken?: string };
   /**
    * F18-b：演武堂挑战。给了 gym 就走固定王牌（不随机、不记 areaId），
    * 敌方由 `createInstance(aceSpeciesId, aceLevel)` 生成，`areaName` 以馆主为准。
@@ -168,7 +170,7 @@ export function createBattle(params: {
    * F18-c：地图首领。给了 mapBoss 就走固定王牌（不随机、不记 areaId），
    * 敌方由 `createMapBossEnemy(spec)` 生成，`areaName` 以首领为准。
    */
-  mapBoss?: { spec: MapBossSpec; quotaKey?: string };
+  mapBoss?: { spec: MapBossSpec; quotaKey?: string; quotaToken?: string };
   /** F04：由 modules 层读 PlayerProgress 后注入，绝不采信客户端入参。 */
   levelCap?: number | null;
 }): BattleState {
@@ -226,6 +228,8 @@ export function createBattle(params: {
     bossName: params.boss?.spec.name ?? null,
     // F18-c：地图首领的次数键同样要落到战斗态，结算/逃跑时才能精确释放在途名额。
     bossQuotaKey: params.boss?.quotaKey ?? params.mapBoss?.quotaKey ?? null,
+    // W6.4：租约 token 一并落战斗态，释放/结算只认 token（防 ABA）。
+    bossQuotaToken: params.boss?.quotaToken ?? params.mapBoss?.quotaToken ?? null,
     damageDealt: 0,
     gymId: params.gym?.locationId ?? null,
     mapBossId: params.mapBoss?.spec.mapBossId ?? null,

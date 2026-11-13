@@ -87,9 +87,11 @@ export async function applyMapBossStart(params: {
       const used = await prisma.bossDamageEvent.count({
         where: { userId: params.userId, bossId: spec.mapBossId, periodKey: dayKey },
       });
-      if (!bossQuota.hold(key, used, limit)) {
+      const held = bossQuota.hold(key, used, limit);
+      if (!held.ok) {
         return fail('MAPBOSS_QUOTA_EXHAUSTED', '今日挑战次数已用完', 429);
       }
+      const bossQuotaToken = held.token;
 
       const battleId = `mb_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
       try {
@@ -104,7 +106,7 @@ export async function applyMapBossStart(params: {
           themes: THEME_TABLE,
           now,
           rng: Math.random,
-          mapBoss: { spec, quotaKey: key },
+          mapBoss: { spec, quotaKey: key, quotaToken: bossQuotaToken ?? undefined },
         });
         battles.create(state);
         return {
@@ -118,7 +120,7 @@ export async function applyMapBossStart(params: {
           },
         };
       } catch (err) {
-        bossQuota.release(key);
+        if (bossQuotaToken) bossQuota.release(bossQuotaToken);
         if (err instanceof Error && (err as any).code) {
           return fail((err as any).code, err.message);
         }
@@ -226,14 +228,14 @@ async function grantMapBossDrop(p: {
  */
 export async function settleMapBossRun(req: FastifyRequest, userId: string, state: BattleState) {
   const mapBossId = state.mapBossId as string;
-  const quotaKey = state.bossQuotaKey ?? null;
+  const quotaToken = state.bossQuotaToken ?? null;
   const now = Date.now();
   const dayKey = mapBossDayKey(now);
   const damage = Math.max(0, Math.floor(state.damageDealt ?? 0));
   const spec = getMapBoss(mapBossId);
 
   if (state.result === 'fled') {
-    if (quotaKey) bossQuota.release(quotaKey);
+    if (quotaToken) bossQuota.release(quotaToken);
     const limit = spec ? mapBossDailyLimit(spec) : 0;
     return {
       mapBossId,
@@ -265,7 +267,7 @@ export async function settleMapBossRun(req: FastifyRequest, userId: string, stat
         'map boss damage event insert failed');
     }
   }
-  if (quotaKey) bossQuota.commit(quotaKey);
+  if (quotaToken) bossQuota.commit(quotaToken);
 
   const attempts = await prisma.bossDamageEvent.count({
     where: { userId, bossId: mapBossId, periodKey: dayKey },

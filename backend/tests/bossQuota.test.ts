@@ -78,16 +78,19 @@ test('buildBossBoard：空 / 脏数据不炸', () => {
 test('BossQuotaLedger：在途 + 已用达到上限后拒绝，release 后可再占', () => {
   const q = new BossQuotaLedger();
   const key = 'boss:daily:2026-11-07:b1:u1';
-  assert.equal(q.hold(key, 0, 2), true);
-  assert.equal(q.hold(key, 0, 2), true);
-  assert.equal(q.hold(key, 0, 2), false, '两个在途已占满');
+  const t1 = q.hold(key, 0, 2);
+  assert.equal(t1.ok, true);
+  assert.equal(typeof t1.token, 'string');
+  const t2 = q.hold(key, 0, 2);
+  assert.equal(t2.ok, true);
+  assert.equal(q.hold(key, 0, 2).ok, false, '两个在途已占满');
   assert.equal(q.heldOf(key), 2);
 
-  q.release(key);
+  q.release(t1.token!);
   assert.equal(q.heldOf(key), 1);
-  assert.equal(q.hold(key, 0, 2), true, '释放一个后可以再占');
+  assert.equal(q.hold(key, 0, 2).ok, true, '释放一个后可以再占');
 
-  q.commit(key);
+  q.commit(t2.token!);
   assert.equal(q.heldOf(key), 1, 'commit 只释放在途，不加已用（已用看 DB）');
 });
 
@@ -95,15 +98,54 @@ test('BossQuotaLedger：DB 已用次数参与计算，跨 key 互不影响', () 
   const q = new BossQuotaLedger();
   const k1 = 'boss:daily:2026-11-07:b1:u1';
   const k2 = 'boss:daily:2026-11-07:b1:u2';
-  assert.equal(q.hold(k1, 2, 3), true);
-  assert.equal(q.hold(k1, 2, 3), false, '已用 2 + 在途 1 = 3');
-  assert.equal(q.hold(k2, 2, 3), true, '别的账号不受影响');
-  assert.deepEqual(q.stats(), { keys: 2, held: 2 });
+  assert.equal(q.hold(k1, 2, 3).ok, true);
+  assert.equal(q.hold(k1, 2, 3).ok, false, '已用 2 + 在途 1 = 3');
+  assert.equal(q.hold(k2, 2, 3).ok, true, '别的账号不受影响');
+  assert.deepEqual(q.stats(), { keys: 2, held: 2, leases: 2, expired: 0 });
 });
 
-test('BossQuotaLedger：释放不存在的 key 不产生负数', () => {
+test('BossQuotaLedger：释放不存在的 token 不产生负数', () => {
   const q = new BossQuotaLedger();
   q.release('nope');
+  q.commit('nope');
   assert.equal(q.heldOf('nope'), 0);
   assert.equal(q.usageOf('nope', 4).committed, 4);
+});
+
+test('BossQuotaLedger：token 幂等——重复释放 / 释放后再 commit 都不二次扣减', () => {
+  const q = new BossQuotaLedger();
+  const key = 'boss:daily:2026-11-07:b1:u1';
+  const t = q.hold(key, 0, 5).token!;
+  assert.equal(q.heldOf(key), 1);
+  q.release(t);
+  assert.equal(q.heldOf(key), 0);
+  q.release(t); // 重复释放：no-op
+  q.commit(t);  // 释放后再 commit：no-op
+  assert.equal(q.heldOf(key), 0, '不会扣成负数或重复扣');
+});
+
+test('BossQuotaLedger：token 防 ABA——迟到释放旧租约不误扣同名 key 的新租约', () => {
+  const q = new BossQuotaLedger();
+  const key = 'boss:daily:2026-11-07:b1:u1';
+  const oldT = q.hold(key, 0, 5).token!;
+  q.release(oldT);              // 旧战斗结算，名额释放
+  assert.equal(q.heldOf(key), 0);
+  const newT = q.hold(key, 0, 5).token!; // 同名 key 新租约
+  assert.equal(q.heldOf(key), 1);
+  q.release(oldT);              // 旧 token 迟到再来：必须 no-op
+  assert.equal(q.heldOf(key), 1, '旧 token 不能误扣新租约（ABA 防护）');
+  q.release(newT);
+  assert.equal(q.heldOf(key), 0);
+});
+
+test('BossQuotaLedger：租约 TTL 过期后由 reapExpired 回收', () => {
+  const q = new BossQuotaLedger(0); // TTL=0，立即过期，便于确定性测试
+  const key = 'boss:daily:2026-11-07:b1:u1';
+  const t = q.hold(key, 0, 5).token!;
+  assert.equal(q.heldOf(key), 1);
+  assert.equal(q.reapExpired(Date.now()), 1, '过期租约被回收');
+  assert.equal(q.heldOf(key), 0, '回收后名额释放');
+  assert.equal(q.reapExpired(Date.now()), 0, '无残留可回收');
+  q.release(t); // 已回收的 token 再释放：no-op
+  assert.equal(q.heldOf(key), 0);
 });

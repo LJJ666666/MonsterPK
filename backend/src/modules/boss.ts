@@ -112,9 +112,11 @@ export async function applyBossStart(params: {
       const used = await prisma.bossDamageEvent.count({
         where: { userId: params.userId, bossId: spec.bossId, periodKey: dayKey },
       });
-      if (!bossQuota.hold(key, used, limit)) {
+      const held = bossQuota.hold(key, used, limit);
+      if (!held.ok) {
         return fail('BOSS_QUOTA_EXHAUSTED', '今日讨伐次数已用完', 429);
       }
+      const bossQuotaToken = held.token;
 
       const battleId = `bt_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
       try {
@@ -129,7 +131,7 @@ export async function applyBossStart(params: {
           themes: THEME_TABLE,
           now,
           rng: Math.random,
-          boss: { spec, quotaKey: key },
+          boss: { spec, quotaKey: key, quotaToken: bossQuotaToken ?? undefined },
         });
         battles.create(state);
         return {
@@ -143,8 +145,8 @@ export async function applyBossStart(params: {
           },
         };
       } catch (err) {
-        // 开局失败必须放回名额，否则这次 hold 会一直占到服务重启。
-        bossQuota.release(key);
+        // 开局失败必须放回名额，否则这次 hold 会一直占到服务重启。按 token 释放（防 ABA）。
+        if (bossQuotaToken) bossQuota.release(bossQuotaToken);
         if (err instanceof BattleError) return fail(err.code, err.message);
         throw err;
       }

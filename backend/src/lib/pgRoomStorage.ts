@@ -14,6 +14,7 @@
 import { roomDb } from './roomUnitOfWork';
 import { periodKeyOf, parsePeriodKey } from '../game/period';
 import type { QuotaUsage, RoomState } from './roomTypes';
+import { normalizeRoom } from './roomNormalize';
 
 /** 深拷贝，避免 `get` 返回的副本被调用方改了之后，绕开 `set` 静默污染存储（§3.6 序列化障碍之一）。 */
 function clone<T>(v: T): T {
@@ -39,7 +40,7 @@ export class PgRoomStorage {
     const row = await roomDb().room.findUnique({ where: { roomId } });
     if (!row) return undefined;
     const room = JSON.parse(row.data) as RoomState;
-    return room;
+    return normalizeRoom(room);
   }
 
   /** 插入新房间；已存在返回 false（调用方据此返回 ROOM_EXISTS）。 */
@@ -96,7 +97,7 @@ export class PgRoomStorage {
   /** 全量加载（sweep 用）；副本隔离，调用方改了不影响存储。 */
   async all(): Promise<RoomState[]> {
     const rows = await roomDb().room.findMany();
-    return rows.map((r) => JSON.parse(r.data) as RoomState);
+    return rows.map((r) => normalizeRoom(JSON.parse(r.data) as RoomState));
   }
 
   async getQuota(key: string): Promise<QuotaUsage> {

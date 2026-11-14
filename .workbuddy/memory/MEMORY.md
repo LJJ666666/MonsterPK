@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52）、**W6.3 DB 计数 ✅ 2026-11-13**（53/53）。下一步 **W6.4（#185 quota 租约 token + 幂等释放 + TTL≥30min + release 全分支）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52）、**W6.3 DB 计数 ✅ 2026-11-13**（53/53）、**W6.4 quota 租约 ✅ 2026-11-14**（#185：token 幂等+TTL30min+补齐 8 处 release/commit，tsc 0 错 / bossQuota 单测 11/11 / 纯逻辑单测 143/143）**。下一步 **W6.5（#186 序列化 3 障碍：pvpSettled/coopSettled/contributions/optional）**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -20,7 +20,7 @@
 - 服务端权威：客户端上报一律校验；`battleApi.ts` 不做离线降级、旧意图 `capture` 已删、下线 `battle_reward`。
 - 发奖顺序：占位→`readSave`→发奖→同步 `authority.expected`→`commitState`（规范 §28）。接新玩法分支显式穷举，别复用普通分支。
 - 前端写档只剩两个入口：服务端快照 `importSaveJson`（含 WS `session.state`）与意图通道 `intents.ts`。**不要再引入任何本地缓存真值**。
-- `data.ts` 大对象漏 `};` 会让后续 `export` 落进对象内部→改完立刻 `npm run check`。禁用 `crypto.randomUUID()`，统一 `rules.ts` 的 `uuid()`；Hook 必须在组件顶层。`strict:false`，判别联合不收窄用 `'code' in result`。
+- `data.ts` 大对象漏 `};` 会让后续 `export` 落进对象内部→改完立刻 `npm run check`。前端禁用 `crypto.randomUUID()`，统一 `rules.ts` 的 `uuid()`（旧 WebView 无此 API）；**后端 Node 22 用 `node:crypto` 的 `randomUUID()` 为既定模式**（roomRegistry/sweepLeader/bossQuota 等均如此，rules.ts 无 uuid 导出）。Hook 必须在组件顶层。`strict:false`，判别联合不收窄用 `'code' in result`。
 - 前端先读 `.impeccable.md`（复古像素/野外手记，内联 SVG、零 CDN）；移动端优先，弹窗 `max-w`+`overflow-auto`+`max-h`，375px 实测 `scrollWidth`。
 
 ## 4. 运行 / 环境 / Git
@@ -35,9 +35,10 @@
 
 ## 5. 本机环境（PG / Redis）
 - **PG = Windows 服务 `PostgreSQL16`**（账户 `NT AUTHORITY\NetworkService` 绕开 PG16 admin 检查，`StartType=Automatic`，127.0.0.1:5432，`pg_ctl.exe runservice -N PostgreSQL16 -D E:\Six\pg-runtime\data -w -o "-p 5432"`），会话结束不回收。管理命令在**本机**跑：`Start-Service PostgreSQL16` / `sc.exe start` / `net start`；⚠️ PowerShell 里 `sc` 是 `Set-Content` 别名，**必须写 `sc.exe`**。
-- **环境启动约定（杰哥 2026-11-13 定，跨机器通用）**：PG / Redis 由杰哥双击 `D:/Six/start-mpk-runtime.bat`（仓库外、幂等：已运行则 skip）启动；tx 开工前只探活（5432 / 6379、`health`），发现缺失**明确告知杰哥去启动**，不要自行注册系统服务或拉前台进程顶替。脚本旧版会打印老实例的 `PONG` 造成「假生效」，已加固为逐项 `OK/FAILED`。
-- 沙箱与本机**同一网络命名空间**（实测），"本机 PG → 沙箱后端"走得通；`postgres.exe` 直启被 admin 检查拒（exit 1）。
-- Redis `E:/Six/redis-runtime/redis-server.exe --port 6379` 后台起（会话结束被回收），`redis-cli PING` 判活。后端 `.env`：`DATABASE_URL=postgresql://mpk@127.0.0.1:5432/monsterpk`、`REDIS_URL=redis://127.0.0.1:6379`、`PORT=3001`；health 报 `lock/sweep/broadcast` 模式。
+- **环境启动约定（杰哥 2026-11-13 定，跨机器通用）**：PG / Redis 由杰哥双击 `start-mpk-runtime.bat`（**仓库外、幂等：已运行则 skip**）启动。脚本 2026-11-14 升级为 robust 版：**自适应 D:/Six 或 E:/Six 安装基**（家用机 D、公司机 E，同一份文件两机通用，放各自 `X:/Six/` 下即可）；**优先 `PostgreSQL16` Windows 服务 `sc start`**（服务以 NetworkService 跑，绕开 Administrator 下 `postgres.exe` 直启被 PG16 admin 检查拒 exit 1 的坑），服务未注册才回退 `postgres.exe` 直启并提示注册命令；非管理员时**提示**右键以管理员运行（**不自提权**，避免双击闪退）；逐项 `OK/FAILED` 校验。tx 开工前只探活（5432 / 6379、`health`），发现缺失**明确告知杰哥去启动**，不要自行注册系统服务或拉前台进程顶替。
+- ⚠️ **bat 必须用 CRLF 换行（致命坑）**：WorkBuddy 的 `Write` 写出的是 **LF**，而 `cmd.exe` 对纯 LF 的 `.bat` 会把嵌套括号块（`if (...) ( ... )`）解析错 → 语法错误直接退出，**连末尾 `pause` 都执行不到 = 双击/管理员运行都「闪退」**。修法：`Write` 写 LF 后，用 Bash `sed -i 's/\r$//; s/$/\r/' <file>` 转 CRLF（或 PowerShell `Set-Content -Encoding ascii`，但 PowerShell 工具会扫描 cmd 语法、遇到 `if exist` 等内容直接拦截写入，故 bat 改写走「Write→Bash sed 转 CRLF」最稳）。另：沙箱 Bash **禁止调 `cmd.exe`**（"bypasses command validation"），无法实跑 bat 验证语法，只能静态分析 + 交本机跑。⚠️ **块内 echo 禁用裸括号**：`if (...) (...)` 块内的 `echo` 文本若含裸 `)`（如 `echo ... (direct), skip`），cmd 会把它当成该 `if` 块的**闭合括号**，导致整段括号失配、报「此时不应有 skip。」并中止脚本（**连 `pause` 都执行不到 = 窗口闪退**）。避坑：块内 echo 不用裸 `()`，改方括号或直接去掉括号；排查用 `grep -o '('` / `')'` 计数是否平衡。
+- 沙箱与本机**同一网络命名空间**（实测），"本机 PG → 沙箱后端"走得通。⚠️ 关于 `postgres.exe` 直启：原记"被 PG16 admin 检查拒 exit 1"**并非绝对**——2026-11-14 家用机（账户 `C:\Users\Administrator`）实测 `start-mpk-runtime.bat` 走 direct launch 分支，`postgres.exe -D ... -p 5432` 正常起、探活 `[PG] OK`，无需注册服务。故服务注册是**可选优化**而非必做；若某机直启被拒再按 bat 内 `pg_ctl register` 提示注册。
+- Redis `X:/Six/redis-runtime/redis-server.exe --port 6379`（X=D 家用 / E 公司）后台起（会话结束被回收），`redis-cli PING` 判活。后端 `.env`：`DATABASE_URL=postgresql://mpk@127.0.0.1:5432/monsterpk`、`REDIS_URL=redis://127.0.0.1:6379`、`PORT=3001`；health 报 `lock/sweep/broadcast` 模式。
 
 ## 6. 后端架构快照
 - 存档三层校验：`saveValidator`→`antiCheat`(`CHEAT_CODES`)→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前 400 拦整包 PUT 夹带真值。
@@ -54,7 +55,7 @@
 - #182 W6.1 RoomStorage 异步化 + PG 行版本 CAS ✅（零行为变更，bug_log §60）
 - #183 W6.2 room+quota+结算/发奖 收进同一事务边界 ✅（`lib/roomUnitOfWork.ts`：`AsyncLocalStorage` 事务客户端 `roomDb()` + 提交后副作用 `onRoomCommit()` + `withRoomUnit()`=房间锁+事务；结算改事务内 await、失败整包回滚；四类存储层共用 tx；`w62RoomUnit.test.ts` 8 例 + `e2e:w62` 13 项）
 - #184 W6.3 房间 `committed` 改 DB 计数 + 结算事务二次 count ✅（`RoomQuotaDaily` 首次启用；`tryHoldQuota` 一条条件 UPDATE，`settleQuota` 二次 count→在途账→每日累计账三段裁决，超限抛 `RoomQuotaExceededError` 整包回滚；`w63RoomQuota.test.ts` 9 例 + `e2e:w63` 13 项）
-- #185 W6.4 quota 租约 token + 幂等释放 + TTL≥30min + 补齐 10 处 release 分支
+- #185 W6.4 quota 租约 token + 幂等释放 + TTL≥30min + 补齐 8 处 release/commit 分支 ✅（token 防 ABA；reapExpired 接入 runGlobalSweep；tsc 0 错 / bossQuota 单测 11/11 / 纯逻辑单测 143/143）
 - #186 W6.5 序列化 3 障碍修复（pvpSettled/coopSettled/contributions/optional）
 - #187 W6.6 按接收者裁剪视图 + `RoomState.revision`/`Save.revision` 区分
 - #188 W6.7 双实例 E2E 验收（含跨实例 room 送达）

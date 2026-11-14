@@ -1,107 +1,81 @@
 /**
- * 活跃战斗注册表（P3-1）。
+ * 活跃战斗注册表（P3-1 / W8.1 降为 facade）。
  *
- * 纯内存、纯逻辑、零 IO：便于 node:test 覆盖归属校验与生命周期。
- * 约束：
+ * 约束（与改造前完全一致，只是落到可注入存储上）：
  *  - 一个账号（单档）同时只允许一场战斗（新开覆盖旧的，避免并发刷奖励）；
  *  - `get()` 必须同时校验 userId + battleId，防止拿到别人的战斗；
- *  - 30 分钟无动作自动回收（断线挂机不会永久占内存）。
+ *  - 30 分钟无动作自动回收（断线挂机不会永久占内存 / Redis）。
+ *
+ * W8.1 变更：真值可落在共享存储上，`useRedisStorage()` 启动时切换。
+ * 这解决的是「换实例不丢战斗」——玩家断线重连被路由到另一实例时，
+ * `current(userId)` 仍能拿到那场战斗，而不是当成没有战斗重新开局。
+ *
+ * 全方法异步：接口不提供同步变体，避免「某处忘了 await」的静默 bug。
  */
-import type { BattleState } from '../game/battle.js';
+import { MemoryBattleStorage } from './memoryBattleStorage';
+import { BATTLE_TTL_MS, type BattleStats, type BattleStorage } from './battleStorage';
+import { RedisBattleStorage } from './redisBattleStorage';
+import type Redis from 'ioredis';
 
-export const BATTLE_TTL_MS = 30 * 60 * 1000;
-
-/** 账号单档：战斗 key 就是 userId（历史名保留）。 */
-export function battleKey(userId: string): string {
-  return userId;
-}
-
-export type BattleStats = {
-  /** 活跃战斗数。 */
-  active: number;
-  /** 有战斗的账号数。 */
-  users: number;
-};
+export { BATTLE_TTL_MS, BATTLE_PHYSICAL_TTL_FACTOR } from './battleStorage';
+export type { BattleStats } from './battleStorage';
+export { battleKey } from './memoryBattleStorage';
 
 export class BattleRegistry {
-  private readonly byId = new Map<string, BattleState>();
-  private readonly byKey = new Map<string, string>();
+  private storage: BattleStorage;
 
-  get size(): number {
-    return this.byId.size;
+  constructor(opts: { storage?: BattleStorage } = {}) {
+    this.storage = opts.storage ?? new MemoryBattleStorage();
   }
 
-  create(state: BattleState): BattleState {
-    const key = battleKey(state.userId);
-    const prevId = this.byKey.get(key);
-    if (prevId) this.byId.delete(prevId);
-    this.byId.set(state.id, state);
-    this.byKey.set(key, state.id);
-    return state;
+  /** 'memory' | 'redis'，health 诊断用。 */
+  get kind(): string {
+    return this.storage.kind;
   }
 
-  /** 两个键全对才返回；battleId 泄漏也拿不到别人的战斗。 */
-  get(userId: string, battleId: string): BattleState | undefined {
-    const state = this.byId.get(battleId);
-    if (!state) return undefined;
-    if (state.userId !== userId) return undefined;
-    return state;
+  /** 启动装配：`REDIS_URL` 已配置时换成共享实现（与 W7 `wilds.useRedisStorage` 同思路）。 */
+  useRedisStorage(client: Redis, prefix = ''): void {
+    this.storage = new RedisBattleStorage({ client, prefix });
   }
 
-  current(userId: string): BattleState | undefined {
-    const id = this.byKey.get(battleKey(userId));
-    return id ? this.byId.get(id) : undefined;
+  size(): Promise<number> {
+    return this.storage.size();
   }
 
-  /** 保存推进后的状态（同一 battleId 覆盖）。 */
-  update(state: BattleState): void {
-    if (!this.byId.has(state.id)) return;
-    this.byId.set(state.id, state);
+  create(state: Parameters<BattleStorage['create']>[0]): ReturnType<BattleStorage['create']> {
+    return this.storage.create(state);
   }
 
-  drop(userId: string): boolean {
-    const key = battleKey(userId);
-    const id = this.byKey.get(key);
-    if (!id) return false;
-    this.byKey.delete(key);
-    return this.byId.delete(id);
+  get(userId: string, battleId: string): ReturnType<BattleStorage['get']> {
+    return this.storage.get(userId, battleId);
   }
 
-  /** 封号 / 登出：丢弃该账号全部战斗。 */
-  dropUser(userId: string): number {
-    let n = 0;
-    for (const [id, state] of [...this.byId]) {
-      if (state.userId !== userId) continue;
-      this.byId.delete(id);
-      this.byKey.delete(battleKey(userId));
-      n += 1;
-    }
-    return n;
+  current(userId: string): ReturnType<BattleStorage['current']> {
+    return this.storage.current(userId);
   }
 
-  /** 回收超时战斗；返回清理数量。 */
-  sweep(now: number, ttl = BATTLE_TTL_MS): number {
-    return this.sweepExpired(now, ttl).length;
+  update(state: Parameters<BattleStorage['update']>[0]): Promise<void> {
+    return this.storage.update(state);
   }
 
-  /**
-   * P4-2c：回收超时战斗并**返回被回收的战斗态**，让调用方释放 Boss 的在途次数。
-   * 单独开一个方法而不是改 `sweep()` 的返回类型：既有调用方与单测依赖 `number`。
-   */
-  sweepExpired(now: number, ttl = BATTLE_TTL_MS): BattleState[] {
-    const cleaned: BattleState[] = [];
-    for (const [id, state] of [...this.byId]) {
-      if (now - state.updatedAt <= ttl) continue;
-      this.byId.delete(id);
-      this.byKey.delete(battleKey(state.userId));
-      cleaned.push(state);
-    }
-    return cleaned;
+  drop(userId: string): Promise<boolean> {
+    return this.storage.drop(userId);
   }
 
-  stats(): BattleStats {
-    const users = new Set<string>();
-    for (const s of this.byId.values()) users.add(s.userId);
-    return { active: this.byId.size, users: users.size };
+  dropUser(userId: string): Promise<number> {
+    return this.storage.dropUser(userId);
+  }
+
+  /** 兼容旧名：只要数量。新代码用 `sweepExpired()`（还要释放 Boss 名额）。 */
+  async sweep(now: number, ttl = BATTLE_TTL_MS): Promise<number> {
+    return (await this.storage.sweepExpired(now, ttl)).length;
+  }
+
+  sweepExpired(now: number, ttl = BATTLE_TTL_MS): ReturnType<BattleStorage['sweepExpired']> {
+    return this.storage.sweepExpired(now, ttl);
+  }
+
+  stats(): Promise<BattleStats> {
+    return this.storage.stats();
   }
 }

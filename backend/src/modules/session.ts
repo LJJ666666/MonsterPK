@@ -14,6 +14,7 @@ import {
   type SaveCasPatch, type SaveCasRow, type SaveCasStore,
 } from '../lib/saveCas';
 import { encodeServerMessage } from '../lib/wsProtocol';
+import { publishSessionRevision } from '../lib/sessionRevision';
 import { gameSessions, broadcastToUser, getSessionStats } from './sessionBus';
 
 export { RevisionConflictError } from '../lib/saveCas';
@@ -205,6 +206,10 @@ export async function commitState(
       });
       // 广播给该账号所有在线连接（含发起端；前端用 revision 幂等忽略自己的回显）。
       broadcastToUser(userId, encodeServerMessage(buildSnapshot(state)));
+      // W8.2：把最新 revision 写到共享戳，让其它实例的内存副本能被判为「落后」。
+      // 挂在 after-commit 钩子里：事务回滚时戳不该前进（否则别的实例会反复回源）。
+      // fire-and-forget：写戳失败不影响本次提交（读档路径会退化成多读一次 DB）。
+      void publishSessionRevision(userId, nextRevision);
     });
     return { saved, revision: nextRevision };
   }

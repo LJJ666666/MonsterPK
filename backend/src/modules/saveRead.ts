@@ -7,6 +7,7 @@
  */
 import { roomDb, isRoomUnitActive } from '../lib/roomUnitOfWork';
 import { parseAuthority, type AuthorityState } from '../lib/authority';
+import { isSessionStale } from '../lib/sessionRevision';
 import { gameSessions } from './sessionBus';
 
 export type SaveRow = {
@@ -22,7 +23,9 @@ export async function readSave(userId: string): Promise<SaveRow | null> {
   // 共斗「回写队伍」后再「发通关奖励」）。事务外保持「在线优先」原口径。
   if (!isRoomUnitActive()) {
     const mem = gameSessions.get(userId);
-    if (mem) {
+    // W8.2：内存副本可能落后于其它实例（本实例只是被 REST 分流打到）。
+    // 共享戳更大就丢弃内存副本回库读——多一次 DB 读，换回「不会把旧档当真值」。
+    if (mem && !(await isSessionStale(userId, mem.authority.revision))) {
       return { raw: mem.data, schemaVersion: mem.schemaVersion, clientId: mem.clientId, authority: mem.authority };
     }
   }

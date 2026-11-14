@@ -251,7 +251,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
 
     // P4-2c：Boss 战未结束时不允许用它顶掉 —— 否则这次「在途次数」会一直挂到 TTL。
     // 普通战斗之间仍然允许覆盖（历史行为，E2E 依赖），只拦 Boss / 地图首领。
-    const existing = battles.current(userId);
+    const existing = await battles.current(userId);
     if (existing?.bossId || existing?.mapBossId) {
       return reply.code(409).send({ error: '战斗尚未结束，请先完成或放弃', code: 'BOSS_IN_PROGRESS' });
     }
@@ -288,13 +288,13 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
 
     const now = Date.now();
     const battleId = `bt_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
-    // P4-1b：指定野怪时先原子抢占。claim 是同步纯函数，没有 await，
-    // 同一实例的两个并发开局请求只有第一个能拿到（捕获互斥的语言级保证）。
+    // P4-1b：指定野怪时先原子抢占。W7 起 claim 走 Redis Lua 原子脚本，
+    // 跨实例的两个并发开局请求也只有第一个能拿到（互斥不再依赖 Node 单线程）。
     let claimed: WildInstance | null = null;
     let claimedAreaId: string | null = null;
     let claimedSpec: WildAreaSpec | null = null;
     if (wildId) {
-      if (battles.current(userId)) {
+      if (await battles.current(userId)) {
         return reply.code(409).send({ error: '已有进行中的战斗', code: 'BATTLE_IN_PROGRESS' });
       }
       const areaKey = areaId ?? theme;
@@ -346,7 +346,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
         const me = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
         if (me?.role === 'admin') applyAdminTestFlags(state, testFlags);
       }
-      battles.create(state);
+      await battles.create(state);
       if (claimed && claimedAreaId && claimedSpec) {
         // 抢占成功立刻广播：其他客户端马上看到「已被挑战」，不会继续排队点同一只。
         await publishArea(claimedAreaId, claimedSpec);
@@ -390,7 +390,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   ) {
     const { battleId, action } = params;
 
-    const state = battles.get(userId, battleId);
+    const state = await battles.get(userId, battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在或已结束', code: 'BATTLE_NOT_FOUND' });
     if (state.actions > 500) return reply.code(429).send({ error: '战斗回合过多，请重新开局' });
 
@@ -416,7 +416,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
       return fail(reply, err);
     }
 
-    battles.update(next);
+    await battles.update(next);
     broadcastBattle(userId, next);
 
     // 结束：服务端结算写档（这一步之后客户端再 PUT 也只能与原档一致）
@@ -435,7 +435,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
           authority,
           source: 'battle',
         });
-        battles.drop(userId);
+        await battles.drop(userId);
 
         // F04 §31.9：常规战斗首通野区 → 幂等发对应徽章（V1 过渡口径）。
         // 只认服务端结算出的 areaId / result；Boss 战 areaId 为 null 不参与。
@@ -512,7 +512,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
   /** 查当前战斗：重连 / 刷新后用，避免把战斗态存到客户端。 */
   fastify.get('/api/battle/current', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = (req.user as any).userId;
-    const state = battles.current(userId);
+    const state = await battles.current(userId);
     if (!state) return { ok: true, battle: null };
     return { ok: true, battle: battleView(state) };
   });
@@ -522,9 +522,9 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     const userId = (req.user as any).userId;
     const parsed = z.object({ battleId: z.string().min(1).max(80) }).strip().safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: '参数不合法' });
-    const state = battles.get(userId, parsed.data.battleId);
+    const state = await battles.get(userId, parsed.data.battleId);
     if (!state) return reply.code(404).send({ error: '战斗不存在', code: 'BATTLE_NOT_FOUND' });
-    battles.drop(userId);
+    await battles.drop(userId);
     // P4-2c / F18-c：放弃 Boss / 地图首领战 = 不扣次数（release 在途名额），也不写伤害事件。
     // 按 bossQuotaToken 释放即可，boss 与 mapBoss 共用 bossQuota；mapBoss 战 state 只有 mapBossId 没有 bossId，
     // 原 `state.bossId &&` 守卫会让 mapBoss 战的在途名额泄漏（每天白丢次数），故用 token 而非常量守卫。

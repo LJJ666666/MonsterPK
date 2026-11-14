@@ -96,7 +96,7 @@ export async function runGlobalSweep(
   bossQuota.reapExpired(now);
   if (!ctx) {
     sweepSessions(now);
-    for (const st of battles.sweepExpired(now)) {
+    for (const st of await battles.sweepExpired(now)) {
       if (st.bossQuotaToken) bossQuota.release(st.bossQuotaToken);
     }
     for (const areaId of await wilds.sweep(now)) {
@@ -110,7 +110,7 @@ export async function runGlobalSweep(
   await guardedCommit(ctx, `sweep:sessions:${bucket}`, () => { sweepSessions(now); });
 
   // 每个被回收的 Boss 战只放行一次 quota.release；重复 sweep 不会把名额多还。
-  const expired = battles.sweepExpired(now);
+  const expired = await battles.sweepExpired(now);
   for (const st of expired) {
     if (!st.bossQuotaToken) continue;
     const token = st.bossQuotaToken;
@@ -163,7 +163,7 @@ export async function runBanSweep(fastify: FastifyInstance): Promise<void> {
       detachConnection(c.id);
       if (banned) {
         dropUserSessions(c.userId);
-        battles.dropUser(c.userId);
+        await battles.dropUser(c.userId);
       }
     }
   } catch (err) {

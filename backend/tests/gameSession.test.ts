@@ -40,7 +40,7 @@ test('sessionKey：按 userId 隔离（账号单档）', () => {
   assert.notEqual(sessionKey('u1'), sessionKey('u2'));
 });
 
-test('hydrate：无 DB 记录不建会话；有记录时建立且重复 hydrate 命中内存', () => {
+test('hydrate：无 DB 记录不建会话；有记录时建立，重复 hydrate 按 revision 裁决', () => {
   const r = new GameSessionRegistry();
   assert.equal(r.hydrate('u1', null), null);
   assert.equal(r.size, 0);
@@ -49,9 +49,19 @@ test('hydrate：无 DB 记录不建会话；有记录时建立且重复 hydrate 
   assert.equal(s.authority.revision, 7);
   assert.equal(s.data, record().data);
   assert.equal(r.size, 1);
-  const again = r.hydrate('u1', record(99));
-  assert.equal(again, s, '在线期间内存即权威，不能被旧 DB 记录覆盖');
-  assert.equal(again!.authority.revision, 7);
+
+  // W8.2：DB 不比内存新 → 保留内存（返回同一对象，在线连接登记不会丢）。
+  const same = r.hydrate('u1', record(7));
+  assert.equal(same, s, '同一版本重复 hydrate 必须复用内存对象');
+  assert.equal(same!.authority.revision, 7);
+
+  // W8.2：DB 更新（别的实例提交过）→ 用 DB 覆盖内存。
+  // 这正是「玩家换实例重连不会读到旧档」的保证；改造前这里会丢弃 DB 行。
+  const newerRecord = { ...record(99), data: '{"version":"10","party":[{"id":"x"}]}' };
+  const newer = r.hydrate('u1', newerRecord);
+  assert.equal(newer, s, '原地覆盖，对象引用保持不变');
+  assert.equal(newer!.authority.revision, 99, 'DB 版本更高时必须覆盖内存副本');
+  assert.equal(newer!.data, newerRecord.data, '内容也要一起换，不能只更新版本号');
 });
 
 test('apply：W2 起 revision 由 DB 列给定，内存缓存不自行 +1', () => {

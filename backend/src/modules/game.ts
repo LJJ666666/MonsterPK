@@ -22,6 +22,7 @@ import { MUTATION_OPS, applyMutation, createNewSave, MutationError, type Mutatio
 import { EXPECTED_SAVE_VERSION } from '../lib/saveValidator';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { commitState } from './session';
+import { isSessionStale } from '../lib/sessionRevision';
 import { battles, gameSessions } from './sessionBus';
 
 const bodySchema = z.object({
@@ -49,7 +50,8 @@ type SaveRow = {
 
 async function readSave(userId: string): Promise<SaveRow | null> {
   const mem = gameSessions.get(userId);
-  if (mem) {
+  // W8.2：与 `saveRead.ts::readSave` 同口径——内存副本落后就回库。
+  if (mem && !(await isSessionStale(userId, mem.authority.revision))) {
     return { raw: mem.data, schemaVersion: mem.schemaVersion, clientId: mem.clientId, authority: mem.authority };
   }
   const rec = await prisma.save.findUnique({ where: { userId } });
@@ -100,7 +102,7 @@ async function handleGameOp(
 
     // —— P3-2b：新档由服务端生成（客户端不再自己掷初始幻兽）——
     if (opRaw === 'new_game') {
-      const battle = battles.current(userId);
+      const battle = await battles.current(userId);
       if (battle && !battle.finished) {
         return reply.code(400).send({ error: '战斗进行中，无法创建新档', code: 'BATTLE_IN_PROGRESS' });
       }
@@ -129,7 +131,7 @@ async function handleGameOp(
     }
 
     // 战斗进行中不允许动存档：治疗/换道具会绕过服务端战斗的 HP 真值。
-    const battle = battles.current(userId);
+    const battle = await battles.current(userId);
     if (battle && !battle.finished) {
       return reply.code(400).send({ error: '战斗进行中，无法执行该操作', code: 'BATTLE_IN_PROGRESS' });
     }

@@ -7,13 +7,13 @@
  *  - 结算：在 `modules/battle.ts` 的结束分支按 `gymId` 分流到 `settleGymRun`：
  *    胜利 → 经 `grantBadge` 发 `gym:<locationId>` 徽章（唯一写入口、幂等）+ 首次发 `ach_gym_first`；
  *    逃跑 / 全灭 → 不发徽章（冷却已在开局时设置，无需再处理）。
- *  - 防刷：开局即置 20min「馆主休息」冷却（单进程内存，见 `game/gyms.ts`）。
+ *  - 防刷：开局即原子占 20min「馆主休息」冷却（W8.0 起走共享 KV，见 `game/gyms.ts`）。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { BattleError, battleView, createBattle } from '../game/battle';
-import { GYMS, getGym, gymCooldownUntil, isGymOnCooldown, setGymCooldown } from '../game/gyms';
+import { GYMS, acquireGymCooldown, getGym, gymCooldownUntil, isGymOnCooldown } from '../game/gyms';
 import { THEME_TABLE } from '../game/content';
 import { battles } from './sessionBus';
 import { readSave } from './saveRead';
@@ -50,11 +50,11 @@ export async function applyGymStart(params: {
   const now = params.now ?? Date.now();
 
   return withSlotLock(slotLockKey(params.userId), async (): Promise<GymResult<Record<string, unknown>>> => {
-    if (battles.current(params.userId)) {
+    if (await battles.current(params.userId)) {
       return fail(GYM_IN_PROGRESS_CODE, '已有进行中的战斗', 409);
     }
-    if (isGymOnCooldown(params.userId, params.locationId, now)) {
-      const remaining = Math.max(0, gymCooldownUntil(params.userId, params.locationId) - now);
+    if (await isGymOnCooldown(params.userId, params.locationId, now)) {
+      const remaining = Math.max(0, (await gymCooldownUntil(params.userId, params.locationId)) - now);
       return fail(GYM_ON_COOLDOWN_CODE, '馆主正在休息，请稍后再来', 429, remaining);
     }
     const row = await readSave(params.userId);
@@ -66,8 +66,14 @@ export async function applyGymStart(params: {
     const aliveOne = party.some((m: any) => m && typeof m.hp === 'number' && m.hp > 0);
     if (!aliveOne) return fail('PARTY_FAINTED', '队伍中没有可战斗的幻兽');
 
-    // 开局即置冷却：防「输→立刻重开」刷战斗，也拦住放弃后瞬重开。
-    setGymCooldown(params.userId, params.locationId, now);
+    // W8.0：开局即占冷却——**这里才是跨实例的唯一裁决点**。
+    // 上方 isGymOnCooldown 只是快速预检（省掉白建一场战斗的开销），
+    // 两个实例同时通过预检时，只有 acquire 成功的那一个能继续开战。
+    // 位置保持在队伍校验之后：队伍不合法不应白占 20 分钟 CD（与改造前语义一致）。
+    const cd = await acquireGymCooldown(params.userId, params.locationId, now, spec.cooldownMs);
+    if (!cd.ok) {
+      return fail(GYM_ON_COOLDOWN_CODE, '馆主正在休息，请稍后再来', 429, Math.max(0, cd.until - now));
+    }
 
     const battleId = `gt_${now.toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
     try {
@@ -85,7 +91,7 @@ export async function applyGymStart(params: {
         rng: Math.random,
         gym: { locationId: spec.locationId, specId: spec.aceSpeciesId, level: spec.aceLevel },
       });
-      battles.create(state);
+      await battles.create(state);
       return ok({
         battle: battleView(state),
         gym: {
@@ -94,7 +100,7 @@ export async function applyGymStart(params: {
           aceSpeciesId: spec.aceSpeciesId,
           aceLevel: spec.aceLevel,
         },
-        cooldownUntil: gymCooldownUntil(params.userId, spec.locationId),
+        cooldownUntil: cd.until,
         readonly: true,
       });
     } catch (err) {
@@ -125,9 +131,9 @@ export async function gymRoutes(fastify: FastifyInstance): Promise<void> {
     const badgeIds = await readBadgeIds(userId);
     const owned = new Set(badgeIds);
     const now = Date.now();
-    const list = GYMS.map((g) => {
+    const list = await Promise.all(GYMS.map(async (g) => {
       const badgeId = badgeIdForLocation(g.locationId);
-      const until = gymCooldownUntil(userId, g.locationId);
+      const until = await gymCooldownUntil(userId, g.locationId);
       return {
         locationId: g.locationId,
         leaderName: g.leaderName,
@@ -138,7 +144,7 @@ export async function gymRoutes(fastify: FastifyInstance): Promise<void> {
         onCooldown: until > now,
         cooldownUntil: until,
       };
-    });
+    }));
     return { ok: true, readonly: true, gyms: list };
   });
 }

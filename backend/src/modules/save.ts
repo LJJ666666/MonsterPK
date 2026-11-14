@@ -17,6 +17,7 @@ import { withSlotLock, slotLockKey } from '../lib/slotLock';
 import { gameSessions } from './sessionBus';
 import { commitState, RevisionConflictError } from './session';
 import { readRevision } from '../lib/revisionSource';
+import { isSessionStale } from '../lib/sessionRevision';
 
 // PUT 入参：存档 JSON 文本（限 5MB）+ 客户端标识 / 基线版本 / 意图 nonce / 重建基线标记
 const putSchema = z.object({
@@ -63,7 +64,8 @@ export async function saveRoutes(fastify: FastifyInstance) {
     }
 
     const live = gameSessions.get(userId);
-    if (live) {
+    // W8.2：内存副本落后于其它实例时回库，避免把旧档推给刚换实例的客户端。
+    if (live && !(await isSessionStale(userId, live.authority.revision))) {
       return {
         data: live.data,
         updatedAt: new Date(live.updatedAt).toISOString(),

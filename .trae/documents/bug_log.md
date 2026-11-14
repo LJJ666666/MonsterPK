@@ -1551,5 +1551,121 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
   2. `src/lib/room.test.ts` 4 处 `toBe(x, "说明")` —— `toBe` 只接受 1 个参数，vitest 运行期忽略第二参数故单测一直绿，但 `tsc -b` 会报 `TS2554`（W6.6 的 `fe76fae` 引入，此前被增量缓存掩盖）。改为 vitest 正确的 `expect(actual, "说明").toBe(x)`。
 - **边界**：Redis 实现是**单实例 Redis** 语义（Lua 内动态拼 `<prefix>wild:rev:<areaId>`）。Redis Cluster 下需改为 hash tag（如 `{wild:<areaId>}`）才能让同一区域的 key 落同槽；部署形态变化时须回来改这一层。`stats()` 为 health 诊断用，走 `SMEMBERS + pipeline` 全量点查，调用频率低故未做计数器缓存；若以后高频轮询需换 `SCAN` 增量或维护计数键。
 
+---
 
+## §69 P5-1 W8 收官：战斗 / 会话 / 馆主 CD 共享 KV + TTL（2026-11-14）
 
+**背景**：W6 让房间进 PG、W7 让野怪池进 Redis 之后，剩下三处真值还在进程内 `Map`：
+战斗态（`BattleRegistry`）、在线会话（`GameSessionRegistry`）、馆主休息 CD（`gyms.ts::cooldowns`）。
+三者都是「一个字符串值 + 一个到期时间」的形态，但单实例下靠 Node 单线程语言级保证，多实例立刻破：
+A 开的战斗 B 看不见（玩家重连换实例=战斗丢失）、A/B 各自判过「未冷却」于是同一次冷却窗口被开两场。
+
+**定稿给的退路是「按 userId 粘性路由先降级」，本次没走退路**——三处都做了真共享，
+因为代价可控（一处 KV 抽象 + 三处组合语义），而粘性路由只是把问题推迟到负载均衡器。
+
+### 69.1 基础设施：`lib/kvStore.ts`（带 TTL 的共享 KV）
+
+三处都是「字符串值 + 到期时间」，抽一层原语后 Redis 代码只写一次：
+
+| 文件 | 职责 |
+|---|---|
+| `lib/kvStore.ts` | `KvStore` 接口（`get/set/acquire/del/keys/pttl/clear`）+ `ACQUIRE_SCRIPT` |
+| `lib/memoryKvStore.ts` | 内存实现，**惰性过期**（读时判定，不用定时器）；`keys` 遍历时顺带清理（原 `gyms.ts` 的 Map 只增不减，是个泄漏） |
+| `lib/redisKvStore.ts` | Redis 实现；`keys` 用 **SCAN 游标**不用 KEYS；`clear()` 在**空前缀下拒绝执行**（防测试误清共享真值） |
+
+**`acquire` 为什么要用 Lua 而不是 `SET NX` + `GET`**：两条命令之间键可能刚好过期，
+会返回「失败 + current=null」，调用方就**算不出剩余冷却时间**。脚本一次往返解决：
+存在则返回旧值，不存在才写入。
+
+### 69.2 馆主 CD（W8.0）
+
+改造前是**两步**：`isGymOnCooldown()` 判 → `setGymCooldown()` 写。多实例下 A/B 都能判过、各开一场，
+20min CD 形同虚设。现在合并成一次原子 `acquireGymCooldown()`：
+
+- 键 `gym:cd:<userId>:<locationId>`，值 = 到期时间戳，**TTL = 冷却时长**（Redis 到期自动删，无需清理任务）；
+- 位置刻意放在「队伍校验之后」：队伍不合法不该白占 20 分钟 CD（与改造前语义一致）；
+- 预检 `isGymOnCooldown()` 保留，只作快速拒绝（省掉白建一场战斗），**真正裁决点是 acquire**；
+- 放弃/战败**不回退 CD**（`abandon` 不碰这个键），这正是 F18-b 防「输→立刻重开」刷经验的落点。
+
+`game/gyms.ts` 加 `setGymCooldownStore()` / `getGymCooldownStoreKind()` / `resetGymCooldownStoreForTest()`，
+`modules/gym.ts` 6 处 async 化（含 `overview` 的 `Promise.all`）。
+
+### 69.3 战斗态（W8.1）
+
+与 W7 `WildStorage` 同构四层：`lib/battleStorage.ts`（**全 async** 接口）→ `lib/memoryBattleStorage.ts`
+（原 Map 状态机原样承接，作行为基线）→ `lib/redisBattleStorage.ts` → `lib/battleSession.ts` 降为 facade
+（保留 `BattleRegistry` 类名与构造签名，`useRedisStorage()` 启动切换）。
+
+Key：`battle:<battleId>`（JSON 全量）/ `battle:user:<userId>`（账号单档索引）/ `battle:ids`（SET，sweep 遍历）。
+
+**关键设计——物理 TTL = 逻辑超时 × 2**（`BATTLE_PHYSICAL_TTL_FACTOR`）：
+`sweepExpired()` 必须**返回被回收的战斗态**，调用方靠它释放 Boss 在途名额（`releaseBossHold`）。
+若物理 TTL 与逻辑超时相同，键会先被 Redis 删掉，sweep 只能看到「不存在」，**名额就泄漏了**。
+物理 TTL 只作兜底（防 sweep 长期不跑导致堆积）。
+
+Lua 两段：
+- `CREATE_SCRIPT`：同账号旧战斗**原子作废**（删旧 battle + 删旧索引 + SREM），再写新战斗与索引——
+  非原子会留下两场战斗，旧的那场再也不被 `current` 命中却永久占位；
+- `UPDATE_SCRIPT`：**存在才写**（不凭空插入）且同步给索引 `PEXPIRE` 续期，避免索引先于战斗态过期。
+
+其余读写由调用方已有的账号锁（`withSlotLock` → W3 Redis 租约锁）串行兜底。
+调用方 async 化 **15 处**：`battle.ts` 8、`boss.ts` 2、`game.ts` 2、`gym.ts` 2、`mapBoss.ts` 2、
+`realtime.ts` 3（含 `for (const st of await ...)`）、`index.ts` 1（health）。
+
+### 69.4 会话新鲜度（W8.2）——不搬全文，只搬版本戳
+
+`GameSessionState.data` 是**整份存档 JSON**，每次 `apply` 都写 Redis 等于给已有的一次 DB 写再翻一倍，
+而 `Save` 表本来就是会话真值（`Save.revision` 列是版本真值，W2 起 CAS 只认它）。
+真正缺的不是数据，是**「B 的内存副本是不是落后了」这个判断依据**。
+
+两处改动：
+
+1. **修 `hydrate()` 的根因**（这是本次最有价值的发现）：
+   改造前是 `if (existing) return existing`——内存有会话就**完全忽略刚读出来的 DB 行**。
+   单实例没问题，多实例下 A 提交了新档、B 内存还是旧副本，玩家重连到 B 时 B 把 DB 新数据丢掉继续推旧的。
+   现在按 `revision` 裁决：DB 更新则**原地覆盖**内容字段、保留 `connections`（进程本地真值）与在线时间；
+   DB 不新则保留内存。原地改而非换对象，因为 `hydrateForUser` 之后会立刻 `attach`，外部已持有引用。
+2. **共享版本戳** `lib/sessionRevision.ts`：键 `sess:rev:<userId>`，**TTL = 会话 TTL + 1min**
+   （避免「会话还在、戳先没了」漏判）。挂在 `commitState` 的 **after-commit 钩子**里 fire-and-forget 写
+   （事务回滚时戳不该前进，否则别的实例会反复回源）；`readSave` / `GET save` / `game.ts::readSave`
+   内存命中前比对，戳更大就丢弃内存副本回库读。
+   **降级**：未装配（无 `REDIS_URL` 单实例）或 Redis 读写失败一律判「不落后」——读档路径不能依赖 Redis 可用性。
+
+### 69.5 装配与诊断
+
+`index.ts` 在 `registerRealtime()` **之前**装配三处（心跳第一轮 sweep 就读写战斗态，装晚了这一轮会写进本进程内存）。
+`/api/health` 新增 `w8: { battleStorage, gymCooldown, sessionRevision }`，三值 `redis` 表示可开第二实例。
+
+### 69.6 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/battleSession.test.ts`（内存基线） | **8/8**（全改 await，断言语义不变） |
+| `tests/gameSession.test.ts`（hydrate 新语义） | **14/14** |
+| `tests/w8RedisKv.test.ts`（真 Redis） | **14/14** |
+| `tests/e2e_w8_shared.mjs`（真 Redis + `:3002` 双实例） | **18/18** |
+| 后端单测 | **488** |
+| 全量 `npm run verify` | **43/43 `VERIFY_OK`**（跳过 14 项均需前端在线的 375px 冒烟） |
+
+W8 E2E 逐条验的：三模式 `redis` / A 开战 B 实例 `/api/battle/current` 拿到同一 battleId /
+B 能对该战斗出招且 A 看到回合被推进 / 放弃后同实例与跨实例再开馆主都是 `429 GYM_ON_COOLDOWN` /
+`retryAfterMs > 0` / 换一座演武堂不受本座 CD 影响 / B 建 WS hydrate 后 A 写档、B 的 `GET /api/save`
+返回**新** revision。
+
+### 69.7 顺手修的两处测试脆弱性（非 W8 引入，本轮暴露）
+
+1. **`e2e:game` C/D 段间歇红（约 9%）**：`autoBattle` 一直用 `moveIds[0]`（基础 `tackle`），
+   5 级御三家对本系招（`wood_strike`）有加成不用，单场胜率只有约 33%，6 次重试全败概率 ≈ 9%。
+   改为**回合间轮换所有招**，并把 C 段重试 6→10、D 段 5→8。连跑 3 次 42/42 稳定。
+2. **`e2e:w4` 偶发 leader=false**：上一轮 `:3001` 被硬杀（不执行 shutdown）会残留 `lock:sweep:global`
+   到 60s TTL，新实例启动后需等旧租约自然过期才能接管——这正是 W4 设计的「leader 挂掉后由其它实例接管」，
+   不是缺陷。给套件加 `waitForLeader()`（上限 75s，无残留时立即返回），避免把接管窗口当失败。
+
+### 69.8 边界
+
+- **仍是单实例 Redis 语义**（与 W7 一致）：Cluster 下 `battle:ids` / `sess:rev:*` 这类无区域维度的键可直接用，
+  但 `gym:cd:*` 若以后要按玩家分片需加 hash tag。
+- **战斗态的 read-modify-write 依赖账号锁**：`get → applyBattleAction → update` 三步不在一个 Lua 里，
+  跨实例正确性由 `withSlotLock`（W3 Redis 租约锁）保证。若以后去掉账号锁，这里必须改成一个原子脚本。
+- **会话只共享新鲜度、不共享内容**：多实例下每个实例的 `connections` 仍是各管各的（进程本地连接集合本来不可共享），
+  跨实例顶号由 W5 的 `takeover` 频道处理。

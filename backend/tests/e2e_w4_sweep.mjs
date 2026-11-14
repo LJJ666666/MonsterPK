@@ -31,9 +31,40 @@ const healthAt = async (base) => {
   return { status: r.status, data: await r.json() };
 };
 
+/**
+ * 等 :3001 抢到全局 sweep 租约。
+ *
+ * 为什么必须等：上一轮 :3001 若被硬杀（SIGKILL / taskkill /F，不执行 shutdown handler），
+ * `lock:sweep:global` 会残留到 60s TTL 自然过期；新实例启动后要等旧租约过期才能接管，
+ * 这期间 `health.sweep.leader=false`。这正是 W4 设计的「leader 挂掉后由其它实例接管」，
+ * 不是缺陷。不等就会把这几十秒的接管窗口当成失败（偶发红）。
+ *
+ * 无残留租约时立即返回，不拖慢正常流程。
+ */
+async function waitForLeader(base, timeoutMs = 75_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    try {
+      const h = await healthAt(base);
+      last = h.data?.sweep ?? null;
+      if (last?.leader === true && last?.current === true) return { ok: true, sweep: last };
+    } catch { /* 还没起来 */ }
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+  return { ok: false, sweep: last };
+}
+
 async function main() {
   await requireBackend();
   loadBackendEnv();
+
+  const leader = await waitForLeader('http://127.0.0.1:3001');
+  if (!leader.ok) {
+    suite.check(':3001 在 75s 内抢到全局 sweep 租约',
+      false,
+      `leader=${leader.sweep?.leader} current=${leader.sweep?.current} fence=${leader.sweep?.fence}`);
+  }
   const {
     SweepLeader, createRedisSweepLeaseStore, guardedCommit,
     SWEEP_LEASE_KEY, SWEEP_FENCE_KEY,

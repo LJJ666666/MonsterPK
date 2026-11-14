@@ -108,14 +108,37 @@ export class GameSessionRegistry {
     return s ? [s] : [];
   }
 
-  /** 从 DB 记录恢复；内存已有会话时直接返回（在线期间内存即权威）。 */
+  /**
+   * 从 DB 记录恢复。
+   *
+   * W8.2：改造前是 `if (existing) return existing`——内存有会话就完全忽略刚读出来的 DB 行。
+   * 单实例下没问题（内存总是最新），**多实例下这是「换实例读到旧档」的根因**：
+   * A 实例提交了新档，B 实例内存还是旧副本，玩家重连到 B 时 B 把 DB 新数据丢掉、
+   * 继续拿旧副本推给客户端。
+   *
+   * 现在按 `revision` 比较（DB 列的版本是真值）：
+   *  - DB 不新于内存 → 保留内存（内存里的 `connections` 是进程本地真值，覆盖会丢在线登记）；
+   *  - DB 更新 → **原地覆盖**内容字段，保留 `connections` 与在线时间。
+   * 原地改而不是换对象：调用方可能已经持有 state 引用（`hydrateForUser` 之后立刻 `attach`）。
+   */
   hydrate(
     userId: string,
     record: SessionRecord | null,
     now = Date.now(),
   ): GameSessionState | null {
     const existing = this.get(userId);
-    if (existing) return existing;
+    if (existing) {
+      // 没有 DB 记录（还没建号）或 DB 不比内存新：内存权威，直接返回。
+      if (!record || existing.authority.revision >= record.authority.revision) return existing;
+      existing.data = record.data;
+      existing.schemaVersion = record.schemaVersion;
+      existing.clientId = record.clientId;
+      existing.authority = record.authority;
+      existing.updatedAt = record.updatedAt;
+      existing.lastActiveAt = now;
+      existing.source = 'hydrate';
+      return existing;
+    }
     if (!record) return null;
     const state: GameSessionState = {
       userId,

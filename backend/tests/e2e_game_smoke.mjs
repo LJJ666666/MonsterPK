@@ -37,16 +37,23 @@ async function startWildBattle(token, areaId, theme, lvMin, lvMax) {
   });
   if (r.status !== 200) return { ok: false, r };
   const b = r.data.battle;
-  const moveId = b?.party?.[0]?.moveIds?.[0];
-  return { ok: true, battleId: b.battleId, moveId, battle: b };
+  const moveIds = Array.isArray(b?.party?.[0]?.moveIds) ? b.party[0].moveIds : [];
+  return { ok: true, battleId: b.battleId, moveId: moveIds[0], moveIds, battle: b };
 }
 
-/** 用指定招式把战斗打到结束（默认不捕获，验证击败）。返回 { battle, timeout }。 */
-async function autoBattle(token, battleId, moveId, maxTurns = 40) {
+/**
+ * 用指定招式把战斗打到结束（默认不捕获，验证击败）。返回 { battle, timeout }。
+ *
+ * W8 起支持传招式数组：回合间轮换出招。
+ * 只用 `moveIds[0]`（基础 tackle）打不过 5 级野怪——本系招（wood_strike 等）有属性加成，
+ * 不用它单场胜率只有三成左右，6 次重试全败约 9% 概率，会让 C 段间歇红。
+ */
+async function autoBattle(token, battleId, moveIds, maxTurns = 40) {
+  const ids = Array.isArray(moveIds) && moveIds.length > 0 ? moveIds : [moveIds];
   let last = null;
   for (let i = 0; i < maxTurns; i++) {
     const r = await api('/api/battle/action', {
-      method: 'POST', token, body: { battleId, action: { type: 'move', moveId } },
+      method: 'POST', token, body: { battleId, action: { type: 'move', moveId: ids[i % ids.length] } },
     });
     if (r.status !== 200) return { err: r, battle: last };
     last = r.data.battle;
@@ -85,7 +92,7 @@ async function farmMoney(token, target = 250, maxBattles = 12) {
     await api('/api/game/heal', { method: 'POST', token }); // 满血开打，避免昏厥雪球
     const b = await startWildBattle(token, 'wild_starter', 'grass', 2, 2);
     if (!b.ok) continue;
-    await autoBattle(token, b.battleId, b.moveId);
+    await autoBattle(token, b.battleId, b.moveIds || b.moveId);
   }
   const s = await getSave(token);
   return s.data.money >= target;
@@ -145,11 +152,11 @@ async function main() {
     const preSave = await getSave(acc.token);
     let cWin = false;
     let cBattle = null;
-    for (let attempt = 0; attempt < 6 && !cWin; attempt++) {
+    for (let attempt = 0; attempt < 10 && !cWin; attempt++) {
       await api('/api/game/heal', { method: 'POST', token: acc.token }); // 满血开打，避免昏厥雪球
       const cb = await startWildBattle(acc.token, 'wild_starter', 'grass', 2, 2);
       if (!cb.ok) continue;
-      const ab = await autoBattle(acc.token, cb.battleId, cb.moveId);
+      const ab = await autoBattle(acc.token, cb.battleId, cb.moveIds || cb.moveId);
       if (ab.err) continue;
       cBattle = ab.battle;
       if (cBattle.finished && (cBattle.result === 'enemy_fainted' || cBattle.result === 'captured')) cWin = true;
@@ -169,11 +176,11 @@ async function main() {
     let captured = false;
     let capBattle = null;
     let capErr = null;
-    for (let attempt = 0; attempt < 5 && !captured; attempt++) {
+    for (let attempt = 0; attempt < 8 && !captured; attempt++) {
       await api('/api/game/heal', { method: 'POST', token: acc.token }); // 满血开打
       const cb = await startWildBattle(acc.token, 'wild_starter', 'grass', 2, 2);
       if (!cb.ok) { capErr = cb.r; continue; }
-      const cap = await captureBattle(acc.token, cb.battleId, cb.moveId);
+      const cap = await captureBattle(acc.token, cb.battleId, cb.moveIds?.[1] ?? cb.moveId);
       if (cap.err) { capErr = cap.err; continue; }
       capBattle = cap.battle;
       captured = cap.captured;

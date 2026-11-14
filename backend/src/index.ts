@@ -27,6 +27,9 @@ import { getAccountState, checkSessionVersion, BAN_CODE, type AccountState } fro
 import { initializeLockProvider, shutdownLockProvider, getLockDiagnostics, getLockRedisClient } from './lib/lockBootstrap';
 import { initializeSweepLeader, getSweepDiagnostics, getSweepLeader } from './lib/sweepLeader';
 import { initW5Broadcast, shutdownBroadcast, getBroadcastMode } from './lib/connectionControl';
+import { RedisKvStore } from './lib/redisKvStore';
+import { setGymCooldownStore, getGymCooldownStoreKind } from './game/gyms';
+import { useSessionRevisionStore, getSessionRevisionMode } from './lib/sessionRevision';
 
 // 声明 authenticate 装饰器类型与请求上的账号风控视图（运行时由下方 decorate 注入）
 declare module 'fastify' {
@@ -125,7 +128,7 @@ fastify.get('/api/health', async () => ({
   ts: Date.now(),
   ws: getRealtimeStats(),
   sessions: getSessionStats(),
-  battles: battles.stats(),
+  battles: await battles.stats(),
   // W7：野怪池诊断。storage=redis 表示已切共享实现（跨实例同一份真值）。
   wild: { ...(await wilds.stats()), storage: wilds.kind },
   // P4-2a：榜单是只读派生读模型，health 只报类型数与真值来源，不查库。
@@ -143,6 +146,13 @@ fastify.get('/api/health', async () => ({
   sweep: { ...getSweepDiagnostics(), current: await getSweepLeader().verifyCurrent() },
   // W5：广播模式诊断。local 为单实例直发；redis 为跨实例 pub/sub 双频道 + 顶号。
   broadcast: getBroadcastMode(),
+  // W8：战斗态 / 馆主 CD / 会话版本戳的共享存储模式。
+  // 三者 memory 表示单实例内存真值（不可开第二实例），redis 表示跨实例共享。
+  w8: {
+    battleStorage: battles.kind,
+    gymCooldown: getGymCooldownStoreKind(),
+    sessionRevision: getSessionRevisionMode(),
+  },
 }));
 
 fastify.register(authRoutes);
@@ -175,6 +185,16 @@ initializeLockProvider()
     // 未配 REDIS_URL 时保持 MemoryWildStorage（单实例开发 / 单测），行为与 W7 前一致。
     const sharedClient = getLockRedisClient();
     if (sharedClient) wilds.useRedisStorage(sharedClient);
+
+    // W8：战斗态 / 馆主 CD / 会话版本戳同样切共享实现。
+    // 三者都必须在 `registerRealtime()`（心跳 + WS）之前装配：
+    // 心跳第一轮 sweep 就会读写战斗态，装晚了这一轮还会写进本进程内存。
+    // 未配 REDIS_URL 时全部保持内存实现（单实例开发 / 单测），行为与 W8 前一致。
+    if (sharedClient) {
+      battles.useRedisStorage(sharedClient);
+      setGymCooldownStore(new RedisKvStore({ client: sharedClient }));
+      useSessionRevisionStore(new RedisKvStore({ client: sharedClient }));
+    }
 
     // E2E 临时实例（W2/W3/W5 这类不测选主的套件）用 MPK_DISABLE_SWEEP=1 不参与选主。
     // 原因：它们被 SIGTERM/SIGKILL 硬杀（Windows 下等同直接杀进程，shutdown handler 不执行），

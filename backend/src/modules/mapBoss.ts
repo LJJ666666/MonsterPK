@@ -57,7 +57,7 @@ export async function applyMapBossStart(params: {
 
   return withSlotLock(slotLockKey(params.userId), () =>
     withSlotLock(mapBossLockKey(params.userId), async (): Promise<MapBossResult<Record<string, unknown>>> => {
-      if (battles.current(params.userId)) {
+      if (await battles.current(params.userId)) {
         return fail('MAPBOSS_BATTLE_IN_PROGRESS', '已有进行中的战斗', 409);
       }
       const unlocked = await ownedUnlockedLocations(params.userId);
@@ -108,7 +108,7 @@ export async function applyMapBossStart(params: {
           rng: Math.random,
           mapBoss: { spec, quotaKey: key, quotaToken: bossQuotaToken ?? undefined },
         });
-        battles.create(state);
+        await battles.create(state);
         return {
           ok: true,
           value: {

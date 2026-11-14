@@ -54,6 +54,7 @@
 - 通用：冒烟 `\d` 被吃、等「元素可用」非「存在」、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖。**E2E 一律用 `127.0.0.1` 不用 `localhost`**（Windows 上 Node 首选解析 `::1`，后端只听 IPv4 → `fetch` 直接失败、全部 ABORT）；`harness.BASE` 已改默认 127，但 **`ORIGIN` 必须留 `localhost`**（WS 握手 Origin，CORS 精确匹配）。交接 `HANDOFF.md`；接手只读核对，等杰哥排期。
 - **APK WebView 联调（2026-11-14）**：`androidScheme: "http"` 使 WebView origin = `http://localhost`（无端口），`API_BASE` 默认 `http://localhost:3001`；CORS 必须精确放行 `http://localhost`（不能只放行 5173），`wsProtocol.ts` 的 `isOriginAllowed` 需认 `*`。dev APK 需 `AndroidManifest` 的 `usesCleartextTraffic="true"`；`capacitor.config.json` 的 StatusBar `overlaysWebView:false` 已由 `MPK_DEV_APK=1 npx cap sync android` 烘焙。设备 `localhost:3001` 靠 `adb reverse` 打通，断连测试要 `--remove-all`（单条 `--remove` 不生效）。
 - **健康探测禁缓存（2026-11-14）**：`api.health()` 是 GET，未带 `cache:"no-store"` 时断网后 Chromium 返回缓存 200 → 登录页「持续嗅探」永久假在线（真机截图实证）；现强制 `no-store` + `AbortController` 超时 + 防堆积，单测 `apiHealth.test.ts` 锁死。组件单测 `ConnBanner.test.tsx` 用 `renderToStaticMarkup`（node 环境无 jsdom）。
+- **流程类踩坑复盘见 bug_log §71（杰哥 2026-11-14 定）**：APK 构建空等 1h43m 的共性根因是「用等待/猜测代替一次取证」。构建前一条命令核 JDK/`ANDROID_HOME`/Gradle `.ok` 标记/SDK，构建后一条命令核 APK mtime + bundle 新字符串；**后台任务退出码不是成功判据**（kill java 后 `tail` 收 EOF 也会 `exit 0`）。真机断连实验先在设备侧取证再解释 UI；面向用户的状态结论必须有界面截图证据。Git 状态汇报只给一句话（见用户级长期记忆）。
 
 ## 8. W6~W9 收官索引（逐单技术事实/验收数字见 bug_log，本文不重复）
 - W6 房间+quota 共享存储（#181~#188，评级 L）✅ 2026-11-14：数据模型→`RoomStorage` 异步化+PG CAS→事务边界→DB 原子计数→租约 token→`normalizeRoom`→按接收者裁剪 + revision→跨实例送达 E2E。

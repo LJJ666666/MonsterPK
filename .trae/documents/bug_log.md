@@ -1751,3 +1751,48 @@ localhost 后端连接、无超时），与 W9 后端改动完全无关；W9 交
 - **反代只做 L4/L7 透传，不持有业务状态**：会话/战斗/野怪真值全在 PG+Redis，反代挂了不影响数据，重启即可。
 - **下一步**：P5-3 Release 签名与渠道包（装到真机）；以及 W9 配套的 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云
   （域名 + TLS 终止在反代/CDN，本轮回测已覆盖多源 CORS 与 `wss` 派生）。
+
+---
+
+### 71. APK 真机联调 + UI 优化：流程/诊断方法踩坑复盘（2026-11-14 夜）
+
+> 杰哥 2026-11-14 指出：**APK 构建不该拖这么久，也不该靠「怀疑没下载好」去猜——一条命令就能知道工具链是否已安装**。
+> 本节只收「流程 / 诊断方法」的错（不是产品缺陷），目的是把每个错都换成一条可执行的核查命令，杜绝重犯。
+> 产品代码缺陷另见 §70 与当日日志；Android 工具链既定用法见 MEMORY §5。
+
+#### 71.1 两条硬纪律（先背这两条命令）
+
+```bash
+# ① 动手前：一条命令核环境（JDK / 环境变量 / Gradle 发行包 / SDK）
+java -version; echo "ANDROID_HOME=$ANDROID_HOME"; \
+ls -1 "$USERPROFILE/.gradle/wrapper/dists/gradle-8.14.3-all/"*/; ls -1 /d/android-sdk/platforms/
+
+# ② 动手后：一条命令核产物（时间戳 + 新代码是否真进包）
+ls -la --time-style=full-iso android/app/build/outputs/apk/debug/app-debug.apk; \
+grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/index-*.js | sort | uniq -c
+```
+
+判据：Gradle 缓存目录里**有 `.ok` 标记 + 已解压 `gradle-8.14.3/` 目录**才算装好；只有 `.zip.part`/`.lck` 是下载残件，不算。
+本机实测 `99x8n45tzh0zr4vi9rz6hydd7` = `gradle-8.14.3/ + .ok`，另两个目录只有 `.part`。
+**成功与否只认产物 mtime + bundle 内容，不认后台任务退出码、不认日志尾。**
+
+#### 71.2 错误清单
+
+| # | 犯的错 | 实际证据 / 代价 | 正确做法 |
+|---|---|---|---|
+| 1 | 没先核工具链就跑 `./gradlew` | wrapper 去 `services.gradle.org` 下 `gradle-8.14.3-all.zip` **卡在 60% 近 1h43m**（沙箱对该域出网不稳）；本机缓存里早就有一份完整解压的 Gradle | 先跑 ①；直接调 `.../gradle-8.14.3/bin/gradle assembleDebug --offline`，**不动仓库 wrapper**，实测 9s 成功 |
+| 2 | 把 `./gradlew` 输出 `\| tail -30` 缓冲后丢后台 | `tail` 不到 EOF 不吐字，三次 `TaskOutput` 全空，期间误判为「首次构建慢」而继续空等 | 输出直接落盘 `> build.log 2>&1`（可随时 `tail -f`）；给长任务设硬超时（如 15min）后主动查进程/产物，不无限等 |
+| 3 | 把后台任务 `exit 0` 当构建成功 | kill 掉卡死的 java 后 `tail` 收 EOF 返回 0，Gradle 其实是被杀的，APK 时间戳仍是 19:29 旧包 | 只认 ② 的产物时间戳 + bundle 新字符串；后台退出码只能作参考 |
+| 4 | 假设上个会话的环境变量还在 | 新会话无 `JAVA_HOME`/`ANDROID_HOME` → `SDK location not found`；随后用 `find /c -maxdepth 4 -name java.exe` 满盘找 JDK（实际在 `D:\jdk21\jdk-21.0.10+7`） | ① 一次看清；用**一次性前缀** `export JAVA_HOME=... ANDROID_HOME=D:/android-sdk`，不写 `local.properties` 污染仓库 |
+| 5 | 改仓库 `gradle-wrapper.properties` 指向本地 zip 加速 | `file:///d/...` 丢盘符被解析成 `\d\...`；仓库原值还留着沙箱残留 `file:///workspace/gradle-8.14.3-all.zip` | **绕过而非修改**：直接调已解压二进制；收尾把 wrapper 还原官方 https URL 并入库（c9b4357） |
+| 6 | 用 `adb shell monkey` 拉起 App | LDPlayer 无 `monkey`，force-stop 后 App 没起来，白等一轮截图 | 统一 `adb shell am start -n com.monster.game/.MainActivity` |
+| 7 | 把 `adb reverse --remove tcp:3001` 当「断网」 | 单条 remove 没生效，据此得出「状态粘在线」的错误结论；改 `--remove-all` + 设备侧 `toybox nc` 才查清：只挡新连接、**不断已建 socket** | 断连实验必须先在**设备侧取证**（`nc -z` / HTTP 请求），再解释 UI；模拟器断连手法有边界，不能当真机断网的等价证据 |
+| 8 | 用服务端日志代替 UI 结论 | 把后端 `login success` 说成「可以登录了」，杰哥当场质疑「还在登录界面、底部连不上服务器」 | 面向用户的状态结论**必须有界面截图/截图文字**；服务端单侧日志只能作佐证 |
+| 9 | 新写的健康探测用默认 GET 缓存 | 轮询 `/api/health` 未禁缓存 → 离线时 Chromium 返回缓存 200 → 「持续嗅探」永久假在线（真机截图实证） | 所有探针/轮询显式 `cache:"no-store"` + 超时 + 防堆积；已修并由 `apiHealth.test.ts` 锁死 |
+| 10 | 把工具参数误拼进工具名 | `present_filescwdD:\MyJob\MonsterPK` → Tool Not Found | 参数走 JSON 字段，不拼名字 |
+
+#### 71.3 共性根因（一句话）
+
+**「用等待和猜测代替一次取证」**——环境问题（JDK/SDK/Gradle/端口/origin）都是一条只读命令就能定性的，
+却反复靠「再等一会儿 / 应该是在下载 / 可能是缓存」推进，把 9s 能做完的事拖成 1h43m。
+固化口径：**先查再猜、先取证再下结论、成功只看产物**。已同步进用户级长期记忆与 MEMORY §7。

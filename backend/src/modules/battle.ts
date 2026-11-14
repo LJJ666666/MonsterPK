@@ -87,11 +87,11 @@ function fail(reply: any, err: unknown) {
 }
 
 /** 用服务端内容表还原区域真值后广播野怪列表（跨账号）。 */
-function publishArea(
+async function publishArea(
   areaId: string,
   fallback: WildAreaSpec,
-): void {
-  publishWild(areaId, resolveAreaSpec(areaId, fallback));
+): Promise<void> {
+  await publishWild(areaId, resolveAreaSpec(areaId, fallback));
 }
 
 /** 战斗结果 → 共享野怪的公开结算结果。 */
@@ -299,7 +299,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const areaKey = areaId ?? theme;
       const spec = resolveAreaSpec(areaKey, { theme: finalTheme, levelMin: lvMin, levelMax: lvMax });
-      const claim = wilds.claim(wildId, userId, battleId, now);
+      const claim = await wilds.claim(wildId, userId, battleId, now);
       if (!claim.ok) {
         // strict:false 下判别联合不收窄，用属性存在性取值（bug_log §18）。
         const code = 'code' in claim ? claim.code : 'WILD_CLAIMED';
@@ -349,7 +349,7 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
       battles.create(state);
       if (claimed && claimedAreaId && claimedSpec) {
         // 抢占成功立刻广播：其他客户端马上看到「已被挑战」，不会继续排队点同一只。
-        publishWild(claimedAreaId, resolveAreaSpec(claimedAreaId, claimedSpec), now);
+        await publishArea(claimedAreaId, claimedSpec);
       }
       return {
         ok: true,
@@ -362,8 +362,8 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
       // 开局失败（队伍全灭 / 内容表异常）必须把刚抢占的实例放回去，
       // 否则这只野怪会永久卡在 claimed，谁都打不了。
       if (claimed && claimedAreaId && claimedSpec) {
-        wilds.release(battleId, now);
-        publishWild(claimedAreaId, resolveAreaSpec(claimedAreaId, claimedSpec), now);
+        await wilds.release(battleId, now);
+        await publishArea(claimedAreaId, claimedSpec);
       }
       return fail(reply, err);
     }
@@ -488,10 +488,10 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
 
         // P4-1b：共享野怪结算。归属两键由 WildRegistry 复核，结果跨账号广播，
         // 其他客户端会看到这只野怪变成 resolved（已捕获 / 已击败 / 已逃走）。
-        const wild = next.wildId ? wilds.findByBattle(next.id) : undefined;
+        const wild = next.wildId ? await wilds.findByBattle(next.id) : undefined;
         if (wild) {
-          wilds.resolve(wild.id, userId, next.id, wildResultOf(next.result), Date.now());
-          publishArea(wild.areaId, {
+          await wilds.resolve(wild.id, userId, next.id, wildResultOf(next.result), Date.now());
+          await publishArea(wild.areaId, {
             theme: next.theme, levelMin: next.levelMin, levelMax: next.levelMax,
           });
         }
@@ -530,9 +530,9 @@ export async function battleRoutes(fastify: FastifyInstance): Promise<void> {
     // 原 `state.bossId &&` 守卫会让 mapBoss 战的在途名额泄漏（每天白丢次数），故用 token 而非常量守卫。
     if (state.bossQuotaToken) bossQuota.release(state.bossQuotaToken);
     // P4-1b：放弃不等于捕获，野怪放回池子让别人还能抢；并广播状态变化。
-    const released = wilds.release(parsed.data.battleId, Date.now());
+    const released = await wilds.release(parsed.data.battleId, Date.now());
     for (const areaId of released) {
-      publishArea(areaId, { theme: state.theme, levelMin: state.levelMin, levelMax: state.levelMax });
+      await publishArea(areaId, { theme: state.theme, levelMin: state.levelMin, levelMax: state.levelMax });
     }
     return { ok: true, dropped: true };
   });

@@ -21,9 +21,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** backend/ 根目录（tests/lib/ 回退两级）。 */
 export const BACKEND_ROOT = resolve(HERE, '../..');
 
-export const BASE = process.env.E2E_BASE || 'http://localhost:3001';
-export const WS_HOST = process.env.E2E_WS_HOST || 'ws://localhost:3001';
-/** 与 scripts/lib/devConfig.mjs 同源：E2E_ORIGIN 优先，否则按 MPK_FRONT_PORT（默认 5173）拼。 */
+// 默认用 127.0.0.1 而非 localhost：Windows 上 Node 会把 localhost 首选解析成 ::1，
+// 而后端监听 0.0.0.0（仅 IPv4），fetch 会直接失败。E2E_BASE / E2E_WS_HOST 仍可覆盖。
+export const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3001';
+export const WS_HOST = process.env.E2E_WS_HOST || 'ws://127.0.0.1:3001';
+/** 与 scripts/lib/devConfig.mjs 同源：E2E_ORIGIN 优先，否则按 MPK_FRONT_PORT（默认 5173）拼。
+ *  注意这里保持 localhost：它是 WS 握手的 Origin 头，服务端 CORS 会精确匹配，不能跟着 BASE 改。 */
 export const ORIGIN = process.env.E2E_ORIGIN || `http://localhost:${process.env.MPK_FRONT_PORT || 5173}`;
 /** 单次运行的短标识；同一进程内创建的账号都带它，便于精确清理。 */
 export const RUN = Date.now().toString(36).slice(-6);

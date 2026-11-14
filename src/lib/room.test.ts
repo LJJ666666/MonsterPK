@@ -115,17 +115,17 @@ describe("RoomState.revision 与 Save.revision 在客户端两模块独立（W6.
   it("写入/推进 Save.revision 不影响房间 revision 基线", () => {
     setRevision(42); // 模拟 session.state 落库到 revision 42
     expect(getWriteRevision()).toBe(42);
-    expect(getRoomRevision("r1")).toBe(-1, "房间基线不应被 Save.revision 污染");
+    expect(getRoomRevision("r1"), "房间基线不应被 Save.revision 污染").toBe(-1);
     applyRoomSnapshot(msg() as RoomStateMessage);
-    expect(getRoomRevision("r1")).toBe(1, "房间快照独立维护自己的 revision");
-    expect(getWriteRevision()).toBe(42, "房间推进不应回填 Save.revision");
+    expect(getRoomRevision("r1"), "房间快照独立维护自己的 revision").toBe(1);
+    expect(getWriteRevision(), "房间推进不应回填 Save.revision").toBe(42);
   });
 
   it("房间多版本推进不影响 Save.revision 基线", () => {
     applyRoomSnapshot(msg() as RoomStateMessage);
     applyRoomSnapshot(msg({ revision: 5 }) as RoomStateMessage);
     expect(getRoomRevision("r1")).toBe(5);
-    expect(getWriteRevision()).toBe(null, "房间推进不应生成 Save.revision 基线");
+    expect(getWriteRevision(), "房间推进不应生成 Save.revision 基线").toBe(null);
   });
 });
 

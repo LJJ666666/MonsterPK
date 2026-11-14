@@ -215,12 +215,12 @@ export interface SweepContext {
 export async function guardedCommit(
   ctx: SweepContext,
   key: string,
-  action: () => void,
+  action: () => void | Promise<void>,
 ): Promise<boolean> {
   if (!(await ctx.guard())) return false;
   const token = await ctx.claim(key);
   if (!token) return false;
-  action();
+  await action();
   return true;
 }
 

@@ -1526,5 +1526,30 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **本次实测确认的真实安全机制（"被拒"= 正确行为，别当 bug）**：顶号 `SESSION_REPLACED` 403（P4-1a，登录后旧 token 立即失效）；重名注册 **409**（非 400）；未解锁城市旅行 `LOCATION_LOCKED` 400；夹带服务端进度字段（`playerLevel` 等）`SAVE_INPUT_FORBIDDEN` 400；大幅改富存档直接**封号** 403；单座房间 `forming` 态提交意图 `ROOM_CLOSED` 409；未知道具购买 400。
 - **测试脚本自身坑（勿再犯）**：① 注册拿 token(sv=1) 后登录拿 token(sv=2)，旧 token 失效→**账号级 helper 必须统一用登录后 token**，否则 A4/B1/G 级联 403；② `/api/battle/start` 返回 `battleId`（非 `id`）、敌人字段 `enemy`（非 `enemies`）；③ 房间/多人响应是嵌套对象——`data.room.roomId` / `data.battle.battleId` / `data.room.seats`；④ 地图首领概览字段是 **`bosses`**（非 `data.mapBosses`），首测误写致 F5/F6 SKIP，修正并优先选 `unlocked` 项（`mb_starter_guardian` 在始终解锁的 `town_starter`）后 SKIP 归零；⑤ 野怪最高 5 级与 5 级御三家互有胜负，战斗前须 `heal` 满血 + 多次重试拿稳赢。
 
+## 68. P5-1 W7 收官：野怪池搬 Redis（全量 key + Lua 原子化）（2026-11-14）
+
+- **工单**：W7（定稿 §3.6「野怪目标设计」/§4.2 工单表），依赖 W3/W4，仅需 Redis。**零产品语义变更**：TTL 常量、每区 3 只、抢占互斥、同账号只允许一场、公开视图不含归属，全部保持；变的是「真值存在哪」与「互斥靠什么保证」。
+- **改造前的真实边界（为什么必须做）**：`wildRegistry.ts` 是进程内 `Map`，`claim` 靠「同步函数 + 方法内无 await」的 Node 单线程语言级保证。一旦开第二实例，A 抢 A 的 Map、B 抢 B 的 Map → 同一只野怪被两人同时打、每区各自补到 3 只、结算各广播各的。
+- **架构（与 `RoomStorage` 同构的三层）**：
+  1. `lib/wildTypes.ts` — 类型 + 常量 + `toWildView` 投影 + `WildSpawner` 工厂签名（打断循环依赖，facade 统一 re-export，现有 `from '../lib/wildRegistry'` 全部零改动）；
+  2. `lib/wildStorage.ts` — `WildStorage` 接口，**全 async**（内存实现也包 Promise，两套实现签名一致，调用方只写一种）；
+  3. `lib/memoryWildStorage.ts` — 原 Map 状态机原样承接（语义一字未改，只加 `async`），供无 `REDIS_URL` 的单实例开发与单测，同时是 Redis 实现的**行为基线**；
+  4. `lib/redisWildStorage.ts` — 全量 key + 四组 Lua；
+  5. `lib/wildRegistry.ts` — facade：只保留**内容生成**（RNG / `THEME_TABLE` / `MONSTER_SPECS` / seq）与参数收敛，`useRedisStorage(client)` 供启动时切换。
+- **为什么内容生成不放进 Lua（关键取舍）**：种族要查 `THEME_TABLE`、稀有度/等级走 RNG，Lua 里没有内容表。所以 Node 侧预生成候选实例，脚本只做「`SCARD < target` 才写入」的**原子追加**——两个实例并发 sweep 也最多补到 3 只（等价于定稿要求的「补怪与 claim 同脚本/区域锁」）。
+- **Key 布局（单实例 Redis；Cluster 需给含 areaId 的组合键加 hash tag）**：`wild:inst:<id>`(HASH 全量字段) / `wild:area:<areaId>`(SET，**唯一数量真值**，恒 ≤ target) / `wild:user:<userId>`(在途索引) / `wild:battle:<battleId>`(定位索引) / `wild:rev:<areaId>` / `wild:rev:global` / `wild:areas`(sweep 遍历) / `wild:spec:<areaId>`。
+- **四组 Lua**：
+  - `CLAIM_SCRIPT`：判存在 → 判 `resolved`(-3) → 判非 `available`(-2) → 判同账号在途(-4) → 置 claimed + 写两索引 + 双 INCR，返回 `{1, ...HGETALL}` 一次拿回抢占后的实例；
+  - `RESOLVE_SCRIPT`：校验 `(claimUserId, claimBattleId)` **双键归属**，不符 -3 拒不误结算；置 resolved + 写 grace 到期 + HDEL 归属字段 + DEL 两索引；
+  - `RELEASE_SCRIPT`：按 `wild:battle:<battleId>` 反查并**校验 index 仍指向同一场**（防 battleId 复用误归还），置 available + 清索引，重复释放返回 0（幂等）；
+  - `ENSURE_SCRIPT` + `APPEND_SCRIPT`：前者原子做「登记 spec + 清过期 resolved/available + claimed 超时归还 + 清在途索引 + 算缺口」，后者按缺口原子追加并自带 `SCARD` 上限校验。
+- **改动文件**：新增 `lib/wildTypes.ts` / `lib/wildStorage.ts` / `lib/memoryWildStorage.ts` / `lib/redisWildStorage.ts` / `tests/w7RedisWild.test.ts` / `tests/e2e_w7_wild.mjs`；重写 `lib/wildRegistry.ts`（facade）；`lib/sweepLeader.ts` 的 `guardedCommit` 回调放开 `void | Promise<void>` 并 `await`；`modules/battle.ts`（claim/release/findByBattle/resolve 4 处 + `publishArea` 改 async）；`modules/wild.ts`（`publishWild` 改 async + `GET /api/wild` 两处 await）；`modules/realtime.ts`（`runGlobalSweep` 两分支 await + 幂等回调改 async）；`index.ts`（`wilds.useRedisStorage` 在心跳前装配、health 增 `wild.storage`）；`tests/lib/harness.mjs`；`src/lib/room.test.ts`；`backend/package.json` + `scripts/verify.mjs` 两处注册。
+- **验收**：`tests/wildRegistry.test.ts` **10/10**（内存实现全 await 化，断言一字未减）；`tests/w7RedisWild.test.ts` **9/9**（真 Redis，含 **10 路并发 claim 只 1 成功**、同账号第二只 `WILD_ON_COOLDOWN`、两实例并发 ensure 不超 3、超时归还清索引、双键归属拒绝、resolved 宽限期、revision 区域独立、stats 分布）；`tests/e2e_w7_wild.mjs` **14/14**（真 Redis + :3002 双实例：`W1b` 两实例同一批 wildId / `W2b` 跨实例 409 `WILD_CLAIMED` / `W3` 并发恰好 1 个 200 / `W4` 视图不含 userId·battleId / `W5` 放弃后跨实例可抢 / `W6` 超时归还并清 battle 索引 / `W7` 反复抢占放弃 3 轮恒 3 只）。全量 **42/42 `VERIFY_OK`**（跳过 14 项均为需前端在线的 375px 冒烟）、后端单测 **488**、前端 135。
+- **首轮红（已修，是测试基建坑不是产品缺陷）**：Lua 里的 key 全写成裸 `'wild:*'`，而 JS 侧 `k()` 带了测试前缀 `w7t:<rand>:` → 写入与读取走了两套 key，`listArea` 恒空、9 例全红。修法：四个脚本统一以 `ARGV[1] = prefix` 拼接（生产传空串零影响），并把 `KEYS` 与动态 key 的职责分清。
+- **顺手修掉两处既有问题（与本工单无因果关系，都是被这次全量 verify 暴露的）**：
+  1. `tests/lib/harness.mjs` 的 `BASE`/`WS_HOST` 默认值 `localhost` → `127.0.0.1`。Windows 上 Node 把 `localhost` 首选解析成 `::1`，而后端监听 `0.0.0.0`（仅 IPv4），导致 `fetch` 直接失败、所有 E2E `[ABORT] 后端未就绪`。`E2E_BASE`/`E2E_WS_HOST` 覆盖逻辑不变；**`ORIGIN` 刻意保持 `localhost`**（它是 WS 握手的 Origin 头，服务端 CORS 精确匹配，跟着改会握手失败）。
+  2. `src/lib/room.test.ts` 4 处 `toBe(x, "说明")` —— `toBe` 只接受 1 个参数，vitest 运行期忽略第二参数故单测一直绿，但 `tsc -b` 会报 `TS2554`（W6.6 的 `fe76fae` 引入，此前被增量缓存掩盖）。改为 vitest 正确的 `expect(actual, "说明").toBe(x)`。
+- **边界**：Redis 实现是**单实例 Redis** 语义（Lua 内动态拼 `<prefix>wild:rev:<areaId>`）。Redis Cluster 下需改为 hash tag（如 `{wild:<areaId>}`）才能让同一区域的 key 落同槽；部署形态变化时须回来改这一层。`stats()` 为 health 诊断用，走 `SMEMBERS + pipeline` 全量点查，调用频率低故未做计数器缓存；若以后高频轮询需换 `SCAN` 增量或维护计数键。
+
 
 

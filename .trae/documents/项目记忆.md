@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W0~W6.7 全部 ✅**——锁/选主/广播/房间/quota 全部迁 PG+Redis 共享存储。锚点：**P5-1 W4 ✅ 2026-11-12**、**W6.2 事务边界 ✅ 2026-11-13**、**W6.3 DB 计数 ✅ 2026-11-13**、W6.4~W6.7 ✅ 2026-11-14（逐单验收见 bug_log §58/§64/§65/§66）。**下一步 W7（野怪池搬 Redis）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W0~W7 全部 ✅**——锁/选主/广播/房间/quota/野怪池全部迁 PG+Redis 共享存储。锚点：**P5-1 W4 ✅ 2026-11-12**、**W6.2 事务边界 ✅ 2026-11-13**、**W6.3 DB 计数 ✅ 2026-11-13**、W6.4~W6.7 ✅ 2026-11-14、**W7 野怪池 Redis 化 ✅ 2026-11-14**（逐单验收见 bug_log §58/§64/§65/§66/§68）。**下一步 W8（战斗/会话/馆主 CD 共享 KV）**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -41,16 +41,18 @@
 ## 6. 后端架构快照
 - 存档三层校验：`saveValidator`→`antiCheat`(`CHEAT_CODES`)→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前 400 拦整包 PUT 夹带真值。
 - P4-2a 派生榜 / P4-2b 房间 `withRoomLock` / P4-2c Boss `BossDamageEvent` / P4-2d 1v1 `pvpSettled` 幂等 / P4-2e+F16 共斗 `RoomState.coop`+最低贡献+每日3次 / F18-c 地图首领 `settleMapBossRun`（3×经验/5×金钱）；W6.1 `lib/pgRoomStorage.ts` 行版本 CAS + `retryCas`/`writeBack`，WS 监听器必须在**任何 await 之前**挂载；W6.2 `lib/roomUnitOfWork.ts` 事务边界；W6.3 `tryHoldQuota/settleQuota` DB 原子计数；W6.4 `bossQuota` token 租约。
+- W7 野怪池：`lib/wildRegistry.ts` 降为 facade（RNG/内容表/seq 留 Node），存储走 `WildStorage` **全 async 接口**两实现——`MemoryWildStorage`（单实例/单测，行为基线）与 `RedisWildStorage`（`wild:inst`/`wild:area`/`wild:user`/`wild:battle`/`wild:rev:*`/`wild:areas`/`wild:spec` + 四组 Lua：claim / resolve / release / ensure+append）；`useRedisStorage` 必须在**心跳启动前**装配，health 报 `wild.storage`（memory|redis）。内容生成不能进 Lua（查不到 `THEME_TABLE`），补怪是「Node 预生成候选 + 脚本 SCARD 上限原子追加」。
 - 能力边界：已挡改档/伪造捕获/白嫖购买/重复领奖/改时间/测试菜单越权/WS 或房间上行伪造/越权 battleId/旧意图刷奖/CAS 旧覆盖/顶号后续写/抢野怪/伪造榜/Boss/1v1/共斗字段；未挡加速器改节奏、改本地展示态。
 
 ## 7. 已修坑 / 交接（详 `.trae/documents/bug_log.md`）
 - 后台任务 `exit 4`/`0xC0000142` = 宿主回收；`lib/env.ts` `.env` 路径曾算错→改实测 `process.env.XXX`。
 - Windows 盘符大小写让 `vite-tsconfig-paths` 静默失配 → 别名走 Vite 原生 `resolve.alias`、模板禁内联 module script、dev 必须 `host:0.0.0.0`。带 RNG 的 E2E（逃跑/捕获）必须重试到 `finished` 或走 `abandon`。
-- 通用：冒烟 `\d` 被吃、等「元素可用」非「存在」、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖。交接 `HANDOFF.md`；接手只读核对，等杰哥排期。
+- 通用：冒烟 `\d` 被吃、等「元素可用」非「存在」、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖。**E2E 一律用 `127.0.0.1` 不用 `localhost`**（Windows 上 Node 首选解析 `::1`，后端只听 IPv4 → `fetch` 直接失败、全部 ABORT）；`harness.BASE` 已改默认 127，但 **`ORIGIN` 必须留 `localhost`**（WS 握手 Origin，CORS 精确匹配）。交接 `HANDOFF.md`；接手只读核对，等杰哥排期。
 
-## 8. W6~W6.7 收官索引（逐单细节见 bug_log）
+## 8. W6~W7 收官索引（逐单细节见 bug_log）
 - P5-1 W6 房间+quota 共享存储迁移（评级 L，#181~#188）**全部 ✅ 2026-11-14**：W6.0 数据模型（`Room`+`RoomQuotaDaily`，迁移 `20261113020739_w6_room_storage`）→ W6.1 `RoomStorage` 异步化+PG 行版本 CAS → W6.2 `roomUnitOfWork` 事务边界 → W6.3 DB 原子计数+结算二次 count → W6.4 quota 租约 token（TTL 30min、幂等 release、reapExpired 入 sweep）→ W6.5 `normalizeRoom` 序列化归一化（contributions key 转 number）→ W6.6 按接收者裁剪视图 + `RoomState.revision`/`Save.revision` 区分 → W6.7 双实例跨实例送达 E2E（`e2e:w7` 18/18）。
-- 逐单技术事实/验收数字见 `bug_log §60/§64/§65/§66`；测试脚本坑见 `bug_log §67`（`e2e:game` 全链路游戏冒烟，42/42）。
+- P5-1 **W7 野怪池搬 Redis（评级 M）✅ 2026-11-14**：三层拆解（`wildTypes`→`wildStorage` 接口→memory/redis 两实现→facade），全量 key + 四组 Lua 原子化，调用方（battle/wild/realtime/index）async 化；验收 内存单测 10/10、真 Redis 单测 9/9、`e2e:w7wild` 14/14（双实例）、后端 488、全量 42/42 `VERIFY_OK`。
+- 逐单技术事实/验收数字见 `bug_log §60/§64/§65/§66/§68`；测试脚本坑见 `bug_log §67`（`e2e:game` 全链路游戏冒烟，42/42）。
 
 ## 9. 验收锚点（勿删）
 - **P4-2a ✅ / P4-2b ✅ / P4-2c ✅ / P4-2d ✅ / P4-2e ✅** —— P4-2 五阶段全部完成（排期契约 `.trae/documents/P4-2_多人玩法排期_2026-11-07.md`）；P3-2 写操作上移服务端；P4-0 写入并发控制（slotLock 串行，规范 §21）；P4-1 ✅ 顶号与共享野怪（`SESSION_REPLACED` 踢旧设备）。

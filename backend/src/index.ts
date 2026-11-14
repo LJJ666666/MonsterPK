@@ -126,7 +126,8 @@ fastify.get('/api/health', async () => ({
   ws: getRealtimeStats(),
   sessions: getSessionStats(),
   battles: battles.stats(),
-  wild: wilds.stats(),
+  // W7：野怪池诊断。storage=redis 表示已切共享实现（跨实例同一份真值）。
+  wild: { ...(await wilds.stats()), storage: wilds.kind },
   // P4-2a：榜单是只读派生读模型，health 只报类型数与真值来源，不查库。
   rank: rankStats(),
   // P4-2b：房间状态域统计（纯内存，不查库）。
@@ -169,6 +170,12 @@ const port = Number(process.env.PORT ?? 3001);
 // 绝不带着进程内锁去接多实例流量（口径见 lib/lockBootstrap.ts）。
 initializeLockProvider()
   .then(async () => {
+    // W7：REDIS_URL 已配置（锁已是 redis 模式）时，把野怪池切到 Redis + Lua 共享实现。
+    // 必须早于心跳启动：否则第一轮全局 sweep 会把补怪写进本进程内存态，跨实例看不到。
+    // 未配 REDIS_URL 时保持 MemoryWildStorage（单实例开发 / 单测），行为与 W7 前一致。
+    const sharedClient = getLockRedisClient();
+    if (sharedClient) wilds.useRedisStorage(sharedClient);
+
     // E2E 临时实例（W2/W3/W5 这类不测选主的套件）用 MPK_DISABLE_SWEEP=1 不参与选主。
     // 原因：它们被 SIGTERM/SIGKILL 硬杀（Windows 下等同直接杀进程，shutdown handler 不执行），
     // lock:sweep:global 租约只能等 60s TTL 过期；这窗口内常驻 :3001 抢不回 leader，
@@ -178,10 +185,8 @@ initializeLockProvider()
     } else {
       await initializeSweepLeader(getLockRedisClient(), heartbeatIntervalMs());
     }
-    // W5：REDIS_URL 已配置（锁已是 redis 模式）时，装配跨实例广播 + 顶号；
-    // 否则保持 LocalBroadcastTransport（单实例直发，行为不变）。
-    const w5Client = getLockRedisClient();
-    if (w5Client) initW5Broadcast(w5Client);
+    // W5：REDIS_URL 已配置时装配跨实例广播 + 顶号；否则保持 LocalBroadcastTransport。
+    if (sharedClient) initW5Broadcast(sharedClient);
     registerRealtime(fastify);
     return fastify.listen({ port, host: '0.0.0.0' });
   })

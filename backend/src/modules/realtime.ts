@@ -99,9 +99,9 @@ export async function runGlobalSweep(
     for (const st of battles.sweepExpired(now)) {
       if (st.bossQuotaToken) bossQuota.release(st.bossQuotaToken);
     }
-    for (const areaId of wilds.sweep(now)) {
-      const spec = wilds.getAreaSpec(areaId);
-      if (spec) publishWild(areaId, spec, now);
+    for (const areaId of await wilds.sweep(now)) {
+      const spec = await wilds.getAreaSpec(areaId);
+      if (spec) await publishWild(areaId, spec, now);
     }
     return;
   }
@@ -121,10 +121,12 @@ export async function runGlobalSweep(
   // 广播再按 (areaId, bucket) 二次幂等，重复订阅/切换不重复推快照。
   const wildToken = (await ctx.guard()) ? await ctx.claim(`sweep:wilds:${bucket}`) : null;
   if (wildToken) {
-    for (const areaId of wilds.sweep(now)) {
-      const spec = wilds.getAreaSpec(areaId);
+    for (const areaId of await wilds.sweep(now)) {
+      const spec = await wilds.getAreaSpec(areaId);
       if (!spec) continue;
-      await guardedCommit(ctx, `wild:${areaId}:${bucket}`, () => { publishWild(areaId, spec, now); });
+      await guardedCommit(ctx, `wild:${areaId}:${bucket}`, async () => {
+        await publishWild(areaId, spec, now);
+      });
     }
   }
 }

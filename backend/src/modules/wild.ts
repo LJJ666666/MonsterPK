@@ -54,8 +54,8 @@ export function resolveAreaSpec(
 }
 
 /** 把某个区域的最新野怪列表广播给所有在线客户端。返回送达条数。 */
-export function publishWild(areaId: string, spec: WildAreaSpec, now = Date.now()): number {
-  const snap = wilds.list(areaId, spec, now);
+export async function publishWild(areaId: string, spec: WildAreaSpec, now = Date.now()): Promise<number> {
+  const snap = await wilds.list(areaId, spec, now);
   return broadcastAll(encodeServerMessage({
     type: 'wild.state',
     areaId,
@@ -76,7 +76,7 @@ export async function wildRoutes(fastify: FastifyInstance): Promise<void> {
     if (!THEME_TABLE[spec.theme]) {
       return reply.code(400).send({ error: '该区域没有可遭遇的幻兽', code: 'THEME_UNKNOWN' });
     }
-    const snap = wilds.list(q.areaId, spec, Date.now());
+    const snap = await wilds.list(q.areaId, spec, Date.now());
     return {
       ok: true,
       areaId: q.areaId,
@@ -86,7 +86,7 @@ export async function wildRoutes(fastify: FastifyInstance): Promise<void> {
       levelMax: spec.levelMax,
       revision: snap.revision,
       monsters: snap.monsters,
-      stats: wilds.stats(),
+      stats: await wilds.stats(),
     };
   });
 }

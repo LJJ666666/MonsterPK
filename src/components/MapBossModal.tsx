@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // F18-c 地图首领弹窗：列出 7 座地图首领，每座显示王牌 / 每日余量 / 掉落预览 / 解锁态。
 // 只读优先：列表与解锁、每日余量、掉落都来自服务端 `/api/mapboss`；点「挑战」只发 mapBossId。
 import { useEffect, useState } from "react";
@@ -46,11 +47,10 @@ export default function MapBossModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="地图首领">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">地图首领</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         <div className="border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/10 px-3 py-2 text-[10px] leading-4 text-[color:var(--muted)]">
@@ -106,7 +106,6 @@ export default function MapBossModal({
             {fightError}
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

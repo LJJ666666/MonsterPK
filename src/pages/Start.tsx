@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PixelButton from "@/components/PixelButton";
+import ModalShell from "@/components/ModalShell";
 import PixelCard from "@/components/PixelCard";
 import BrandMark from "@/components/BrandMark";
 import { MONSTER_SPECS, STARTERS } from "@/game/data";
@@ -110,7 +111,7 @@ export default function Start() {
   }
 
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col overflow-y-auto bg-[color:var(--bg)] shadow-2xl safe-top sm:border-x-2 sm:border-[color:var(--stroke)]">
+    <div className="page-shell safe-top overflow-y-auto">
       {/* 账号条 */}
       <header className="flex flex-none items-center justify-between border-b-2 border-[color:var(--stroke2)] px-5 py-4">
         <div className="flex items-center gap-3">
@@ -119,7 +120,7 @@ export default function Start() {
             <div className="font-display text-xs tracking-[0.1em] text-[color:var(--accent)]">
               兽域手记
             </div>
-            <div className="mt-1 text-[10px] tracking-[0.2em] text-[color:var(--muted)] opacity-70">
+            <div className="mt-1 text-xs tracking-[0.2em] text-[color:var(--muted)] opacity-90">
               BEAST JOURNAL
             </div>
           </div>
@@ -128,22 +129,22 @@ export default function Start() {
           <div className="flex items-center justify-end gap-1.5">
             <span className="text-xs text-[color:var(--text)]">{username || "旅行者"}</span>
             {isAdmin && (
-              <span className="border border-[color:var(--accent)] px-1 text-[9px] leading-4 text-[color:var(--accent)]">
+              <span className="border border-[color:var(--accent)] px-1 text-xs leading-4 text-[color:var(--accent)]">
                 管理员
               </span>
             )}
           </div>
           <button
             onClick={logout}
-            className="mt-1 text-[11px] text-[color:var(--muted)] underline decoration-dotted hover:text-[color:var(--text)]"
+            className="mt-1 text-xs text-[color:var(--muted)] underline decoration-dotted hover:text-[color:var(--text)]"
           >
             退出登录
           </button>
         </div>
       </header>
 
-      <main className="flex-1 px-5 py-8">
-        <div className="text-[11px] tracking-[0.22em] text-[color:var(--muted)] opacity-80">
+      <main className="safe-bottom flex-1 px-5 py-6">
+        <div className="text-xs tracking-[0.22em] text-[color:var(--muted)] opacity-90">
           FIELD JOURNAL / 001
         </div>
         <h1 className="mt-3 font-display text-xl leading-relaxed tracking-[0.08em] text-[color:var(--text)]">
@@ -168,7 +169,7 @@ export default function Start() {
               </div>
             </>
           ) : (
-            <div className="mt-1 text-sm text-[color:var(--muted)] opacity-70">
+            <div className="mt-1 text-sm text-[color:var(--muted)] opacity-90">
               尚无冒险记录，选一只伙伴出发吧。
             </div>
           )}
@@ -177,7 +178,7 @@ export default function Start() {
         {/* 唯一主操作 */}
         <button
           onClick={() => (activeSave ? navigate("/camp") : setOpen(true))}
-          className="mt-8 w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)]"
+          className="mt-8 min-h-[48px] w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)]"
         >
           {activeSave ? "继续旅程" : "开始新旅程"}
         </button>
@@ -248,14 +249,14 @@ export default function Start() {
           <button
             onClick={() => setAccountOpen(!accountOpen)}
             aria-expanded={accountOpen}
-            className="flex w-full items-center justify-between text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
+            className="flex min-h-[44px] w-full items-center justify-between text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
           >
             <span>账号与存档</span>
             <span>{accountOpen ? "收起 −" : "展开 +"}</span>
           </button>
           {accountOpen && (
             <div className="mt-4 flex flex-col gap-3">
-              <div className="text-[11px] leading-relaxed text-[color:var(--muted)] opacity-80">
+              <div className="text-xs leading-relaxed text-[color:var(--muted)] opacity-90">
                 进度只保存在你的账号下（当前账号：{username || "旅行者"}），换设备登录即可继续。
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -284,13 +285,13 @@ export default function Start() {
 
       {/* 创建新档弹窗（游戏必要流程，保留） */}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="max-h-[85dvh] w-full max-w-md overflow-y-auto">
+        <ModalShell onClose={() => setOpen(false)} title="创建新档" panelClassName="modal-panel--bare">
+          <div className="modal-body">
             <PixelCard
               title="创建新档"
               right={
                 <button
-                  className="text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                  className="min-h-[44px] min-w-[44px] text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
                   onClick={() => setOpen(false)}
                 >
                   关闭
@@ -349,7 +350,7 @@ export default function Start() {
               </div>
             </PixelCard>
           </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );

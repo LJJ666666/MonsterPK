@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // F18-d 剧情对话弹窗（2026-11-10 骨架）。
 // 轻量、移动优先：底部卡片、逐行推进、点击背景或按钮继续；占位 beat 显式标注。
 // 不持久化任何状态，关闭即释放。
@@ -15,14 +16,7 @@ export default function StoryModal({ beat, onClose }: { beat: StoryBeat; onClose
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-2"
-      onClick={advance}
-    >
-      <div
-        className="w-full max-w-[420px] border-2 border-[color:var(--stroke)] bg-[color:var(--bg)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell onClose={advance} title="剧情" scrimClassName="items-end p-2" panelClassName="modal-panel--story">
         <div className="flex items-center justify-between border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-3 py-2">
           <div className="font-display text-sm tracking-[0.08em] text-[color:var(--text)]">剧情</div>
           {beat.placeholder && (
@@ -48,12 +42,11 @@ export default function StoryModal({ beat, onClose }: { beat: StoryBeat; onClose
           </div>
           <button
             onClick={advance}
-            className="border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-1 text-xs font-semibold text-[color:var(--bg)]"
+            className="min-h-[44px] border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-5 text-sm font-semibold text-[color:var(--bg)]"
           >
             {last ? "完成" : "继续"}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

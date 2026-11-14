@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 import { X } from "lucide-react";
 import PixelCard from "./PixelCard";
 
@@ -7,12 +8,11 @@ type Props = {
 
 export default function MechanicsModal({ onClose }: Props) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md">
+    <ModalShell onClose={onClose} title="战斗机制与概率说明" scrimClassName="backdrop-blur-sm" panelClassName="modal-panel--bare">
         <PixelCard
           title="战斗机制与概率说明"
           right={
-            <button onClick={onClose} className="p-1 hover:text-[color:var(--danger)]">
+            <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">
               <X size={18} />
             </button>
           }
@@ -87,7 +87,6 @@ export default function MechanicsModal({ onClose }: Props) {
 
           </div>
         </PixelCard>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

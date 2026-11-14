@@ -1,4 +1,13 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+SC:wght@400;600&family=Press+Start+2P&display=swap");
+/* 字体自包含：像素标题字本地打包，中文走系统字体栈。
+   原先的 @import fonts.googleapis.com 在离线 APK / 弱网下会阻塞 CSS 解析，
+   导致首屏等待甚至白屏；本地 woff2 只有 12KB，随 dist 一起进包。 */
+@font-face {
+  font-family: "Press Start 2P";
+  src: url("/fonts/press-start-2p-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
 
 @tailwind base;
 @tailwind components;
@@ -10,14 +19,17 @@
   --panel: rgba(19, 28, 56, 0.78);
   --panel2: rgba(28, 40, 78, 0.78);
   --text: #eef1ff;
-  --muted: rgba(238, 241, 255, 0.72);
-  --stroke: rgba(238, 241, 255, 0.22);
-  --stroke2: rgba(238, 241, 255, 0.14);
+  /* 可读性：次要文字对比度由 0.72 提到 0.82，分隔线略提亮 */
+  --muted: rgba(238, 241, 255, 0.82);
+  --stroke: rgba(238, 241, 255, 0.26);
+  --stroke2: rgba(238, 241, 255, 0.16);
   --accent: #f6c24b;
   --ok: #66ff9a;
   --danger: #ff5a68;
+  /* 移动端最小触控目标；密集入口用 chip 自行保证 */
+  --tap: 44px;
 
-  font-family: "IBM Plex Sans SC", system-ui, sans-serif;
+  font-family: "IBM Plex Sans SC", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -31,6 +43,8 @@ html,
 body,
 #root {
   height: 100%;
+  /* 移动端禁止整页横向滚动：任何卡片/表格溢出都不得把页面推宽 */
+  overflow-x: hidden;
 }
 
 body {
@@ -41,16 +55,160 @@ body {
   color: var(--text);
 }
 
-/* 全局隐藏滚动条 (无感滑动) */
-::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+/* 交互反馈：去掉 WebView 默认蓝色点击块，禁止双击缩放带来的 300ms 延迟 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
+}
+/* 全站兜底：内容区仍有一批 12px 的小链接按钮（背包筛选、列表操作、弹窗 Tab），
+   点击区不足 30px。统一抬到 36px；已显式声明 min-h 的组件（PixelButton 40/44px、
+   GameHeader chip 40px、modal-close 44px）不受影响。 */
+button:not([class*="min-h-"]) {
+  min-height: 36px;
 }
 
+/* 统一焦点环：键盘/无障碍导航时清晰可见，不改变布局 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 滚动条：原先全局 display:none 让用户完全看不出内容可滚动。
+   改为极细的低对比度轨道，保留克制观感同时给出可滚动提示。 */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(238, 241, 255, 0.22);
+}
 * {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(238, 241, 255, 0.22) transparent;
+}
+
+/* 触控扩展：只给孤立的图标/关闭按钮使用（密集排列的按钮不要加，
+   否则相邻扩展区会重叠造成误触）。伪元素属于按钮本身，点击仍命中按钮。 */
+.tap-expand {
+  position: relative;
+}
+.tap-expand::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, var(--tap));
+  height: max(100%, var(--tap));
+  transform: translate(-50%, -50%);
+}
+
+/* 全站页面外壳：一屏容器 + 顶部安全区 + 禁止横向溢出。
+   游戏页统一用 page-shell，避免各页分别拼 h-[100dvh] 的细微差异。 */
+.page-shell {
+  display: flex;
+  height: 100dvh;
+  width: 100%;
+  max-width: 28rem;
+  margin-inline: auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  background: var(--bg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+@media (min-width: 640px) {
+  .page-shell {
+    border-left: 2px solid var(--stroke);
+    border-right: 2px solid var(--stroke);
+  }
+}
+
+/* 弹窗统一外壳：见 components/ModalShell.tsx */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.65);
+}
+.modal-panel {
+  display: flex;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 90dvh;
+  flex-direction: column;
+  border: 2px solid var(--stroke);
+  background: var(--bg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+.modal-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-bottom: 2px solid var(--stroke);
+  background: var(--bg2);
+  padding: 0.625rem 0.75rem;
+}
+.modal-title {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.modal-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  margin: -0.5rem -0.5rem -0.5rem 0;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--muted);
+}
+.modal-close:hover {
+  color: var(--text);
+}
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.modal-footer {
+  flex: none;
+  border-top: 2px solid var(--stroke);
+  padding: 0.5rem 0.75rem;
+}
+/* 程序性聚焦面板时不显示焦点环（键盘焦点仍由 :focus-visible 处理） */
+.modal-panel:focus {
+  outline: none;
+}
+/* PixelCard 自带外框的弹窗：外壳不再重复画框 */
+.modal-panel--bare {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* 剧情卡片：贴底显示，底部留出手势区 */
+.modal-panel--story {
+  max-width: 420px;
+  max-height: 85dvh;
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
 }
 
 /* 满潜特效 (呼吸灯) */
@@ -99,6 +257,10 @@ body {
 }
 .safe-bottom {
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+}
+/* 底部导航栏：无手势条的设备不加兜底高度，保持 56px 一屏预算 */
+.nav-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .safe-x {
   padding-left: env(safe-area-inset-left, 0px);

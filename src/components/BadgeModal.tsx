@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // F04 徽章 / 成就弹窗：一个页面、两个 Tab（规范 §31.1 / §31.4）。
 // 数据全部来自服务端只读接口；本地不计算等级、不上报字段、没有领取入口。
 // 375px 窄屏：全纵向列表 + min-w-0/truncate + max-h/overflow-auto，禁止横向滚动。
@@ -33,11 +34,10 @@ export default function BadgeModal({ onClose }: { onClose: () => void }) {
   const owned = new Set((p?.badges ?? []).map((b) => b.id));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="徽章与成就">
+        <div className="modal-header">
           <div className="font-display text-sm tracking-[0.08em] text-[color:var(--text)]">徽章与成就</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         {/* 顶部总览：人物等级 / 等级帽 / 总等级加成（服务端真值，只读） */}
@@ -136,7 +136,6 @@ export default function BadgeModal({ onClose }: { onClose: () => void }) {
           <div className="mb-2 text-[10px] leading-relaxed text-[color:var(--muted)]">{PROGRESS_DISCLAIMER}</div>
           <PixelButton onClick={onClose}>关闭</PixelButton>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

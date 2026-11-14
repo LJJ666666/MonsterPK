@@ -20,6 +20,8 @@ import StoryModal from "@/components/StoryModal";
 import GymModal from "@/components/GymModal";
 import MapBossModal from "@/components/MapBossModal";
 import { useStoryTriggers } from "@/lib/story";
+import ModalShell from "@/components/ModalShell";
+import GameHeader from "@/components/GameHeader";
 
 import { MonsterName } from "@/components/MonsterName";
 
@@ -109,11 +111,10 @@ function TestMenuModal({ onClose }: { onClose: () => void }) {
   const { testOHKO, testMaxStats, testShiny, toggleTestOHKO, toggleTestMaxStats, toggleTestShiny, addGold, addMasterBalls } = useGameStore();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-sm flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="测试功能">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">测试功能</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
         <div className="p-4 flex flex-col gap-3">
           <PixelButton onClick={() => { void addGold(999999); onClose(); }}>满金币 (+999999)</PixelButton>
@@ -128,8 +129,7 @@ function TestMenuModal({ onClose }: { onClose: () => void }) {
             捕抓必异色开关 {testShiny ? "[ON]" : "[OFF]"}
           </PixelButton>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1092,62 +1092,28 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   };
 
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl safe-top sm:border-x-2 sm:border-[color:var(--stroke)]">
-      {/* Header */}
-      <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="font-display text-xl tracking-widest text-[color:var(--text)]">兽域手记</div>
-          <div className="flex items-center gap-3">
-            {isAdmin && (
-              <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTestMenu(true)}>
-                测试
-              </button>
-            )}
-            <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTypeChart(true)}>
-              属性表
-            </button>
-            {onShowMoveChart && (
-              <button className="text-xs text-[color:var(--muted)] underline" onClick={onShowMoveChart}>
-                技能表
-              </button>
-            )}
-            {onShowMechanics && (
-              <button className="text-xs text-[color:var(--muted)] underline" onClick={onShowMechanics}>
-                机制表
-              </button>
-            )}
-            <button className="text-xs text-[color:var(--muted)] underline" onClick={() => navigate("/")}>
-              系统菜单
-            </button>
-          </div>
-        </div>
-        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[color:var(--muted)]">
-          <span className="truncate">{save.playerName} · ¥{save.money}</span>
-          <div className="flex flex-none items-center gap-3">
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowBoss(true)}>
-              讨伐
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowPvp(true)}>
-              对战
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowCoop(true)}>
-              共斗
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowGym(true)}>
-              演武堂
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowMapBoss(true)}>
-              地图首领
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowRank(true)}>
-              榜单
-            </button>
-            <button className="text-[color:var(--accent)] underline" onClick={() => setShowBadge(true)}>
-              徽章
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="page-shell safe-top">
+      {/* Header：玩法入口 chip 化、辅助功能收敛到菜单 */}
+      <GameHeader
+        title="兽域手记"
+        subtitle={<span className="truncate">{save.playerName} · ¥{save.money}</span>}
+        links={[
+          { label: "讨伐", onClick: () => setShowBoss(true) },
+          { label: "对战", onClick: () => setShowPvp(true) },
+          { label: "共斗", onClick: () => setShowCoop(true) },
+          { label: "演武堂", onClick: () => setShowGym(true) },
+          { label: "地图首领", onClick: () => setShowMapBoss(true) },
+          { label: "榜单", onClick: () => setShowRank(true) },
+          { label: "徽章", onClick: () => setShowBadge(true) },
+        ]}
+        menu={[
+          { label: "属性相克表", onClick: () => setShowTypeChart(true) },
+          ...(onShowMoveChart ? [{ label: "技能图鉴", onClick: onShowMoveChart }] : []),
+          ...(onShowMechanics ? [{ label: "战斗机制说明", onClick: onShowMechanics }] : []),
+          ...(isAdmin ? [{ label: "测试功能", onClick: () => setShowTestMenu(true) }] : []),
+          { label: "系统菜单", onClick: () => navigate("/") },
+        ]}
+      />
 
       {showTestMenu && isAdmin && <TestMenuModal onClose={() => setShowTestMenu(false)} />}
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
@@ -1208,7 +1174,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col">
+      <div className="flex-1 overflow-y-auto p-3 pb-5 flex flex-col">
         {tab === "party" && renderParty()}
         {tab === "bag" && renderBag()}
         {tab === "map" && renderMap()}
@@ -1216,8 +1182,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         {tab === "box" && renderBox()}
       </div>
 
-      {/* Bottom Navigation */}
-      <div className="flex-none flex h-14 border-t-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+      {/* Bottom Navigation：底部安全区避免手势条遮挡 */}
+      <div className="nav-safe-bottom flex-none flex min-h-[56px] border-t-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
         {[
           { id: "party", label: "队伍" },
           { id: "bag", label: "背包" },

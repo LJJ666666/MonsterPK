@@ -40,7 +40,7 @@ function Field({
           {error}
         </div>
       ) : hint ? (
-        <div className="mt-1.5 text-[11px] text-[color:var(--muted)] opacity-70">{hint}</div>
+        <div className="mt-1.5 text-[11px] text-[color:var(--muted)] opacity-90">{hint}</div>
       ) : null}
     </div>
   );
@@ -160,7 +160,7 @@ export default function Auth() {
     // 安全区：顶部留状态栏空间（刘海屏用真实 inset，无刘海设备兜底 24px），
     // 底部留导航栏空间。整体一屏排布：头部固定 + 表单垂直居中 + 服务状态贴底，
     // 默认登录态不出现滚动；注册态字段更多时若小屏放不下才允许局部滚动。
-    <div className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl safe-top safe-bottom sm:border-x-2 sm:border-[color:var(--stroke)]">
+    <div className="page-shell safe-top safe-bottom overflow-y-auto">
       {/* 品牌区（紧凑，给表单让出垂直空间） */}
       <header className="flex-none px-6 pb-5">
         <div className="flex items-center gap-3">
@@ -169,7 +169,7 @@ export default function Auth() {
             <div className="font-display text-base leading-none tracking-[0.1em] text-[color:var(--accent)]">
               兽域手记
             </div>
-            <div className="mt-1.5 text-[10px] tracking-[0.28em] text-[color:var(--muted)]">
+            <div className="mt-1.5 text-[11px] tracking-[0.28em] text-[color:var(--muted)]">
               BEAST JOURNAL
             </div>
           </div>
@@ -197,7 +197,7 @@ export default function Auth() {
                 aria-selected={mode === m}
                 onClick={() => switchMode(m)}
                 className={[
-                  "py-2.5 text-sm font-semibold tracking-wide transition-colors",
+                  "min-h-[44px] py-2.5 text-sm font-semibold tracking-wide transition-colors",
                   m === "login" ? "border-r-2 border-[color:var(--stroke)]" : "",
                   mode === m
                     ? "bg-[color:var(--accent)] text-[#0b1020]"
@@ -343,7 +343,7 @@ export default function Auth() {
             <button
               type="submit"
               disabled={busy}
-              className="mt-1 w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 min-h-[48px] w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? "请稍候…" : mode === "login" ? "登录并继续" : "创建账号并进入"}
             </button>
@@ -365,7 +365,7 @@ export default function Auth() {
             />
             <span>{serviceText[service]}</span>
           </div>
-          <div className="mt-1 text-[11px] text-[color:var(--muted)] opacity-60">
+          <div className="mt-1 text-[11px] text-[color:var(--muted)] opacity-90">
             API · {API_BASE}
           </div>
         </div>

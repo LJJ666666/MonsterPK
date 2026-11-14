@@ -31,8 +31,8 @@ export function EvolutionModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-sm border-4 border-[color:var(--stroke)] bg-[color:var(--bg)] p-4 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-label="进化确认">
+      <div className="w-full max-w-sm border-4 border-[color:var(--stroke)] bg-[color:var(--bg)] p-4 shadow-2xl safe-bottom">
         <div className="mb-4 text-center font-display text-lg text-[color:var(--text)]">
           {fromSpec.name} 即将进化为 <span className="text-[color:var(--accent)]">{toSpec.name}</span>
         </div>

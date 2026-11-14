@@ -29,8 +29,8 @@ export function MoveLearnerModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-sm border-4 border-[color:var(--stroke)] bg-[color:var(--bg)] p-4 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-label="学习新技能">
+      <div className="w-full max-w-sm border-4 border-[color:var(--stroke)] bg-[color:var(--bg)] p-4 shadow-2xl safe-bottom">
         <div className="mb-4 text-center font-display text-lg text-[color:var(--text)]">
           {MONSTER_SPECS[learningMonster.specId].name} 想要学习 <span className="text-[color:var(--accent)]">{newMove.name}</span>
         </div>

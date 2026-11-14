@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 import { useState } from "react";
 import { ELEMENT_LABEL, ELEMENT_COLORS } from "@/game/data";
 import type { Element } from "@/game/types";
@@ -30,11 +31,10 @@ export default function TypeChartModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="属性相克">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">属性相克</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
@@ -118,7 +118,6 @@ export default function TypeChartModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

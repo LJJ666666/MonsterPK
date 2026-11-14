@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // 榜单弹窗：P4-2a 本期四榜 + F01 周期历史榜 + F02 我的奖励。
 // 三块数据全部来自服务端只读接口；本地不计算名次、不上报奖励、没有领取入口。
 // 375px 窄屏：全纵向列表 + min-w-0/truncate，禁止大表格横向滚动。
@@ -105,11 +106,10 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
       : `共 ${rewards?.entries.length ?? 0} 条记录 · 服务端发放 · 只读`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="兽域榜单">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">兽域榜单</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         <div className="border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/10 px-3 py-2 text-[10px] leading-4 text-[color:var(--muted)]">
@@ -230,7 +230,6 @@ export default function RankBoardModal({ onClose }: { onClose: () => void }) {
           <div className="text-[10px] text-[color:var(--muted)] truncate">{footerText}</div>
           <PixelButton size="sm" onClick={() => setReloadKey((k) => k + 1)}>刷新</PixelButton>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

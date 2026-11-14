@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // P4-2d 玩家对战 1v1 弹窗：创建 / 加入房间 + 对战界面。
 //
 // 唯一真值在服务端：房间与 1v1 战斗态由 `room.state` 全量快照下发（按接收者裁剪），
@@ -98,11 +99,10 @@ export default function PvpModal({ onClose }: { onClose: () => void }) {
   const pvp = pvpViewOf(room);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="玩家对战">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">玩家对战</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         <div className="border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/10 px-3 py-2 text-[10px] leading-4 text-[color:var(--muted)]">
@@ -254,7 +254,6 @@ export default function PvpModal({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

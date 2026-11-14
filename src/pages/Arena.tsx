@@ -16,6 +16,7 @@ import type { LocationId } from "@/game/types";
 import TypeChartModal from "@/components/TypeChartModal";
 import StoryModal from "@/components/StoryModal";
 import { MonsterName } from "@/components/MonsterName";
+import GameHeader from "@/components/GameHeader";
 
 function resultText(r: string | undefined) {
   if (r === "captured") return "捕获成功";
@@ -202,85 +203,76 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
   const activePP = battle.ppByMonster?.[active.id] ?? {};
 
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl safe-top sm:border-x-2 sm:border-[color:var(--stroke)]">
-      {/* Header */}
-      <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="font-display text-xl tracking-widest text-[color:var(--text)]">{battle.areaName}</div>
-          <div className="flex items-center gap-3">
-            <button className="text-xs text-[color:var(--muted)] underline" onClick={() => setShowTypeChart(true)}>
-              属性表
-            </button>
-            {onShowMoveChart && (
-              <button className="text-xs text-[color:var(--muted)] underline" onClick={onShowMoveChart}>
-                技能表
-              </button>
+    <div className="page-shell safe-top">
+      {/* Header：辅助功能收进菜单，副信息常显 */}
+      <GameHeader
+        title={battle.areaName}
+        subtitle={
+          <>
+            回合 {battle.turn} · {battle.theme.toUpperCase()}
+            {(battle.bossId || battle.mapBossId) && (
+              <span className="ml-2 text-[color:var(--accent)]">
+                {battle.bossId ? "讨伐" : "首领"} · 本场伤害 {battle.damageDealt ?? 0}
+              </span>
             )}
-            {onShowMechanics && (
-              <button className="text-xs text-[color:var(--muted)] underline" onClick={onShowMechanics}>
-                机制表
-              </button>
+            {battle.serverId ? (
+              <span className="ml-2 text-[color:var(--accent)]">服务端裁决</span>
+            ) : (
+              <span className="ml-2 text-amber-500">本地模式（结果需服务端确认）</span>
             )}
-            <button className="text-xs text-[color:var(--muted)] underline" onClick={() => {
+            {battle.pending && <span className="ml-2 animate-pulse text-[color:var(--accent)]">处理中…</span>}
+          </>
+        }
+        menu={[
+          { label: "属性相克表", onClick: () => setShowTypeChart(true) },
+          ...(onShowMoveChart ? [{ label: "技能图鉴", onClick: onShowMoveChart }] : []),
+          ...(onShowMechanics ? [{ label: "战斗机制说明", onClick: onShowMechanics }] : []),
+          {
+            label: "回程",
+            onClick: () => {
               leaveBattle();
               navigate("/camp", { state: { returnToTown: true } });
-            }}>
-              回程
-            </button>
-          </div>
-        </div>
-        <div className="mt-1 text-xs text-[color:var(--muted)]">
-          回合 {battle.turn} · {battle.theme.toUpperCase()}
-          {(battle.bossId || battle.mapBossId) && (
-            <span className="ml-2 text-[color:var(--accent)]">
-              {battle.bossId ? "讨伐" : "首领"} · 本场伤害 {battle.damageDealt ?? 0}
-            </span>
-          )}
-          {battle.serverId ? (
-            <span className="ml-2 text-[color:var(--accent)]">服务端裁决</span>
-          ) : (
-            <span className="ml-2 text-amber-500">本地模式（结果需服务端确认）</span>
-          )}
-          {battle.pending && <span className="ml-2 animate-pulse text-[color:var(--accent)]">处理中…</span>}
-        </div>
-      </div>
+            },
+          },
+        ]}
+      />
 
       {showTypeChart && <TypeChartModal onClose={() => setShowTypeChart(false)} />}
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+      {/* 上方可滚动：战场状态与当回合日志 */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
         {/* Battle Stage */}
-        <div className="grid gap-3">
-          <div className={`border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 relative overflow-hidden transition-all duration-200 ${enemyHit ? "bg-red-500/20 translate-x-1" : ""}`}>
+        <div className="grid gap-2">
+          <div className={`border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2.5 relative overflow-hidden transition-all duration-200 ${enemyHit ? "bg-red-500/20 translate-x-1" : ""}`}>
             <div className="flex items-baseline justify-between">
               <div className="text-sm font-semibold text-[color:var(--text)]"><MonsterName m={battle.enemy} /></div>
               <div className="text-xs text-[color:var(--muted)]">
                 Lv.{battle.enemy.level} · <span className={ELEMENT_COLORS[battle.enemy.element]}>{ELEMENT_LABEL[battle.enemy.element]}</span>
               </div>
             </div>
-            <div className="mt-2">
+            <div className="mt-1.5">
               <StatBar label="HP" value={battle.enemy.hp} max={battle.enemy.maxHp} tone="enemy" />
             </div>
-            <div className="mt-2 text-xs text-[color:var(--muted)]">状态：{battle.enemy.status === "none" ? "正常" : battle.enemy.status}</div>
+            <div className="mt-1.5 text-xs text-[color:var(--muted)]">状态：{battle.enemy.status === "none" ? "正常" : battle.enemy.status}</div>
           </div>
 
-          <div className={`border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 relative overflow-hidden transition-all duration-200 ${playerHit ? "bg-red-500/20 -translate-x-1" : ""}`}>
+          <div className={`border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2.5 relative overflow-hidden transition-all duration-200 ${playerHit ? "bg-red-500/20 -translate-x-1" : ""}`}>
             <div className="flex items-baseline justify-between">
               <div className="text-sm font-semibold text-[color:var(--text)]"><MonsterName m={active} /></div>
               <div className="text-xs text-[color:var(--muted)]">
                 Lv.{active.level} · <span className={ELEMENT_COLORS[active.element]}>{ELEMENT_LABEL[active.element]}</span>
               </div>
             </div>
-            <div className="mt-2 grid gap-2">
+            <div className="mt-1.5 grid gap-1.5">
               <StatBar label="HP" value={active.hp} max={active.maxHp} />
               <StatBar label="EXP" value={active.exp} max={requiredExpForNextLevel(active.level)} tone="exp" size="sm" className="-mt-1" />
             </div>
-            <div className="mt-2 text-xs text-[color:var(--muted)]">状态：{active.status === "none" ? "正常" : active.status}</div>
+            <div className="mt-1.5 text-xs text-[color:var(--muted)]">状态：{active.status === "none" ? "正常" : active.status}</div>
           </div>
         </div>
 
         {/* Current Round Log (Replaces Full Log List) */}
-        <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 text-sm leading-relaxed text-[color:var(--muted)] min-h-[5rem] flex flex-col justify-center">
+        <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3 text-sm leading-relaxed text-[color:var(--muted)] min-h-[3.5rem] flex flex-col justify-center">
           {latestLog.length > 0 ? (
             latestLog.map((line, idx) => {
               const isEff = line.includes("拔群") || line.includes("克制");
@@ -303,9 +295,18 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
           )}
         </div>
 
-        {/* Action Panel - Pushed to Bottom */}
-        <div className="mt-auto">
-          <PixelCard title={battle.finished ? "结束: " + resultText(battle.result) : "选择行动"}>
+      </div>
+
+      {/* 最新回合反馈常显：出招后不必滚动就能看到伤害/效果 */}
+      <div className="flex-none truncate border-t-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-3 py-1.5 text-xs text-[color:var(--text)]">
+        {latestLog.length > 0 ? latestLog[latestLog.length - 1] : "等待指令…"}
+      </div>
+
+      {/* 核心行动区固定在底部：招式/道具/换位始终可见，不随战斗日志滚动；
+          极端小屏最多占 46dvh，内部再滚动，保证上方状态区仍有空间 */}
+      <div className="flex-none border-t-2 border-[color:var(--stroke)] bg-[color:var(--bg)] p-3 safe-bottom">
+        <div className="max-h-[46dvh] overflow-y-auto overscroll-contain">
+          <PixelCard title={battle.finished ? "结束: " + resultText(battle.result) : "选择行动"} bodyClassName="p-3">
             {!battle.finished ? (
               <>
                 <div className="mb-3 flex flex-wrap gap-2">

@@ -21,6 +21,9 @@ const config: CapacitorConfig = {
   plugins: {
     StatusBar: {
       overlaysWebView: false,
+      // 枚举按「文字颜色」命名：Style.Dark = "DARK" = 深色背景配浅色图标。
+      // Android 实现为 setAppearanceLightStatusBars(!style.equals("DARK"))，
+      // 传 LIGHT 反而会变成深色图标、在 #070a14 上不可读。
       style: 'DARK',
       backgroundColor: '#070a14'
     }

@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 import { useState } from "react";
 import { ELEMENT_LABEL, ELEMENT_COLORS, MOVE_SPECS } from "@/game/data";
 import type { Element, MoveSpec } from "@/game/types";
@@ -23,13 +24,12 @@ export default function MoveChartModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
+    <ModalShell onClose={onClose} title="技能图鉴" scrimClassName="backdrop-blur-sm">
         
         {/* 头部 */}
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] flex-none">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">技能图鉴</div>
-          <button onClick={onClose} className="p-1 hover:text-[color:var(--danger)] text-[color:var(--muted)]">
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">
             <X size={18} />
           </button>
         </div>
@@ -97,7 +97,6 @@ export default function MoveChartModal({ onClose }: { onClose: () => void }) {
           </div>
 
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

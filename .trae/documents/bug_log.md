@@ -1825,3 +1825,56 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
    徽章页 s19 显示「青苗徽章 · 已获得 1/7」→ 捕获首通授予青苗徽章后解锁下一城，是 F18-a 正常设计，非 UI/存档错误。
 
 **测试数据**：账号 `gametest001` 及其存档（rev=3、2 只幻兽）保留在库中，未清理，供后续继续测；需要时用 `cd backend && npm run clean:e2e` 清 `mpk-e2e-` 前缀数据（不覆盖本账号）。
+
+## §73 2026-11-15 全站 UI/UE 优化（按「反AI味UI设计工作室」方法论）
+
+**指令**：杰哥「先邀请 UIUE 相关的专家，优化一下所有界面」。专家推荐卡片超时未选，按既定口径自取
+「反AI味UI设计工作室」（四人团队制、页面令牌一次出全 + 门禁实测把关）的方法论执行；**未改任何产品语义/数值/风控**。
+
+**走查发现（改造前，真机截图 + 源码取证）**：
+1. `src/index.css` 首行 `@import fonts.googleapis.com` 违反 `.impeccable.md` 零 CDN，离线 APK 会阻塞 CSS 解析。
+2. Camp/Arena 头部把 7~11 个 `text-xs` 下划线链接挤在两行，触控目标 <24dp；玩家名被 `truncate`。
+3. 14 个弹窗各写各的遮罩/面板/关闭按钮：无 ESC / 遮罩关闭、无 `role="dialog"`、关闭按钮 <24dp。
+4. 战斗页行动面板在滚动区内用 `mt-auto` 推底，招式要滚动才看得全（11-15 实测 s8/s9）。
+5. 全局 `::-webkit-scrollbar{display:none}` 让用户看不出内容可滚动；`--muted` 0.72 对比度偏低；底部导航无安全区。
+
+**改造（三层）**：
+- **底座 `src/index.css`**：本地化 Press Start 2P、中文走系统字体栈；`--muted` 0.82；新增 `--tap:44px`、
+  `.page-shell` / `.modal-*` / `.tap-expand` / `.nav-safe-bottom`；全局 `overflow-x:hidden`、
+  `touch-action:manipulation`、`:focus-visible` 焦点环、4px 细滚动条、
+  `button:not([class*="min-h-"]) { min-height:36px }` 给内容区小按钮兜底（不覆盖显式 min-h 的组件）。
+- **通用组件**：新增 `ModalShell.tsx`（遮罩点击/ESC 关闭、`role="dialog"`/`aria-modal`、背景滚动锁计数、44px 关闭按钮）
+  与 `GameHeader.tsx`（标题+副信息+可横滑 40dp chip+44px 菜单按钮）；`PixelButton` 40/44px、
+  `PixelCard` 支持 `bodyClassName`。9 个标准弹窗批量换壳；Mechanics/Story/Start 建档/Camp 测试菜单单独适配；
+  `EvolutionModal`/`MoveLearnerModal` 保留强制决策语义（不可点遮罩关闭，仅补无障碍 + 安全区）。
+- **页面**：4 个页面统一 `page-shell` + 安全区；Camp/Arena 头部收敛为 `GameHeader`（7 个玩法入口 chip 化、
+  4 个辅助表收进菜单）；Arena 行动面板移出滚动区固定底部（`max-h-[46dvh]` 内滚）+ 常显最新回合反馈条；
+  Camp 底部导航 `nav-safe-bottom`；Start/Auth 字号 10/11→11/12、主按钮 48px、建档弹窗换壳。
+- **`capacitor.config.ts` StatusBar**：查 `@capacitor/status-bar` 源码后保留 `DARK`。
+  `Style.Dark = "DARK"` 是「深色背景配浅色图标」，Android 实现 `setAppearanceLightStatusBars(!style.equals("DARK"))`；
+  **曾误改成 LIGHT 并据 README 示例推断，被源码推翻后改回**（净变化只有防再犯的注释）。
+
+**验收（门禁 + 真机，emulator-5554）**：
+- `npm run check` 0 错；`vite build` 通过；`vitest` 全量 **154/154**（新增 `Layout.test.tsx` 4 条 + `styles.test.ts` 5 条，145→154）。
+- 离线 Gradle 构建 8s（缓存 `.ok` 目录直调二进制 + `--offline`），APK `01:12:09`；核 bundle 含 `page-shell`/`modal-scrim`/`button:not`。
+- 真机逐页：登录页一屏；Camp 五个 tab；菜单弹窗；属性相克表弹窗；**ESC 关闭**（A 100633 ≠ B 139927）、
+  **遮罩关闭**（E 127130 ≠ F 139927）；战斗页敌我血条 + 常显反馈条 + 4 tab + 2 招式卡片**同屏全可见**，
+  出招后反馈条由「遭遇：野生 绒毛犬」更新为「苔羽鸮 使用了 原木重击，造成 7 点伤害。」（回合 2 / 敌 46/53 / PP 24/25）。
+- **CDP 实测横向溢出**（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` + `Runtime.evaluate`）：
+  360dp `innerWidth=360, scrollWidth=360, bodyScrollWidth=360`；240dp 超窄 `innerWidth=240, scrollWidth=240` —— 均无横向溢出。
+- 证据截图 `%TEMP%/mpk_ui_final_*.png`（登录/地图/菜单/弹窗/战斗/出招后）。
+
+**踩坑（补 §71 同类清单）**：
+1. `grep -o` 无匹配返回 1，用 `&&` 串联导致后续 Gradle 构建整段被跳过却显示 `BUILD_EXIT=1` —— 与 §71「grep -c 断链」同源；
+   长命令一律用 `;` 或 `|| true`。
+2. StatusBar style 语义按 README 示例猜反，源码取证后改回：**验收结论只认源码/产物，不认文档示例推断**。
+3. 地图页提示「战斗进行中，无法执行该操作」导致一串点击全部无效、三张截图字节相同；不重复盲点，
+   改用 WebView CDP 注入 `history.pushState + popstate` 切回 `/arena` 验证战斗页。
+4. `wm size` / `adb reverse` 改变后坐标与状态会变；**截图字节数相同要立刻怀疑「操作未生效」**，而不是「UI 没变化」。
+
+**未修 / 观察项（不动产品语义）**：
+- LDPlayer 冷启动首帧状态栏图标偏暗；`wm size` 触发配置变化后（`handleOnConfigurationChanged → updateStyle`）恢复白色清晰。
+  属模拟器自绘状态栏时序，代码侧配置已按源码语义正确，真机上线前复核。若要彻底消除可评估 `StatusBar.hide()` 全屏沉浸
+  （产品行为变更，需杰哥拍板）。
+- 240dp 超窄屏下战斗状态卡被固定行动区挤到需上滑、反馈条文字被 `truncate` 省略；属合理降级（无横向溢出，可滚达）。
+- 剧情 intro 冷启动重播（§72 观察点 1）仍未改，属产品行为，等排期。

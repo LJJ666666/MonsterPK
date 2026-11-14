@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // F16 共斗 6 房副本弹窗：选目标 → 创建 / 加入房间 → 六房地图 + 行动面板。
 //
 // 唯一真值在服务端：每房敌人 HP / 四态 / 贡献 / 回合 / 胜负由 `room.state` 全量快照下发
@@ -129,11 +130,10 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
   const inLobby = !!coop && coop.self.roomIndex < 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="共斗副本">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">共斗副本</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         <div className="border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/10 px-3 py-2 text-[10px] leading-4 text-[color:var(--muted)]">
@@ -339,7 +339,6 @@ export default function CoopModal({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

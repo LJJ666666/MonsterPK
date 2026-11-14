@@ -1,3 +1,4 @@
+import ModalShell from "@/components/ModalShell";
 // F18-b 演武堂弹窗：列出 7 座演武堂，每座显示馆主 / 王牌 / 已得徽章 / 馆主休息倒计时。
 // 只读优先：列表与冷却、徽章归属都来自服务端 `/api/gym/overview`；点「挑战馆主」只发 locationId。
 import { useEffect, useState } from "react";
@@ -56,11 +57,10 @@ export default function GymModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[color:var(--bg)] border-2 border-[color:var(--stroke)] w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between p-3 border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
+    <ModalShell onClose={onClose} title="兽域演武堂">
+        <div className="modal-header">
           <div className="font-bold text-[color:var(--text)]">兽域演武堂</div>
-          <button onClick={onClose} className="text-2xl leading-none text-[color:var(--muted)] hover:text-[color:var(--text)]">&times;</button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
         <div className="border-b-2 border-[color:var(--stroke)] bg-[color:var(--danger)]/10 px-3 py-2 text-[10px] leading-4 text-[color:var(--muted)]">
@@ -113,7 +113,6 @@ export default function GymModal({
             {fightError}
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

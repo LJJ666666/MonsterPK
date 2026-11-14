@@ -352,6 +352,16 @@ export function sweepLeaseTtlMs(heartbeatMs: number): number {
  * 启动时装配：有 W3 的 Redis 客户端就用真跨进程租约；没有则保持进程内
  * （仅允许单实例，与 W3 `REDIS_URL` 未配置时同口径）。
  */
+/**
+ * 选主命名空间前缀（仅 E2E 用）。为空 = 默认 `lock:sweep:global`（生产 / 常驻实例）。
+ * E2E 多实例套件每轮注入 `mpk-e2e-<RUN>`，让测试实例在**独立命名空间**选主，
+ * 绝不抢常驻 :3001 的租约，也不会被上一次 SIGKILL 残留的租约挡住本次选主（F1 接管验收必需）。
+ */
+function sweepKeyPrefix(): string {
+  const raw = process.env.SWEEP_KEY_PREFIX;
+  return raw && raw.length > 0 ? raw : '';
+}
+
 export async function initializeSweepLeader(
   client: Redis | null,
   heartbeatMs: number,
@@ -360,8 +370,9 @@ export async function initializeSweepLeader(
     console.warn('[W4] 无 Redis 客户端：选主保持进程内，仅允许单实例');
     return current;
   }
+  const prefix = sweepKeyPrefix();
   const leader = new SweepLeader(
-    createRedisSweepLeaseStore(client),
+    createRedisSweepLeaseStore(client, prefix),
     `${process.pid}:${randomUUID().slice(0, 8)}`,
     { ttlMs: sweepLeaseTtlMs(heartbeatMs) },
   );

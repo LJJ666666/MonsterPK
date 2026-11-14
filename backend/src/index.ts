@@ -218,11 +218,17 @@ initializeLockProvider()
     process.exit(1);
   });
 
-process.on('SIGINT', async () => {
+async function gracefulShutdown(signal: string) {
+  fastify.log.info(`[shutdown] 收到 ${signal}，开始优雅关闭`);
   // 先交出 leader 租约（要用 Redis 客户端），再关闭广播订阅与锁连接，让其它实例立即接管。
   await getSweepLeader().shutdown();
   await shutdownBroadcast();
   await shutdownLockProvider();
   await prisma.$disconnect();
   process.exit(0);
-});
+}
+
+process.on('SIGINT', () => { void gracefulShutdown('SIGINT'); });
+// SIGTERM 同样优雅关闭：测试以 SIGTERM 杀实例时（如 W9 故障注入 kill-leader），
+// 主动交还租约让幸存实例立即接管，而不是等 60s TTL 过期。生产容器编排 SIGTERM 也走这条。
+process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });

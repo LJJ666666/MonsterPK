@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W0~W8 全部 ✅**——锁/选主/广播/房间/quota/野怪池/战斗/馆主CD 全部迁 PG+Redis 共享存储。锚点：**P5-1 W4 ✅ 2026-11-12**、**W6.2 事务边界 ✅ 2026-11-13**、**W6.3 DB 计数 ✅ 2026-11-13**、W6.4~W6.7 ✅ 2026-11-14、**W7 野怪池 Redis 化 ✅ 2026-11-14**、**W8 战斗/会话/CD 共享 KV ✅ 2026-11-14**（逐单验收见 bug_log §58/§64/§65/§66/§68/§69）。**下一步 W9（HTTPS 切云 + WS 横向扩展 + 双实例回归）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W0~W9 全部 ✅**——锁/选主/广播/房间/quota/野怪池/战斗/馆主CD 全部迁 PG+Redis 共享存储，W9 起真正开第二实例做常规服务（反代 + 共享存储）。锚点：**P5-1 W4 ✅ 2026-11-12**、**W6.2 事务边界 ✅ 2026-11-13**、**W6.3 DB 计数 ✅ 2026-11-13**、W6.4~W6.7 ✅ 2026-11-14、**W7 野怪池 Redis 化 ✅ 2026-11-14**、**W8 战斗/会话/CD 共享 KV ✅ 2026-11-14**、**W9 双实例横向扩展与故障注入（反代 + 真 Redis）✅ 2026-11-14**（`e2e:multi` 42/42，逐单验收见 bug_log §58/§64/§65/§66/§68/§69/§70）。**下一步 P5-3 Release 签名与渠道包（装到真机）+ W9 配套 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -54,7 +54,8 @@
 - P5-1 W6 房间+quota 共享存储迁移（评级 L，#181~#188）**全部 ✅ 2026-11-14**：W6.0 数据模型（`Room`+`RoomQuotaDaily`，迁移 `20261113020739_w6_room_storage`）→ W6.1 `RoomStorage` 异步化+PG 行版本 CAS → W6.2 `roomUnitOfWork` 事务边界 → W6.3 DB 原子计数+结算二次 count → W6.4 quota 租约 token（TTL 30min、幂等 release、reapExpired 入 sweep）→ W6.5 `normalizeRoom` 序列化归一化（contributions key 转 number）→ W6.6 按接收者裁剪视图 + `RoomState.revision`/`Save.revision` 区分 → W6.7 双实例跨实例送达 E2E（`e2e:w7` 18/18）。
 - P5-1 **W7 野怪池搬 Redis（评级 M）✅ 2026-11-14**：三层拆解（`wildTypes`→`wildStorage` 接口→memory/redis 两实现→facade），全量 key + 四组 Lua 原子化，调用方（battle/wild/realtime/index）async 化；验收 内存单测 10/10、真 Redis 单测 9/9、`e2e:w7wild` 14/14（双实例）、后端 488、全量 42/42 `VERIFY_OK`。
 - P5-1 **W8 战斗/会话/馆主 CD 共享 KV + TTL（评级 M）✅ 2026-11-14**：**没走定稿给的「userId 粘性路由降级」退路**。新增 `kvStore` 抽象（内存/Redis 双实现）→ 馆主 CD 原子 `acquire`（`gym:cd:*`，TTL=20min 自动过期）→ 战斗态 `BattleStorage` 四层同构（物理 TTL=逻辑×2，Lua 两段原子覆盖/续期，15 处调用 async 化）→ 会话修 `hydrate()` 根因 + `sess:rev:*` 新鲜度戳；验收 内存 8/8 + 会话 14/14 + 真 Redis 14/14 + `e2e:w8shared` 18/18（双实例）+ 后端 488 + 全量 43/43 `VERIFY_OK`。顺手修 `e2e:game` C/D 段只用基础招致 9% 间歇红（改回合间轮换所有招）与 `e2e:w4` 残留 leader 租约致 leader=false（加 `waitForLeader` 上限 75s）。
-- 逐单技术事实/验收数字见 `bug_log §60/§64/§65/§66/§68/§69`；测试脚本坑见 `bug_log §67`（`e2e:game` 全链路游戏冒烟，42/42）。
+- P5-1 **W9 双实例横向扩展与故障注入（反代 + 真 Redis）✅ 2026-11-14**：新增 `tests/lib/reverseProxy.mjs`（纯 Node 反代：HTTP 轮询探活 + WS Upgrade 透传 + Origin 白名单）+ `tests/e2e_multi_instance.mjs`（42 断言，6 happy-path 经反代 + 跨实例广播/顶号 + 4 故障注入：杀 leader 接管 / 杀非 leader 在途战斗不丢 / 杀连接实例经反代重连拉全量 / 租约迟到释放不误删）；`sweepLeader.ts` 加 `SWEEP_KEY_PREFIX` 隔离、`index.ts` 抽 `gracefulShutdown` 挂 SIGINT/SIGTERM 主动释放租约；`verify.mjs` 的 `STAGES`+`GROUPS.e2e` 注册 `e2e:multi`。验收 42/42 `E2E_MULTI_OK` + 后端 `node:test` 502/502。**已真正开第二实例做常规服务**。详见 bug_log §70。
+- 逐单技术事实/验收数字见 `bug_log §60/§64/§65/§66/§68/§69/§70`；测试脚本坑见 `bug_log §67`（`e2e:game` 全链路游戏冒烟，42/42）。
 
 ## 9. 验收锚点（勿删）
 - **P4-2a ✅ / P4-2b ✅ / P4-2c ✅ / P4-2d ✅ / P4-2e ✅** —— P4-2 五阶段全部完成（排期契约 `.trae/documents/P4-2_多人玩法排期_2026-11-07.md`）；P3-2 写操作上移服务端；P4-0 写入并发控制（slotLock 串行，规范 §21）；P4-1 ✅ 顶号与共享野怪（`SESSION_REPLACED` 踢旧设备）。

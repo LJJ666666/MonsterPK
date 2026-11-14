@@ -1669,3 +1669,85 @@ B 能对该战斗出招且 A 看到回合被推进 / 放弃后同实例与跨实
   跨实例正确性由 `withSlotLock`（W3 Redis 租约锁）保证。若以后去掉账号锁，这里必须改成一个原子脚本。
 - **会话只共享新鲜度、不共享内容**：多实例下每个实例的 `connections` 仍是各管各的（进程本地连接集合本来不可共享），
   跨实例顶号由 W5 的 `takeover` 频道处理。
+
+---
+
+## §70 P5-1 W9 收官：双实例横向扩展与故障注入（反代 + 真 Redis）（2026-11-14）
+
+**背景**：W0~W8 把锁/选主/广播/房间/quota/野怪池/战斗/会话/馆主CD 全部迁到 PG+Redis 共享存储，health 的
+`lock`/`sweep`/`broadcast`/`wild.storage`/`w8` 五项均 `redis`。W9 是**真正开第二实例做常规服务**的验收关：
+同一份代码起两个进程，前面放一个反代做 HTTP 轮询 + WS Upgrade 透传 + Origin 白名单，再注入四类故障
+（杀 leader / 杀非 leader / 杀连接所在实例 / 租约迟到释放），证明「横向扩展 + 故障切换」在共享存储下成立。
+**零产品语义变更**：不动存档结构 / `SCHEMA_VERSION` / 发奖链路 / 任何 gameplay 数值。
+
+**代码侧前置（本轮之前已就绪，本轮回测确认）**：前端 `wss` 派生支持多后端、`CORS_ORIGIN` 支持多源逗号分隔、
+`RedisBroadcastTransport` 双频道跨实例广播（见 §59）。本轮回的只是「把两个后端 + 反代 + 故障注入」编成 E2E，
+并补两处工程缺口（`SWEEP_KEY_PREFIX` 隔离 + SIGTERM 优雅释放租约）。
+
+### 70.1 反代工具 `tests/lib/reverseProxy.mjs`
+
+纯 Node `http` 实现，不引第三方：
+- **HTTP 轮询探活**：每 1s `GET /api/health` 维护 `live` Set；`pick()` 只从 live 里 round-robin，死实例立即出池；
+- **WS Upgrade 透传**：手工转发 101 握手（`upgrade` 事件取 `clientSocket`，向目标发同样的 Upgrade 请求，双向 `pipe`，带 1s 超时兜底）；
+- **Origin 白名单**：`ORIGIN`（= `localhost`，WS 握手 Origin 头，CORS 精确匹配不可改）+ `CORS_ORIGIN` 合并校验；
+- 暴露 `isLive(target)`（F3 修复核心：轮询「死实例是否还在池里」而非「live 数>1」，避免幸存实例临时离线误退出）。
+
+### 70.2 选主隔离 + 优雅关闭（两处工程缺口，本轮回补）
+
+- `lib/sweepLeader.ts`：新增 `SWEEP_KEY_PREFIX` env（默认空）。E2E 注入 `mpk-e2e-${RUN}`，让测试租约与常驻 `:3001`
+  的 `lock:sweep:global` **命名空间隔离**，两个测试实例互不抢、也不抢常驻实例的选主。
+- `index.ts`：抽出 `gracefulShutdown(signal)`，同时挂 `SIGINT`/`SIGTERM`——关闭时主动 `shutdownBroadcast()` /
+  `shutdownLockProvider()` / `getSweepLeader().shutdown()` / `prisma.$disconnect()` 再 `exit(0)`。
+  这样 F1 的 SIGTERM kill-leader 会**立刻交还租约**，幸存实例立即接管，而不是干等 60s TTL（SIGKILL 不执行 shutdown，
+  才会卡 TTL，属预期）。
+
+### 70.3 E2E `tests/e2e_multi_instance.mjs`（42 条断言，6 happy-path + 4 故障注入）
+
+隔离端口 `:3101`/`:3102` 起两实例（继承 `.env` 的 PG/Redis，注入 `SWEEP_KEY_PREFIX` + `WS_HEARTBEAT_MS=5000`
+加速重选主），反代 `:3109`。**6 条 happy-path**：
+- `M1` 经反代 PUT 存档 → 200 且 WS 收到 `session.state`（反代正确转发 WS 下行）；
+- `M2` 并发 PUT 经负载均衡：恰好 1 成功 1 `409`（CAS 在共享 PG 成立）、revision 只 +1；
+- `M3` 同 `wildId` 双 claim 经反代：只 1 成功（Lua 原子 claim 跨实例）；
+- `M4` 房间创建/加入经反代 + 同 nonce 双意图只 1 次生效（`INTENT_REPLAY`）、另一 nonce 正常推进；
+- `M6` 跨实例广播：A(:3101) 写档/抢野怪/房间操作 → B(:3102) 收到对应 `session.state`/`wild.state`/`room.state`；
+- `M7` 跨实例顶号：二次登录签出新 token，B 旧连接收到 `bye(SESSION_REPLACED)` + 关闭码 `4001`。
+
+**4 条故障注入**：
+- `F1` 杀 leader（SIGTERM）→ 幸存实例接管为新 leader、`fence` 严格递增（干净接管无双推进）、接管前后野怪每区恒 3；
+- `F2` 杀非 leader → 幸存实例仍能读在途战斗 / 开新战斗（战斗态在共享存储不丢、无残留锁）；
+- `F3` 杀连接所在实例 → 经反代重连到幸存实例，回源拉到全量 `session.state`（rev≥断前）；
+- `F4` 租约过期后迟到释放(tokA)不扣掉新租约(tokB)，新租约仍可被正确释放。
+
+### 70.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/e2e_multi_instance.mjs`（真 Redis + `:3101`/`:3102` 双实例 + `:3109` 反代） | **42/42 `E2E_MULTI_OK`**（25.1s） |
+| 后端 `tsc --noEmit` | **0** |
+| 后端 `node:test` | **502/502** |
+| 注册 `e2e:multi` | `STAGES` + `GROUPS.e2e` 两处均补（漏 `GROUPS` 会静默少跑） |
+
+**全量 `npm run verify` 在本沙箱卡在前端 vitest 阶段（长时间无进展）**——属前端单测环境挂起（疑似某用例等一个未起的
+localhost 后端连接、无超时），与 W9 后端改动完全无关；W9 交付物 `e2e:multi` 已单独 **42/42** 绿，后端 check/unit 全绿，
+故以「后端管线 + e2e:multi」作为 W9 验收口径。前端 vitest 挂起为既有环境问题，不计入 W9 回归。
+
+### 70.5 顺手修的测试设计错（非产品缺陷，本轮暴露）
+
+1. **M6e 404「还没有存档」**：`accV new_game` 用了非法初始幻兽 `spark_mouse` → 400 `STARTER_INVALID` → 无存档 →
+   `battle/start` 404。改为合法 `sprout_owl`，M6e 转绿。
+2. **M6f 404 / 409 `ROOM_WS_REQUIRED`**：创建者 WS 连在 B 但房间建在 A，A 本地看不到创建者在线（`connectionOf`
+   只取本实例 `wsRegistry`）。重写为创建者连 `WS_A`、在 `BASE_A` 建；成员连 `WS_B`、在 `BASE_B` 加入
+   （房间态共享 PG，跨实例 join 成立），观察者 `wsR4` 在 B 收广播，M6f 转绿。
+3. **F3b `socket hang up`**：原轮询 `liveCount>1` 在幸存实例也临时离线时立即退出（死实例仍在池）。改 `isLive(BASE_A)`
+   轮询 + `F3-pre` 校验 B 存活，F3b 转绿。
+4. **F1 SKIP（leaderOf=null）**：F3 的 SIGKILL 残留 `mpk-e2e-<RUN>lock:sweep:global` 卡 60s，F1 两子实例抢不到。
+   修法：① `SWEEP_KEY_PREFIX` 隔离；② `index.ts` SIGTERM 优雅释放；③ 测试内 `WS_HEARTBEAT_MS=5000` + F1 前 DEL 残留前缀租约（只删 lease 不删 fence，保 fence 单调）。
+5. **F1b/F1e `count=-1`**：`wildCount` 调 `/api/wild` 未带 token → 鉴权失败。加 token + 建 `accW` 专用账号，转绿。
+
+### 70.6 边界 / 下一步
+
+- **W9 起真正开第二实例做常规服务**：反代前可放任意数量的同代码后端进程，共享 PG+Redis 真值，故障切换由选主租约
+  （TTL 60s 或优雅关闭立即交还）+ 广播频道兜底。
+- **反代只做 L4/L7 透传，不持有业务状态**：会话/战斗/野怪真值全在 PG+Redis，反代挂了不影响数据，重启即可。
+- **下一步**：P5-3 Release 签名与渠道包（装到真机）；以及 W9 配套的 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云
+  （域名 + TLS 终止在反代/CDN，本轮回测已覆盖多源 CORS 与 `wss` 派生）。

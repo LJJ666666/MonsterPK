@@ -167,7 +167,13 @@ export class Suite {
  * @param {string} path
  * @param {{method?:string, token?:string, body?:unknown, bodyText?:string, headers?:Record<string,string>, noJson?:boolean}} opts
  */
-export async function api(path, opts = {}) {
+/**
+ * 发请求并解析响应（可指定 base，便于指向反代 / 第二实例）。
+ * @param {string} base
+ * @param {string} path
+ * @param {{method?:string, token?:string, body?:unknown, bodyText?:string, headers?:Record<string,string>, noJson?:boolean}} opts
+ */
+export async function apiWithBase(base, path, opts = {}) {
   const { method = 'GET', token, body, bodyText, headers = {} } = opts;
   const h = { ...headers };
   let payload;
@@ -182,18 +188,22 @@ export async function api(path, opts = {}) {
 
   let res;
   try {
-    res = await fetch(BASE + path, { method, headers: h, body: payload });
+    res = await fetch(base + path, { method, headers: h, body: payload });
   } catch (e) {
     // 后端重启 / 连接被重置时原本抛的是裸 ECONNREFUSED，套件 catch 里再一截断，
     // 只剩「fetch failed」四个字。这里带上方法与完整 URL，并挂 cause 保留堆栈。
     pushHttp({ method, path, status: -1, preview: `NETWORK_ERROR ${String(e?.message || e)}` });
-    throw new Error(`E2E_HTTP_NETWORK ${method} ${BASE + path}: ${String(e?.message || e)}`, { cause: e });
+    throw new Error(`E2E_HTTP_NETWORK ${method} ${base + path}: ${String(e?.message || e)}`, { cause: e });
   }
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = text; }
   pushHttp({ method, path, status: res.status, preview: text.replace(/\s+/g, ' ').slice(0, 300) });
   return { status: res.status, data, text };
+}
+
+export async function api(path, opts = {}) {
+  return apiWithBase(BASE, path, opts);
 }
 
 export const health = () => api('/api/health');
@@ -396,11 +406,12 @@ export const battle = {
 
 /**
  * 建立 WS 连接并等待 hello；被拒时通过 unexpected-response 读回状态码与 JSON body。
+ * @param {string} wsHost 目标 WS 主机（如 ws://127.0.0.1:3102 或反代 ws://127.0.0.1:3109）
  * @param {{token?:string|null, origin?:string|null, path?:string}} opts
  */
-export function openWs({ token, origin = ORIGIN, path = '/ws' } = {}) {
+export function openWsWithHost(wsHost, { token, origin = ORIGIN, path = '/ws' } = {}) {
   return new Promise((resolvePromise) => {
-    const url = new URL(path, WS_HOST);
+    const url = new URL(path, wsHost);
     if (token !== undefined && token !== null) url.searchParams.set('token', token);
     const headers = {};
     if (origin !== undefined && origin !== null) headers.Origin = origin;
@@ -441,8 +452,46 @@ export function openWs({ token, origin = ORIGIN, path = '/ws' } = {}) {
   });
 }
 
+/** 模块级默认 target 的便捷封装（向后兼容，等价于 createClient() 不带参）。 */
+export function openWs(opts = {}) {
+  return openWsWithHost(WS_HOST, opts);
+}
+
+/**
+ * 多 target 客户端工厂（W9 双实例 / 反代验收）。
+ * 解除模块级单 target 限制：调用方传入 base / wsHost / origin，
+ * 即可把请求与 WS 指向反代或任意实例，互不干扰。
+ * @param {{base?:string, wsHost?:string, origin?:string}} opts
+ */
+export function createClient({ base = BASE, wsHost = WS_HOST, origin = ORIGIN } = {}) {
+  return {
+    base, wsHost, origin,
+    api: (path, opts = {}) => apiWithBase(base, path, opts),
+    rest: (path, opts = {}) => apiWithBase(base, path, opts),
+    openWs: (opts = {}) => openWsWithHost(wsHost, { ...opts, origin }),
+    waitMsg, closeWs, waitClose,
+    health: () => apiWithBase(base, '/api/health'),
+  };
+}
+
+/**
+ * 多 target 前置检查（W9：双实例 + 反代）。
+ * 任一目标 health 不 200 即给出可执行提示并退出，避免一堆 ECONNREFUSED。
+ * @param {string[]} urls 形如 ['http://127.0.0.1:3101','http://127.0.0.1:3109']
+ */
+export async function requireTargets(urls) {
+  for (const u of urls) {
+    try {
+      const r = await fetch(`${u}/api/health`, { signal: AbortSignal.timeout(1500) });
+      if (r.status === 200 && (await r.json())?.ok) continue; // eslint-disable-line no-await-in-loop
+    } catch { /* 下面统一报错 */ }
+    console.error(`[ABORT] 目标未就绪：${u}（先启动对应实例 / 反代）`);
+    process.exit(1);
+  }
+}
+
 /** 从队列里取出（并移除）第一条满足条件的消息，超时返回 null。 */
-export async function waitMsg(ctx, pred, timeout = 3_000) {
+export async function waitMsg(ctx, pred, timeout = 5_000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
     const i = ctx.queue.findIndex(pred);

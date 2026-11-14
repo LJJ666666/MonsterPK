@@ -6,7 +6,7 @@
 - **本地存档 2026-11-13 全部删除**（zustand persist、localStorage 副本、syncPolicy 的 LWW、离线重传队列、rebase 标记）。刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52）、**W6.3 DB 计数 ✅ 2026-11-13**（53/53）、**W6.4 quota 租约 ✅ 2026-11-14**（#185：token 幂等+TTL30min+补齐 8 处 release/commit，tsc 0 错 / bossQuota 单测 11/11 / 纯逻辑单测 143/143）、**W6.5 序列化归一化 ✅ 2026-11-14**（#186：`normalizeRoom` 在 `PgRoomStorage.get/all` 将共斗 `contributions` 的 string key 转 number、缺省 `pvpSettled/coopSettled` 补显式 false；注 pvpSettled 初始化+settled 显式写回+optional 显式布尔已在 W0/W6.1/2 顺手修掉，本次仅剩 contributions 一项；tsc 0 错 / roomNormalize 单测 4/4 / 后端单测 477/477 / e2e:p42c+f18c+p42e 98/98）**、**W6.6 裁剪视图+revision 区分 ✅ 2026-11-14**（#187：pvp 对手替补状态隐藏 + 客户端 RoomState.revision/Save.revision 两模块独立锁证；后端单测 479/479；前端 room.test 11/11；e2e:p42d 16/16）**。下一步 **W6.7（#188 双实例 E2E 验收，含跨实例 room 送达）**。
+- 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W4 ✅ 2026-11-12**（sweep 选主 / fencing / 幂等键，50/50）、W0~W3/W5 ✅；W6.0/W6.1 ✅；本地存档删除 ✅；**W6.2 事务边界 ✅ 2026-11-13**（52/52）、**W6.3 DB 计数 ✅ 2026-11-13**（53/53）、**W6.4 quota 租约 ✅ 2026-11-14**（#185：token 幂等+TTL30min+补齐 8 处 release/commit，tsc 0 错 / bossQuota 单测 11/11 / 纯逻辑单测 143/143）、**W6.5 序列化归一化 ✅ 2026-11-14**（#186：`normalizeRoom` 在 `PgRoomStorage.get/all` 将共斗 `contributions` 的 string key 转 number、缺省 `pvpSettled/coopSettled` 补显式 false；注 pvpSettled 初始化+settled 显式写回+optional 显式布尔已在 W0/W6.1/2 顺手修掉，本次仅剩 contributions 一项；tsc 0 错 / roomNormalize 单测 4/4 / 后端单测 477/477 / e2e:p42c+f18c+p42e 98/98）**、**W6.6 裁剪视图+revision 区分 ✅ 2026-11-14**（#187：pvp 对手替补状态隐藏 + 客户端 RoomState.revision/Save.revision 两模块独立锁证；后端单测 479/479；前端 room.test 11/11；e2e:p42d 16/16）**。**W6.7 双实例 E2E 验收 ✅ 2026-11-14**（#188：双实例房间跨实例送达，e2e:w7 18/18）**。下一步 **W6 收官归档（bug_log/HANDOFF/任务表）**。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试
@@ -58,7 +58,7 @@
 - #185 W6.4 quota 租约 token + 幂等释放 + TTL≥30min + 补齐 8 处 release/commit 分支 ✅（token 防 ABA；reapExpired 接入 runGlobalSweep；tsc 0 错 / bossQuota 单测 11/11 / 纯逻辑单测 143/143）
 - #186 W6.5 序列化归一化 ✅（contributions key 转 number + settled 显式布尔；pvpSettled 初始化/写回/optional 显式布尔已在 W0/W6.1/2 修掉，本次仅剩 contributions 一项）
 - #187 W6.6 按接收者裁剪视图 + `RoomState.revision`/`Save.revision` 区分 ✅
-- #188 W6.7 双实例 E2E 验收（含跨实例 room 送达）
+- #188 W6.7 双实例 E2E 验收 ✅（含跨实例 room 送达；e2e:w7 18/18：成员跨实例分布下 publishRoom 经 Redis 跨实例送达 + W6.6 裁剪 + room.resync 回源 + 断线重连不丢成员）
 - 收官：核对代理分层→建推 `rollback` tag→归档 bug_log/HANDOFF/任务表→`git add -A`→中文分条 commit→push master→核对 `HEAD==origin/master` 且工作树干净。
 
 ## 9. 验收锚点（勿删）

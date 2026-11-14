@@ -1510,5 +1510,21 @@ E2E 里 `save.revisionOf` 返回 Promise，断言写成 `[object Promise]→2`�
 - **首轮红（已修，非产品缺陷）**：E2E 漏开 WS → 6 个 create 全 `409 ROOM_WS_REQUIRED`；按 w62 套件前置补 `openWs({ token })` 后全绿。
 - **边界**：每日上限的「奖励真值」仍由 `coopReward.ts::grantOne` 的 `CoopRewardGrant.count`（`COOP_DAILY_CLEAR_LIMIT=3`）裁决，与 quota 侧的 `RoomQuotaDaily` 在同一事务内提交、当前配置下数值一致；若以后用 `ROOM_QUOTA_LIMIT` 改房间上限，需同步两处配置。超限抛错回滚是防御分支，正常 hold 已挡住，不会日常触发。quota 租约 token / TTL≥30min / release 全分支归 **#185 W6.4**。
 
+## 66. P5-1 W6.4~W6.7 收官：quota 租约 / 序列化归一化 / 裁剪视图 / 双实例验收（2026-11-14）
+
+- **工单链**：#185 W6.4 → #186 W6.5 → #187 W6.6 → #188 W6.7。四步全部零产品语义变更（不动存档结构 / `SCHEMA_VERSION` / 发奖链路），把 W6.2/W6.3 留下的四个收口点补完，W6 收官。
+- **#185 W6.4 quota 租约 token（`lib/bossQuota.ts`）**：`BossQuotaLedger` 由纯内存无守卫改为 **token 租约模型**——`hold` 返回 `{ok, token}`；`release/commit` 按 token 幂等（迟到/重复释放 no-op，**防 ABA 超卖**）；新增 `leases`/`counts` Map、TTL=30min、`reapExpired(now)` 回收；`stats()` 增 `leases`/`expired`。`BattleState` 增 `bossQuotaToken`，`createBattle` 透传；`boss.ts`/`mapBoss.ts` 的 hold 捕获 token、catch 按 token 回滚；`battle.ts`(settleBossRun/abandon)、`realtime.ts`(runGlobalSweep 两路) 共 **8 处 release/commit** 全改按 token；`runGlobalSweep` 入口接 `reapExpired`。验收 tsc 0 错 / `bossQuota.test.ts` 11/11（含 token 幂等、ABA 防护、TTL 回收）/ 纯逻辑单测 143/143。
+- **#186 W6.5 序列化归一化（`lib/roomNormalize.ts`）**：共斗 `contributions: Record<number,number>` 经 PG JSON 往返后 key 变 string。新增纯模块 `normalizeRoom`，在 `PgRoomStorage.get/all` 读取后归一化（contributions key 转 number + 缺省 `pvpSettled/coopSettled` 补显式 false）；不引 DB 依赖便于单测。注：`pvpSettled` 初始化 + settled 显式写回 + optional 显式布尔**已在 W0/W6.1/W6.2 顺手修掉**，本次仅剩 contributions 一项。验收 tsc 0 错 / `roomNormalize.test.ts` 4/4 / 后端 477/477 / `e2e:p42c+f18c+p42e` 98/98。
+- **#187 W6.6 按接收者裁剪 + revision 区分（`game/pvp.ts`）**：`pvpViewFor` 注释写「只下发在场这只」，实际对对手**全部**怪兽下发 hp/maxHp/status/isShiny/alive（PvpModal 只读 active 故 UI 无感，但改包/DevTools 可读替补实时态）。修法：仅 active 这只下发明细，替补只暴露 `specId+level`（组合可见）、HP/状态清零；`PvpFoeMonster` 字段保持齐全。新增 `pvp.test.ts` 替补隐藏 1 例 + `roomRegistry.test.ts` view 裁剪 1 例 + 前端 `room.test.ts` 补证 `RoomState.revision` 与 `Save.revision` 两模块独立不互污染 2 例。验收后端 479/479 / 前端 room.test 11/11 / `e2e:p42d` 16/16。
+- **#188 W6.7 双实例 E2E（`tests/e2e_w7_room_cross_instance.mjs`）**：W6.0~W6.3 房间态已迁 PG（`PgRoomStorage`），`publishRoom` 按 seat.userId 经 `broadcastToUser`(Redis) 送达，而 `connectionOf(userId)` 只查**本实例** wsRegistry → 「成员连不同实例 + 各自 REST 打到所连实例」既满足 ROOM_WS_REQUIRED，又能构造 W6 前不可能的「跨实例 room 送达」拓扑。R1 连 A(:3001)、R2 连 B(:3002 临时，`MPK_DISABLE_SWEEP=1`)；覆盖 C0 双实例 broadcast=redis / C2c 连 A 的 R1 收到「R2 在 B 加入」的 room.state（跨实例）/ C3 双向跨实例 + 回合推进 / C4 W6.6 裁剪跨实例（不含对方 username/tokenDigest/conn_）/ C5 room.resync 回源 / C6 断线重连跨实例不丢成员。注册 `e2e:w7` + `STAGES` + **`GROUPS.e2e` 两处**（漏 GROUPS 静默少跑）。验收 `npm run e2e:w7` **18/18**（约 3s，`E2E_W7_RESULT pass=18 fail=0`）。
+- **W6 收官状态**：P5-1 W6.0~W6.7（#181~#188）全部 ✅；房间 / 会话 / 广播均已迁 PG+Redis 共享存储（`Room`/`RoomQuotaDaily`/`BossDamageEvent`/`BossRewardGrant`/`CoopRewardGrant`/`BadgeGrant`/`AchievementGrant`），`lock`/`sweep`/`broadcast` 三模式均 redis。**下一步 W7（野怪池搬 Redis）起才需开第二实例做常规服务**，当前 W6 仅以双实例 E2E 验证跨实例送达。
+
+## 67. 全链路游戏冒烟测试资产 e2e:game（2026-11-14）
+
+- **交付**：`backend/tests/e2e_game_smoke.mjs`（复用 `tests/lib/harness.mjs`，跑真实 PG/Redis 后端 :3001），注册 `backend/package.json` 的 `e2e:game` + `scripts/verify.mjs` 的 `STAGES`/`GROUPS.e2e` 两处。验收 **pass=42 fail=0 skip=0**（`E2E_GAME_OK`）。
+- **覆盖**：A 认证(6) / B 新档存档(4) / C 野外战斗胜+奖励(3) / D 捕获(3) / E 治疗+旅行锁+商店闭环(7) / F 多人系统 16（Boss·地图首领·1v1·共斗·房间·榜单·演武堂）/ G 反作弊(3)。
+- **本次实测确认的真实安全机制（"被拒"= 正确行为，别当 bug）**：顶号 `SESSION_REPLACED` 403（P4-1a，登录后旧 token 立即失效）；重名注册 **409**（非 400）；未解锁城市旅行 `LOCATION_LOCKED` 400；夹带服务端进度字段（`playerLevel` 等）`SAVE_INPUT_FORBIDDEN` 400；大幅改富存档直接**封号** 403；单座房间 `forming` 态提交意图 `ROOM_CLOSED` 409；未知道具购买 400。
+- **测试脚本自身坑（勿再犯）**：① 注册拿 token(sv=1) 后登录拿 token(sv=2)，旧 token 失效→**账号级 helper 必须统一用登录后 token**，否则 A4/B1/G 级联 403；② `/api/battle/start` 返回 `battleId`（非 `id`）、敌人字段 `enemy`（非 `enemies`）；③ 房间/多人响应是嵌套对象——`data.room.roomId` / `data.battle.battleId` / `data.room.seats`；④ 地图首领概览字段是 **`bosses`**（非 `data.mapBosses`），首测误写致 F5/F6 SKIP，修正并优先选 `unlocked` 项（`mb_starter_guardian` 在始终解锁的 `town_starter`）后 SKIP 归零；⑤ 野怪最高 5 级与 5 级御三家互有胜负，战斗前须 `heal` 满血 + 多次重试拿稳赢。
+
 
 

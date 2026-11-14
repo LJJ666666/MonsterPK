@@ -246,3 +246,31 @@ test('pvpViewFor：winnerIsSelf 与 fledUserId 正确下发', () => {
   const viewB = pvpViewFor(s, 'ub');
   assert.equal(viewB.winnerIsSelf, true);
 });
+
+test('pvpViewFor：对手替补怪兽实时状态隐藏，仅 active 下发明细', () => {
+  const sideA = { userId: 'ua', party: party(seeded(1)) };
+  const sideB = {
+    userId: 'ub',
+    party: [
+      createInstance('spark_mouse', 20, seeded(2), { id: 'b1' }),
+      createInstance('spark_mouse', 15, seeded(3), { id: 'b2' }),
+    ],
+  };
+  const res = createPvpState({ sideA, sideB, now: 1_700_000_000_000 });
+  assert.ok(res.ok);
+  const viewA = pvpViewFor(res.value, 'ua'); // A 视角，B 是对手
+  const activeFoe = viewA.foe.party[viewA.foe.activeIndex];
+  assert.ok(activeFoe.hp > 0 && activeFoe.maxHp > 0, '在场对手怪兽 HP 完整下发');
+  const bench = viewA.foe.party.filter((_, i) => i !== viewA.foe.activeIndex);
+  assert.ok(bench.length >= 1, '对手应存在替补怪兽');
+  for (const m of bench) {
+    assert.equal(m.hp, 0, '替补怪兽 HP 必须隐藏');
+    assert.equal(m.maxHp, 0);
+    assert.equal(m.status, 'none');
+    assert.equal(m.inField, false);
+    assert.ok(typeof m.specId === 'string' && m.specId.length > 0, '替补种族仍可见（组合信息）');
+  }
+  for (const m of viewA.self.party) {
+    assert.ok(m.hp > 0 && m.maxHp > 0, '己方怪兽 HP 始终完整');
+  }
+});

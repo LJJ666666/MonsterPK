@@ -320,3 +320,15 @@ test('sweep 汇总所有房间的变化并广播一次（revision 不重复抬�
   assert.equal(report.timedOut, 4);
   assert.equal((await reg.get('r1'))!.revision, before + 1, '一次 tick 只抬一次 revision');
 });
+
+test('view()：按接收者裁剪，seat 不泄露 tokenDigest / connectionId', async () => {
+  const reg = make();
+  const room = await twoPlayers(reg);
+  const viewA = reg.view(room, 'u_a');
+  assert.ok(viewA.seats.find((s) => s.self), '应有 self 席');
+  const raw = JSON.stringify(viewA);
+  assert.ok(!/digest_a/.test(raw), '不能泄露自身 tokenDigest');
+  assert.ok(!/conn_a/.test(raw), '不能泄露自身 connectionId');
+  assert.ok(!/digest_b/.test(raw), '不能泄露他人 tokenDigest');
+  assert.ok(!/conn_b/.test(raw), '不能泄露他人 connectionId');
+});

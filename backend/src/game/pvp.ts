@@ -400,17 +400,32 @@ export function pvpViewFor(state: PvpState, viewerUserId: string) {
     foe: {
       userId: foe.userId,
       activeIndex: foe.activeIndex,
-      party: foe.party.map((m, i) => ({
-        specId: m.specId,
-        level: m.level,
-        hp: m.hp,
-        maxHp: m.maxHp,
-        status: m.status,
-        isShiny: !!m.isShiny,
-        alive: alive(m),
-        // 只下发「在场」这一只的种族名，其余座位不下发细节。
-        inField: i === foe.activeIndex,
-      })),
+      // 按接收者裁剪：在场这只下发明细（HP/状态可见），替补只暴露种族/等级
+      // （组合可见），实时 HP/状态清零——否则对手改包/DevTools 能窥探我方替补
+      // 当前状态（PvpModal 只读 activeIndex，本改动不影响 UI）。
+      party: foe.party.map((m, i) =>
+        i === foe.activeIndex
+          ? {
+              specId: m.specId,
+              level: m.level,
+              hp: m.hp,
+              maxHp: m.maxHp,
+              status: m.status,
+              isShiny: !!m.isShiny,
+              alive: alive(m),
+              inField: true,
+            }
+          : {
+              specId: m.specId,
+              level: m.level,
+              hp: 0,
+              maxHp: 0,
+              status: 'none',
+              isShiny: false,
+              alive: true,
+              inField: false,
+            },
+      ),
     },
   };
 }

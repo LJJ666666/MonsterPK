@@ -25,6 +25,7 @@ import { startSessionSync } from "@/lib/session";
 import { SESSION_REPLACED_EVENT } from "@/lib/sessionReplaced";
 import { setSessionSuspended } from "@/lib/sessionState";
 import PixelButton from "@/components/PixelButton";
+import ConnBanner from "@/components/ConnBanner";
 
 // 未登录一律先去登录页；登录完成后由 Auth 页 navigate("/") 回到游戏。
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -228,6 +229,8 @@ export default function App() {
         <SessionGate />
         <SessionBootstrap />
         <RealtimeBootstrap />
+        {/* 全局实时通道状态横幅：断线/重连/恢复可视化（登录页 phase=idle 时不渲染）。 */}
+        <ConnBanner />
         <Routes>
           <Route
             path="/"

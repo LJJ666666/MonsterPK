@@ -62,15 +62,29 @@ export default function Auth() {
   const [service, setService] = useState<ServiceState>("checking");
   const [forgotHint, setForgotHint] = useState(false);
 
-  // 后端可达性探测：连不上时给明确提示，避免用户对着白屏猜。
+  // 后端可达性持续嗅探：连不上时给明确提示并自动重试，而不是只首次监听一次。
+  // 每 3s 轮询一次，在线后保持在线态；一旦失败再由 offline 转回重试，
+  // 这样后端中途重启 / 手机切后台回来都能自动恢复，无需用户手动刷新。
   useEffect(() => {
     let alive = true;
-    api
-      .health()
-      .then(() => alive && setService("online"))
-      .catch(() => alive && setService("offline"));
+    let inFlight = false; // 断网时 fetch 可能悬挂，避免 3s 轮询叠加出一堆请求
+    const probe = () => {
+      if (inFlight) return;
+      inFlight = true;
+      api
+        .health({ timeoutMs: 2500 })
+        .then(() => alive && setService("online"))
+        .catch(() => alive && setService("offline"))
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    setService("checking");
+    probe();
+    const timer = setInterval(probe, 3000);
     return () => {
       alive = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -122,9 +136,13 @@ export default function Auth() {
       navigate("/", { replace: true });
     } catch (e: any) {
       const raw = e?.message || "";
+      const isNet = /failed to fetch|networkerror|load failed/i.test(raw);
+      // 网络层失败：立刻把服务态翻成 offline，驱动底部状态条与「自动重试」提示，
+      // 持续嗅探会在后端恢复后自动翻回 online。
+      if (isNet) setService("offline");
       setFormError(
-        /failed to fetch|networkerror|load failed/i.test(raw)
-          ? "连不上服务器，请确认后端服务已启动"
+        isNet
+          ? "连不上服务器，请确认后端服务已启动（正在自动重试）"
           : raw || "操作失败，请稍后再试"
       );
     } finally {
@@ -135,207 +153,221 @@ export default function Auth() {
   const serviceText: Record<ServiceState, string> = {
     checking: "正在连接服务器…",
     online: "服务器在线",
-    offline: "连不上服务器 · 请确认后端服务已启动",
+    offline: "连不上服务器 · 正在自动重试",
   };
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl sm:border-x-2 sm:border-[color:var(--stroke)]">
-      {/* 品牌区 */}
-      <header className="flex-none px-6 pt-10 pb-7">
-        <div className="flex items-center gap-4">
-          <BrandMark className="h-14 w-14 shrink-0" />
+    // 安全区：顶部留状态栏空间（刘海屏用真实 inset，无刘海设备兜底 24px），
+    // 底部留导航栏空间。整体一屏排布：头部固定 + 表单垂直居中 + 服务状态贴底，
+    // 默认登录态不出现滚动；注册态字段更多时若小屏放不下才允许局部滚动。
+    <div className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl safe-top safe-bottom sm:border-x-2 sm:border-[color:var(--stroke)]">
+      {/* 品牌区（紧凑，给表单让出垂直空间） */}
+      <header className="flex-none px-6 pb-5">
+        <div className="flex items-center gap-3">
+          <BrandMark className="h-11 w-11 shrink-0" />
           <div>
-            <div className="font-display text-lg tracking-[0.1em] text-[color:var(--accent)]">
+            <div className="font-display text-base leading-none tracking-[0.1em] text-[color:var(--accent)]">
               兽域手记
             </div>
-            <div className="mt-2 text-[11px] tracking-[0.28em] text-[color:var(--muted)]">
+            <div className="mt-1.5 text-[10px] tracking-[0.28em] text-[color:var(--muted)]">
               BEAST JOURNAL
             </div>
           </div>
         </div>
-        <p className="mt-6 text-sm leading-relaxed text-[color:var(--muted)]">
+        <p className="mt-4 text-[13px] leading-relaxed text-[color:var(--muted)]">
           登录账号，继续你的野外考察与幻兽收集之旅。
         </p>
-        <div className="mt-6 h-[2px] w-full bg-[color:var(--stroke2)]" />
+        <div className="mt-4 h-[2px] w-full bg-[color:var(--stroke2)]" />
       </header>
 
-      <main className="flex-1 overflow-y-auto px-6 pb-10">
-        {/* 登录 / 注册分段切换 */}
-        <div
-          className="grid grid-cols-2 border-2 border-[color:var(--stroke)]"
-          role="tablist"
-          aria-label="账号操作"
-        >
-          {(["login", "register"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="tab"
-              aria-selected={mode === m}
-              onClick={() => switchMode(m)}
-              className={[
-                "py-2.5 text-sm font-semibold tracking-wide transition-colors",
-                m === "login" ? "border-r-2 border-[color:var(--stroke)]" : "",
-                mode === m
-                  ? "bg-[color:var(--accent)] text-[#0b1020]"
-                  : "bg-[color:var(--bg2)] text-[color:var(--muted)] hover:text-[color:var(--text)]",
-              ].join(" ")}
-            >
-              {m === "login" ? "登录" : "注册"}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-6 text-lg font-semibold text-[color:var(--text)]">
-          {mode === "login" ? "欢迎回来，旅行者" : "创建你的冒险账号"}
-        </div>
-        <div className="mt-1 text-xs text-[color:var(--muted)]">
-          {mode === "login"
-            ? "进度跟随账号，换设备也能接着玩"
-            : "注册后自动登录，立即开始旅程"}
-        </div>
-
-        <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
-          <Field
-            label="用户名"
-            htmlFor="auth-username"
-            error={errors.username}
-            hint={mode === "register" ? "3–20 位，字母、数字或中文" : undefined}
+      <main className="flex flex-1 flex-col px-6">
+        {/* 表单主体：在可用空间内垂直居中，保证一屏不滚动 */}
+        <div className="flex flex-1 flex-col justify-center">
+          {/* 登录 / 注册分段切换 */}
+          <div
+            className="grid grid-cols-2 border-2 border-[color:var(--stroke)]"
+            role="tablist"
+            aria-label="账号操作"
           >
-            <input
-              id="auth-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              maxLength={20}
-              placeholder="请输入用户名"
-              aria-invalid={!!errors.username}
-              className={[
-                inputBase,
-                errors.username
-                  ? "border-[color:var(--danger)]"
-                  : "border-[color:var(--stroke)]",
-              ].join(" ")}
-            />
-          </Field>
-
-          <Field
-            label="密码"
-            htmlFor="auth-password"
-            error={errors.password}
-            hint={mode === "register" ? "至少 6 位" : undefined}
-          >
-            <div className="relative">
-              <input
-                id="auth-password"
-                type={showPwd ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-                maxLength={64}
-                placeholder="请输入密码"
-                aria-invalid={!!errors.password}
-                className={[
-                  inputBase,
-                  "pr-16",
-                  errors.password
-                    ? "border-[color:var(--danger)]"
-                    : "border-[color:var(--stroke)]",
-                ].join(" ")}
-              />
+            {(["login", "register"] as const).map((m) => (
               <button
+                key={m}
                 type="button"
-                onClick={() => setShowPwd(!showPwd)}
-                aria-label={showPwd ? "隐藏密码" : "显示密码"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => switchMode(m)}
+                className={[
+                  "py-2.5 text-sm font-semibold tracking-wide transition-colors",
+                  m === "login" ? "border-r-2 border-[color:var(--stroke)]" : "",
+                  mode === m
+                    ? "bg-[color:var(--accent)] text-[#0b1020]"
+                    : "bg-[color:var(--bg2)] text-[color:var(--muted)] hover:text-[color:var(--text)]",
+                ].join(" ")}
               >
-                {showPwd ? "隐藏" : "显示"}
+                {m === "login" ? "登录" : "注册"}
               </button>
-            </div>
-          </Field>
+            ))}
+          </div>
 
-          {mode === "register" && (
-            <Field label="确认密码" htmlFor="auth-confirm" error={errors.confirm}>
+          <div className="mt-5 text-lg font-semibold text-[color:var(--text)]">
+            {mode === "login" ? "欢迎回来，旅行者" : "创建你的冒险账号"}
+          </div>
+          <div className="mt-1 text-xs text-[color:var(--muted)]">
+            {mode === "login"
+              ? "进度跟随账号，换设备也能接着玩"
+              : "注册后自动登录，立即开始旅程"}
+          </div>
+
+          <form onSubmit={submit} className="mt-5 flex flex-col gap-3" noValidate>
+            <Field
+              label="用户名"
+              htmlFor="auth-username"
+              error={errors.username}
+              hint={mode === "register" ? "3–20 位，字母、数字或中文" : undefined}
+            >
               <input
-                id="auth-confirm"
-                type={showPwd ? "text" : "password"}
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
-                maxLength={64}
-                placeholder="再输入一次密码"
-                aria-invalid={!!errors.confirm}
+                id="auth-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={20}
+                placeholder="请输入用户名"
+                aria-invalid={!!errors.username}
                 className={[
                   inputBase,
-                  errors.confirm
+                  errors.username
                     ? "border-[color:var(--danger)]"
                     : "border-[color:var(--stroke)]",
                 ].join(" ")}
               />
             </Field>
-          )}
 
-          {mode === "login" && (
-            <div className="flex items-center justify-between text-xs">
-              <label className="flex cursor-pointer items-center gap-2 text-[color:var(--muted)]">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                  className="h-4 w-4 accent-[#f6c24b]"
-                />
-                记住用户名
-              </label>
-              <button
-                type="button"
-                onClick={() => setForgotHint(true)}
-                className="text-[color:var(--muted)] underline decoration-dotted hover:text-[color:var(--text)]"
-              >
-                忘记密码？
-              </button>
-            </div>
-          )}
-
-          {forgotHint && (
-            <div className="border-l-2 border-[color:var(--accent)] pl-3 text-xs leading-relaxed text-[color:var(--muted)]">
-              暂未开放自助找回密码，请联系管理员处理。
-            </div>
-          )}
-
-          {formError && (
-            <div
-              role="alert"
-              className="border-2 border-[color:var(--danger)] bg-[color:var(--bg2)] px-3 py-2.5 text-xs leading-relaxed text-[color:var(--danger)]"
+            <Field
+              label="密码"
+              htmlFor="auth-password"
+              error={errors.password}
+              hint={mode === "register" ? "至少 6 位" : undefined}
             >
-              {formError}
-            </div>
-          )}
+              <div className="relative">
+                <input
+                  id="auth-password"
+                  type={showPwd ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  maxLength={64}
+                  placeholder="请输入密码"
+                  aria-invalid={!!errors.password}
+                  className={[
+                    inputBase,
+                    "pr-16",
+                    errors.password
+                      ? "border-[color:var(--danger)]"
+                      : "border-[color:var(--stroke)]",
+                  ].join(" ")}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwd(!showPwd)}
+                  aria-label={showPwd ? "隐藏密码" : "显示密码"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                >
+                  {showPwd ? "隐藏" : "显示"}
+                </button>
+              </div>
+            </Field>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-1 w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy ? "请稍候…" : mode === "login" ? "登录并继续" : "创建账号并进入"}
-          </button>
-        </form>
+            {mode === "register" && (
+              <Field label="确认密码" htmlFor="auth-confirm" error={errors.confirm}>
+                <input
+                  id="auth-confirm"
+                  type={showPwd ? "text" : "password"}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  maxLength={64}
+                  placeholder="再输入一次密码"
+                  aria-invalid={!!errors.confirm}
+                  className={[
+                    inputBase,
+                    errors.confirm
+                      ? "border-[color:var(--danger)]"
+                      : "border-[color:var(--stroke)]",
+                  ].join(" ")}
+                />
+              </Field>
+            )}
 
-        {/* 服务状态 */}
-        <div className="mt-8 flex items-center gap-2 text-xs text-[color:var(--muted)]">
-          <span
-            className={[
-              "inline-block h-2 w-2 shrink-0",
-              service === "online"
-                ? "bg-[color:var(--ok)]"
-                : service === "offline"
-                  ? "bg-[color:var(--danger)]"
-                  : "bg-[color:var(--muted)]",
-            ].join(" ")}
-          />
-          <span>{serviceText[service]}</span>
+            {mode === "login" && (
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex cursor-pointer items-center gap-2 text-[color:var(--muted)]">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="h-4 w-4 accent-[#f6c24b]"
+                  />
+                  记住用户名
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setForgotHint(true)}
+                  className="text-[color:var(--muted)] underline decoration-dotted hover:text-[color:var(--text)]"
+                >
+                  忘记密码？
+                </button>
+              </div>
+            )}
+
+            {forgotHint && (
+              <div className="border-l-2 border-[color:var(--accent)] pl-3 text-xs leading-relaxed text-[color:var(--muted)]">
+                暂未开放自助找回密码，请联系管理员处理。
+              </div>
+            )}
+
+            {formError && (
+              <div
+                role="alert"
+                className="border-2 border-[color:var(--danger)] bg-[color:var(--bg2)] px-3 py-2.5 text-xs leading-relaxed text-[color:var(--danger)]"
+              >
+                {formError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="mt-1 w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? "请稍候…" : mode === "login" ? "登录并继续" : "创建账号并进入"}
+            </button>
+          </form>
         </div>
-        <div className="mt-2 text-[11px] text-[color:var(--muted)] opacity-60">
-          API · {API_BASE}
+
+        {/* 服务状态（贴底，始终可见） */}
+        <div className="pb-1 pt-5">
+          <div className="flex items-center gap-2 text-xs text-[color:var(--muted)]">
+            <span
+              className={[
+                "inline-block h-2 w-2 shrink-0 rounded-full",
+                service === "online"
+                  ? "bg-[color:var(--ok)]"
+                  : service === "offline"
+                    ? "bg-[color:var(--danger)]"
+                    : "bg-[color:var(--muted)] animate-pulse",
+              ].join(" ")}
+            />
+            <span>{serviceText[service]}</span>
+          </div>
+          <div className="mt-1 text-[11px] text-[color:var(--muted)] opacity-60">
+            API · {API_BASE}
+          </div>
         </div>
       </main>
     </div>

@@ -110,7 +110,7 @@ export default function Start() {
   }
 
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col overflow-y-auto bg-[color:var(--bg)] shadow-2xl sm:border-x-2 sm:border-[color:var(--stroke)]">
+    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col overflow-y-auto bg-[color:var(--bg)] shadow-2xl safe-top sm:border-x-2 sm:border-[color:var(--stroke)]">
       {/* 账号条 */}
       <header className="flex flex-none items-center justify-between border-b-2 border-[color:var(--stroke2)] px-5 py-4">
         <div className="flex items-center gap-3">

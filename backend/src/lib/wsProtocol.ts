@@ -89,6 +89,9 @@ export function isOriginAllowed(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (allowed.length === 0) return true;
+  // 开发期可用 '*' 通配（同时放行前端 dev 与 APK WebView 的 localhost 源），
+  // 生产环境由运维配具体域名清单，不会用 '*'。
+  if (allowed.includes('*')) return true;
   return allowed.includes(origin);
 }
 

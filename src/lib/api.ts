@@ -84,7 +84,28 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
 export type PutExtra = { revision: number; intentNonce?: string };
 
 export const api = {
-  health: () => request("/api/health"),
+  /**
+   * 后端可达性探测（状态嗅探专用）：
+   * - `cache: "no-store"`：绝不复用 HTTP 缓存。否则断网时 Chromium 会直接返回
+   *   缓存过的 200，让「持续嗅探」误判为在线（真机实测：拔掉 adb reverse 后
+   *   状态仍粘在「服务器在线」，冷启动才正确显示离线）。
+   * - 可选超时：断网/黑洞网络下 fetch 可能长时间悬挂，超时后按失败处理，
+   *   由调用方翻成 offline 并继续重试。用 AbortController 手动实现，
+   *   不依赖旧 WebView 可能缺失的 AbortSignal.timeout()。
+   */
+  health: (opts?: { timeoutMs?: number }) => {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (controller && opts?.timeoutMs && opts.timeoutMs > 0) {
+      timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+    }
+    return request("/api/health", {
+      cache: "no-store",
+      ...(controller ? { signal: controller.signal } : {}),
+    }).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  },
   /** F04：徽章 / 成就 / 人物等级只读投影，客户端无任何写入口。 */
   playerProgress: () => request("/api/player/progress"),
   me: () => request("/api/auth/me"),

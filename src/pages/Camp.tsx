@@ -1092,7 +1092,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   };
 
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl sm:border-x-2 sm:border-[color:var(--stroke)]">
+    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[color:var(--bg)] shadow-2xl safe-top sm:border-x-2 sm:border-[color:var(--stroke)]">
       {/* Header */}
       <div className="flex-none border-b-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-4 py-3">
         <div className="flex items-center justify-between">

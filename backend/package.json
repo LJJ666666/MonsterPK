@@ -29,6 +29,7 @@
     "e2e:w62": "node tests/e2e_w62_room_tx.mjs",
     "e2e:w63": "node tests/e2e_w63_quota.mjs",
     "e2e:w7": "node --import tsx tests/e2e_w7_room_cross_instance.mjs",
+    "e2e:game": "node tests/e2e_game_smoke.mjs",
     "e2e:p41": "node tests/e2e_p41_wild.mjs",
     "e2e:p42a": "node tests/e2e_p42a_rank.mjs",
     "e2e:p42b": "node tests/e2e_p42b_room.mjs",

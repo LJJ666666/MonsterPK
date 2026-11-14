@@ -8,7 +8,7 @@
 - 不变式：每块状态一个 owner key（个人档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态，个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单只放行管理员；改档/GG/加速器拦截+封号，改系统时间不封号只要求不生效；顶号旧 token REST 403 `SESSION_REPLACED`。
 - 进度：P0~P4-2e ✅；F18-a/b/c/d ✅；F15 冻结；P4-3 交易/赠送冻结；A1~A6 ✅；**P5-1 W0~W9 全部 ✅**（锁/选主/广播/房间/quota/野怪池/战斗/馆主CD 全迁 PG+Redis 共享存储，W9 起真正开第二实例做常规服务；逐单锚点/验收见 bug_log §58/§64~§70 与当日日志）。
-- **2026-11-14 晚：APK 真机联调 + 移动端 UI/连接态优化 ✅**（详见当日日志）：装 JDK21/SDK/Gradle 工具链、dev APK 打包装雷电模拟器 `emulator-5554`、`adb reverse tcp:3001`；修 `CORS_ORIGIN` 放行 `http://localhost` + `wsProtocol.ts` 支持 `*`；登录页改为一屏不滚动 + 安全区、health 持续嗅探（禁缓存）、新增全局 `ConnBanner` 断线重连横幅。**下一步：杰哥拍板后开始测试游戏**；再往后 P5-3 Release 签名与渠道包 + W9 配套 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云。
+- **2026-11-14~15：APK 真机联调 + 移动端 UI/连接态优化 + 真机游戏全链路 ✅**（详见当日日志与 bug_log §71/§72）：装 JDK21/SDK/Gradle 工具链、dev APK 装雷电 `emulator-5554`、`adb reverse tcp:3001`；`CORS_ORIGIN` 精确放行 `http://localhost`，**按杰哥拍板移除 `wsProtocol.ts` 的 `*` 通配**（fail-closed + 单测锁死）；登录页一屏不滚动 + 安全区、health 持续嗅探（禁缓存）、全局 `ConnBanner` 重连横幅。真机走通 登录→建档→地图→野外→战斗→捕获→**冷启动拉服务端存档（rev=3、已捕获 2 只、无需重登）**；后端 503/503。**下一步：P5-3 Release 签名与渠道包 + W9 配套 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云**；待优化 UX：剧情 intro 每次进 Camp 重播（`Camp.tsx:167` 既定设计）。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，**Redis 不存权益真值**。实施权威：`.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 
 ## 2. 技术栈 / 入口 / 测试

@@ -78,6 +78,15 @@ test('isOriginAllowed：白名单命中才放行，不放行跨站劫持', () =>
   assert.equal(isOriginAllowed('https://evil.example.com', undefined), true, '未配置白名单时不误伤');
 });
 
+// 2026-11-15 杰哥拍板：移除 '*' 通配（上线时 CORS_ORIGIN 会换成正式域名清单）。
+// 锁死 fail-closed：误配 '*' 必须拒绝连接并立刻暴露，不能静默全放行。
+test("isOriginAllowed：'*' 不是通配，误配时拒绝而非全放行", () => {
+  assert.equal(isOriginAllowed('https://evil.example.com', '*'), false);
+  assert.equal(isOriginAllowed('http://localhost:5173', '*'), false);
+  assert.equal(isOriginAllowed('https://evil.example.com', 'http://localhost:5173,*'), false);
+  assert.equal(isOriginAllowed('https://game.example.com', 'http://localhost:5173,*'), false);
+});
+
 // ——————————————— 消息协议 ———————————————
 
 test('parseClientMessage：合法 ping（带 / 不带 ts）', () => {

@@ -89,9 +89,8 @@ export function isOriginAllowed(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (allowed.length === 0) return true;
-  // 开发期可用 '*' 通配（同时放行前端 dev 与 APK WebView 的 localhost 源），
-  // 生产环境由运维配具体域名清单，不会用 '*'。
-  if (allowed.includes('*')) return true;
+  // 刻意不支持 '*' 通配：上线时 CORS_ORIGIN 会换成正式域名清单，
+  // 通配会让「误配一个字符」静默变成全放行且无告警；这里保持精确匹配（fail-closed）。
   return allowed.includes(origin);
 }
 

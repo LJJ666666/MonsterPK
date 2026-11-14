@@ -5,6 +5,7 @@ import BrandMark from "@/components/BrandMark";
 import { api, API_BASE } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { bootstrapSave } from "@/lib/saveBootstrap";
+import { signOut } from "@/lib/accountSwitch";
 
 type Mode = "login" | "register";
 type FieldErrors = { username?: string; password?: string; confirm?: string };
@@ -13,20 +14,25 @@ type ServiceState = "checking" | "online" | "offline";
 const LAST_USER_KEY = "mpk_last_username";
 
 const inputBase =
-  "w-full border-2 bg-[color:var(--bg2)] px-3 py-2.5 text-sm text-[color:var(--text)] outline-none transition-colors " +
+  "w-full border-2 bg-[color:var(--bg2)] px-3 text-sm text-[color:var(--text)] outline-none transition-colors " +
   "placeholder:text-[color:var(--muted)] placeholder:opacity-50 focus:border-[color:var(--accent)]";
+// 注册态字段更多：输入框纵向留白收紧，保证 360×616 真机一屏放得下。
+const padLoose = "py-2.5";
+const padTight = "py-2";
 
 function Field({
   label,
   htmlFor,
   error,
   hint,
+  compact,
   children,
 }: {
   label: string;
   htmlFor: string;
   error?: string;
   hint?: string;
+  compact?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -34,13 +40,15 @@ function Field({
       <label htmlFor={htmlFor} className="block text-xs tracking-wide text-[color:var(--muted)]">
         {label}
       </label>
-      <div className="mt-1.5">{children}</div>
+      <div className={compact ? "mt-1" : "mt-1.5"}>{children}</div>
       {error ? (
-        <div className="mt-1.5 text-xs text-[color:var(--danger)]" role="alert">
+        <div className={compact ? "mt-1 text-xs text-[color:var(--danger)]" : "mt-1.5 text-xs text-[color:var(--danger)]"} role="alert">
           {error}
         </div>
       ) : hint ? (
-        <div className="mt-1.5 text-[11px] text-[color:var(--muted)] opacity-90">{hint}</div>
+        <div className={compact ? "mt-1 text-[11px] text-[color:var(--muted)] opacity-90" : "mt-1.5 text-[11px] text-[color:var(--muted)] opacity-90"}>
+          {hint}
+        </div>
       ) : null}
     </div>
   );
@@ -61,6 +69,10 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [service, setService] = useState<ServiceState>("checking");
   const [forgotHint, setForgotHint] = useState(false);
+  // 注册态用紧凑排版：砍掉品牌描述/分割线/API 行、收紧各处间距。
+  // 真机 360×616 实测普通态 687px 溢出 71px，紧凑态约 530px，仍留得下字段错误提示。
+  const compact = mode === "register";
+  const inputPad = compact ? padTight : padLoose;
 
   // 后端可达性持续嗅探：连不上时给明确提示并自动重试，而不是只首次监听一次。
   // 每 3s 轮询一次，在线后保持在线态；一旦失败再由 offline 转回重试，
@@ -127,6 +139,9 @@ export default function Auth() {
         mode === "login"
           ? await api.login(username.trim(), password)
           : await api.register(username.trim(), password);
+      // 账号边界：先把上一个账号的内存渲染副本 / revision / 实时通道清干净。
+      // 否则新账号若没有存档，会继续显示旧账号的图鉴与进度，写操作却全部 404。
+      signOut();
       setToken(res.token);
       // 登录后立刻把服务端存档拉下来（本地没有任何副本，这是唯一的来源）。
       // 必须等它完成再跳转，否则 Start 会先闪一屏「开始新旅程」。
@@ -157,27 +172,33 @@ export default function Auth() {
   };
 
   return (
-    // 安全区：顶部留状态栏空间（刘海屏用真实 inset，无刘海设备兜底 24px），
-    // 底部留导航栏空间。整体一屏排布：头部固定 + 表单垂直居中 + 服务状态贴底，
-    // 默认登录态不出现滚动；注册态字段更多时若小屏放不下才允许局部滚动。
+    // 安全区：只用真实 env(safe-area-inset-top)（非 overlay WebView 的状态栏在 WebView 外，
+    // 再兜底 24px 会白占一屏高度）。整体一屏排布：头部 + 表单垂直居中 + 服务状态贴底，
+    // 登录态与注册态在 360×616 真机上都不出现滚动；字段报错时仍有余量。
     <div className="page-shell safe-top safe-bottom overflow-y-auto">
-      {/* 品牌区（紧凑，给表单让出垂直空间） */}
-      <header className="flex-none px-6 pb-5">
+      {/* 品牌区：注册态压成一行，给三个输入框让出垂直空间 */}
+      <header className={compact ? "flex-none px-6 pb-2 pt-3" : "flex-none px-6 pb-5"}>
         <div className="flex items-center gap-3">
-          <BrandMark className="h-11 w-11 shrink-0" />
+          <BrandMark className={compact ? "h-9 w-9 shrink-0" : "h-11 w-11 shrink-0"} />
           <div>
-            <div className="font-display text-base leading-none tracking-[0.1em] text-[color:var(--accent)]">
+            <div className={compact ? "font-display text-sm leading-none tracking-[0.1em] text-[color:var(--accent)]" : "font-display text-base leading-none tracking-[0.1em] text-[color:var(--accent)]"}>
               兽域手记
             </div>
-            <div className="mt-1.5 text-[11px] tracking-[0.28em] text-[color:var(--muted)]">
-              BEAST JOURNAL
-            </div>
+            {!compact && (
+              <div className="mt-1.5 text-[11px] tracking-[0.28em] text-[color:var(--muted)]">
+                BEAST JOURNAL
+              </div>
+            )}
           </div>
         </div>
-        <p className="mt-4 text-[13px] leading-relaxed text-[color:var(--muted)]">
-          登录账号，继续你的野外考察与幻兽收集之旅。
-        </p>
-        <div className="mt-4 h-[2px] w-full bg-[color:var(--stroke2)]" />
+        {!compact && (
+          <>
+            <p className="mt-4 text-[13px] leading-relaxed text-[color:var(--muted)]">
+              登录账号，继续你的野外考察与幻兽收集之旅。
+            </p>
+            <div className="mt-4 h-[2px] w-full bg-[color:var(--stroke2)]" />
+          </>
+        )}
       </header>
 
       <main className="flex flex-1 flex-col px-6">
@@ -209,21 +230,22 @@ export default function Auth() {
             ))}
           </div>
 
-          <div className="mt-5 text-lg font-semibold text-[color:var(--text)]">
+          <div className={compact ? "mt-3 text-base font-semibold text-[color:var(--text)]" : "mt-5 text-lg font-semibold text-[color:var(--text)]"}>
             {mode === "login" ? "欢迎回来，旅行者" : "创建你的冒险账号"}
           </div>
-          <div className="mt-1 text-xs text-[color:var(--muted)]">
+          <div className={compact ? "mt-0.5 text-[11px] text-[color:var(--muted)]" : "mt-1 text-xs text-[color:var(--muted)]"}>
             {mode === "login"
               ? "进度跟随账号，换设备也能接着玩"
               : "注册后自动登录，立即开始旅程"}
           </div>
 
-          <form onSubmit={submit} className="mt-5 flex flex-col gap-3" noValidate>
+          <form onSubmit={submit} className={compact ? "mt-3 flex flex-col gap-2" : "mt-5 flex flex-col gap-3"} noValidate>
             <Field
-              label="用户名"
+              label={compact ? "用户名 · 3–20 位" : "用户名"}
               htmlFor="auth-username"
               error={errors.username}
-              hint={mode === "register" ? "3–20 位，字母、数字或中文" : undefined}
+              hint={mode === "register" && !compact ? "3–20 位，字母、数字或中文" : undefined}
+              compact={compact}
             >
               <input
                 id="auth-username"
@@ -238,6 +260,7 @@ export default function Auth() {
                 aria-invalid={!!errors.username}
                 className={[
                   inputBase,
+                  inputPad,
                   errors.username
                     ? "border-[color:var(--danger)]"
                     : "border-[color:var(--stroke)]",
@@ -246,10 +269,11 @@ export default function Auth() {
             </Field>
 
             <Field
-              label="密码"
+              label={compact ? "密码 · 至少 6 位" : "密码"}
               htmlFor="auth-password"
               error={errors.password}
-              hint={mode === "register" ? "至少 6 位" : undefined}
+              hint={mode === "register" && !compact ? "至少 6 位" : undefined}
+              compact={compact}
             >
               <div className="relative">
                 <input
@@ -263,6 +287,7 @@ export default function Auth() {
                   aria-invalid={!!errors.password}
                   className={[
                     inputBase,
+                    inputPad,
                     "pr-16",
                     errors.password
                       ? "border-[color:var(--danger)]"
@@ -281,7 +306,7 @@ export default function Auth() {
             </Field>
 
             {mode === "register" && (
-              <Field label="确认密码" htmlFor="auth-confirm" error={errors.confirm}>
+              <Field label="确认密码" htmlFor="auth-confirm" error={errors.confirm} compact={compact}>
                 <input
                   id="auth-confirm"
                   type={showPwd ? "text" : "password"}
@@ -296,6 +321,7 @@ export default function Auth() {
                   aria-invalid={!!errors.confirm}
                   className={[
                     inputBase,
+                    inputPad,
                     errors.confirm
                       ? "border-[color:var(--danger)]"
                       : "border-[color:var(--stroke)]",
@@ -343,7 +369,7 @@ export default function Auth() {
             <button
               type="submit"
               disabled={busy}
-              className="mt-1 min-h-[48px] w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+              className={compact ? "mt-1 min-h-[48px] w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2.5 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50" : "mt-1 min-h-[48px] w-full border-2 border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold tracking-wide text-[#0b1020] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--text)] disabled:cursor-not-allowed disabled:opacity-50"}
             >
               {busy ? "请稍候…" : mode === "login" ? "登录并继续" : "创建账号并进入"}
             </button>
@@ -351,7 +377,7 @@ export default function Auth() {
         </div>
 
         {/* 服务状态（贴底，始终可见） */}
-        <div className="pb-1 pt-5">
+        <div className={compact ? "pb-1 pt-3" : "pb-1 pt-5"}>
           <div className="flex items-center gap-2 text-xs text-[color:var(--muted)]">
             <span
               className={[
@@ -365,9 +391,11 @@ export default function Auth() {
             />
             <span>{serviceText[service]}</span>
           </div>
-          <div className="mt-1 text-[11px] text-[color:var(--muted)] opacity-90">
-            API · {API_BASE}
-          </div>
+          {!compact && (
+            <div className="mt-1 text-[11px] text-[color:var(--muted)] opacity-90">
+              API · {API_BASE}
+            </div>
+          )}
         </div>
       </main>
     </div>

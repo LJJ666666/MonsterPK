@@ -33,6 +33,11 @@ function setView(v: SessionView): void {
 export function getSessionView(): SessionView | null {
   return view;
 }
+/** 换账号 / 退出登录时清掉展示用的权威态视图，避免新账号顶着旧账号的 rev。 */
+export function resetSessionView(): void {
+  view = null;
+  for (const l of listeners) l();
+}
 export function subscribeSession(cb: () => void): () => void {
   listeners.add(cb);
   cb();

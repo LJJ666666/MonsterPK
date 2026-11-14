@@ -7,7 +7,7 @@ import BrandMark from "@/components/BrandMark";
 import { MONSTER_SPECS, STARTERS } from "@/game/data";
 import { useGameStore } from "@/stores/useGameStore";
 import { api } from "@/lib/api";
-import { clearToken } from "@/lib/auth";
+import { signOut } from "@/lib/accountSwitch";
 import { useSyncStatus, type SyncPhase } from "@/lib/sync";
 import { useIsAdmin } from "@/lib/admin";
 import { useWsStatus, type WsPhase } from "@/lib/ws";
@@ -80,7 +80,7 @@ export default function Start() {
       })
       .catch((e: any) => {
         if (e?.status === 401) {
-          clearToken();
+          signOut();
           navigate("/auth", { replace: true });
         }
       });
@@ -106,7 +106,9 @@ export default function Start() {
     : 0;
 
   function logout() {
-    clearToken();
+    // 不只是清 token：内存里还留着上一个账号的存档渲染副本 / revision / WS 连接，
+    // 不清理的话换账号登录后会拿旧档渲染「能玩」的假界面（见 lib/accountSwitch.ts）。
+    signOut();
     navigate("/auth", { replace: true });
   }
 

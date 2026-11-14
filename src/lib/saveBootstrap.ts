@@ -28,7 +28,11 @@ export async function bootstrapSave(): Promise<boolean> {
   } catch (e: any) {
     if (e?.status === 404) {
       // 服务端确实没有存档：下一次提交即新建，基线 0 合法。
+      // 同时必须丢掉内存里可能残留的「上一个账号的渲染副本」——
+      // 换账号登录后若不清，Start 会显示「继续旅程」、Camp 会拿旧档渲染，
+      // 但所有写操作都以新账号身份打到服务端，一律 404 SAVE_NOT_FOUND。
       setRevision(0);
+      useGameStore.getState().resetLocalSave();
       return false;
     }
     // 401 由 api 层的 UnauthorizedListener 统一处理；

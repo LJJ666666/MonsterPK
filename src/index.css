@@ -248,12 +248,13 @@ button:not([class*="min-h-"]) {
   font-family: "Press Start 2P", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* 移动端安全区：刘海 / 状态栏 / 导航栏不遮挡内容。
-   真机刘海屏由 env(safe-area-inset-*) 提供真实内边距；
-   模拟器等无刘海设备该值为 0，故用 max() 兜底一个最小间距，
-   避免 WebView 内容从 y=0 起被系统状态栏截断。 */
+/* 移动端安全区：只用系统给的真实 inset。
+   Capacitor 配置 StatusBar.overlaysWebView=false，状态栏在 WebView 之外
+   （真机 CDP 实测 WebView screenY=72 设备px、env(safe-area-inset-top)=0px），
+   此前 max(inset, 24px) 的兜底会白占 24px、把页头硬顶下来，已删除。
+   若将来改成 overlay / 刘海屏，env() 会给出真实值，这里自动生效。 */
 .safe-top {
-  padding-top: max(env(safe-area-inset-top, 0px), 24px);
+  padding-top: env(safe-area-inset-top, 0px);
 }
 .safe-bottom {
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);

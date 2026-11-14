@@ -1878,3 +1878,41 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
   （产品行为变更，需杰哥拍板）。
 - 240dp 超窄屏下战斗状态卡被固定行动区挤到需上滑、反馈条文字被 `truncate` 省略；属合理降级（无横向溢出，可滚达）。
 - 剧情 intro 冷启动重播（§72 观察点 1）仍未改，属产品行为，等排期。
+
+---
+
+## §74 2026-11-15 注册页一屏 / 顶部空白条 / 换账号残留旧档
+
+**杰哥三问**：①注册页内容也很长；②头部顶下来那块是否为状态栏留白、是否多余；③「目前是假的注册登录游玩吗？为什么显示还没存档，请先开始游戏」。
+
+### 74.1 取证（先查再下结论，全部真机 CDP + DB 实证）
+
+| 问题 | 证据 | 结论 |
+|---|---|---|
+| 注册页长度 | 旧包 360×616 实测 `.page-shell` `scrollHeight=687 / clientHeight=616`，溢出 **71px**；登录态 616/616 | 注册态多一个确认密码框 + 两条 hint，确实滚屏 |
+| 顶部空条 | CDP：`env(safe-area-inset-top)=0px`、`.page-shell` `padding-top=24px`；`/json/list` 的 `screenY=72` 设备px（dpr=3 → 24 CSS px） | **多余**。Capacitor `StatusBar.overlaysWebView=false`，状态栏已在 WebView 外；`.safe-top` 的 `max(inset,24px)` 兜底纯属白占 |
+| 是否假登录 | `/api/auth/me` → `{"id":"cmwgog3fy2im014iwwn68f0s7","username":"aabbcc","isAdmin":false}`；`/api/save` → **404 还没有存档**；DB `User aabbcc` `saveCount=0`（17:26 注册） | 注册/登录/游玩都是真的服务端权威，不是假的 |
+| 为何显示旧进度 | DB `gametest001` 存档 `rev=5, playerName=旅行者, money=0, 发现3/捕获2`；截图正是「旅行者 · ¥0」「发现 3 / 捕获 2」 | **换账号残留旧档**：`bootstrapSave()` 收 404 只置 `revision=0` 就返回，没清内存渲染副本。于是 Start 显示「继续旅程」、Camp 拿旧账号图鉴渲染，写操作却以 `aabbcc` 身份打到服务端 → `game.ts:140` 返回 `SAVE_NOT_FOUND` → 红条 |
+
+### 74.2 修复（零产品语义/数值/风控改动）
+
+1. **注册页紧凑态**（`Auth.tsx`）：`compact = mode === "register"`，品牌区压成一行（去描述/分割线）、提示语并进 label（「用户名 · 3–20 位」）、输入框 `py-2`、间距 `gap-2`、隐藏注册态 API 行；登录态版式不变。真机 616/616 不滚动，三字段同时报错仍 616/616、`scrollWidth==innerWidth==360`。
+2. **删 24px 兜底**（`index.css` `.safe-top`）：只用 `env(safe-area-inset-top, 0px)`；将来改 overlay / 刘海屏由系统给真值自动生效。`styles.test.ts` 加锁回归。页头自带 `py-2.5`，去掉后状态栏与标题不再有空白断层。
+3. **账号边界**（`lib/accountSwitch.ts` 新增，`bootstrapSave.ts` / `Auth.tsx` / `Start.tsx` / `session.ts` / `useGameStore.ts`）：
+   - `bootstrapSave()` 收到 404 调 `resetLocalSave()` 丢掉旧渲染副本（非 404 的网络故障**不清**，避免诱导玩家覆盖服务端真档）；
+   - `signOut()` = `stopRealtime()` + `stopWriteChannel()` + `resetLocalSave()` + `forgetAllRevisions()` + `resetSessionView()` + `clearToken()`；退出登录、401、登录成功前统一走；
+   - `resetLocalSave()` 是**丢弃**内存副本，不是新写入口，不产生任何真值。
+   - 新增 `saveBootstrap.test.ts` 三条回归（404 清空 / 200 导入 / 500 不误清）。
+
+### 74.3 验收
+
+- `npm run check` 0 错；`npm test`（vitest）**158/154 → 158/158**（+1 CSS 断言 +3 换账号回归）；`npm run build` 通过。
+- 离线 Gradle 9s ×2，APK `01:56:00` / `02:01:53`；核 bundle 含 `padding-top:env(safe-area-inset-top,0px)`、无旧兜底、含 `resetLocalSave` 与新 label 文案。
+- 真机：`/auth` 注册页 `padTop=0px`、`scrollH=616=clientH`；三字段报错态同样 616/616；Camp `padTop=0px`、无红条、地区列表完整（截图 `mpk_camp_new.png` / `mpk_register_new.png`）。
+- **换账号全流程**：`uinosave001`（有档：已捕获 1 只 / 云端已有备份 / 继续旅程）→ 退出登录 → 登录 `uinosave002`（无档）→ Start 正确显示「尚无冒险记录 / 开始新旅程 / 云端暂无备份」，**不再残留旧图鉴、不再假 Camp、不再 `SAVE_NOT_FOUND`**。
+- 真机 UI 建档再验证：点「开始新旅程」→ 建档 → `/camp` 正常，无红色错误条。
+
+### 74.4 交给杰哥的口径
+
+`aabbcc` 是 17:26 新注册、**还没建档**的账号；重新登录后会看到「开始新旅程」，点一下选初始伙伴即可正式开玩。之前看到的「旅行者 ¥0 / 发现3 捕获2」是 `gametest001` 的旧渲染副本，不是新账号的进度。临时验证账号 `uinosave001/002` 已从库清理。
+

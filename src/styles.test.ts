@@ -50,6 +50,11 @@ describe("index.css 设计底座", () => {
     }
   });
 
+  it("顶部安全区只用真实 inset，不再白占 24px 兜底", () => {
+    expect(css).toContain("padding-top: env(safe-area-inset-top, 0px);");
+    expect(css).not.toContain("max(env(safe-area-inset-top, 0px), 24px)");
+  });
+
   it("可读性：次要文字对比度高于旧值 0.72", () => {
     expect(css).toContain("--muted: rgba(238, 241, 255, 0.82)");
   });

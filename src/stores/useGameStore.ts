@@ -116,6 +116,8 @@ type GameState = {
     json: string,
     opts?: { keepBattle?: boolean },
   ) => { ok: true } | { ok: false; reason: string };
+  /** 丢弃内存里的渲染副本（换账号 / 服务端确认无档）。不是写入口，不产生任何真值。 */
+  resetLocalSave: () => void;
   exportSaveJson: () => { ok: true; json: string } | { ok: false; reason: string };
   
   startEncounter: (theme: EncounterTheme, areaName: string, levelMin: number, levelMax: number, areaId?: string, wildId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
@@ -257,6 +259,8 @@ export const useGameStore = create<GameState>()((set, get) => ({
           return { ok: false, reason: "JSON 解析失败" };
         }
       },
+
+      resetLocalSave: () => set({ save: null, battle: null }),
 
       exportSaveJson: () => {
         const save = get().save;

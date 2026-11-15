@@ -17,7 +17,7 @@
 - 文档权威源分工（已解耦，别再往一处堆）：`.workbuddy/memory/MEMORY.md` 只放**硬约束 + 索引 + 进度快照**，不复述技术细节；`.trae/documents/` 下的后端规范 / 排期 / 任务表 / bug_log / 未来规划台账才是**权威事实**；`scripts/doc_check.py` 只做结构断言。查数字、查代码符号去权威文档，别靠记忆或推断。改任一侧记忆后跑 `python scripts/sync_memory.py`（`--reverse` 反向 / `--check` 只校验）。
 - **产品语义变更（规则、数值、风控策略、离线策略、奖励发放）必须先给评估与方案让杰哥拍板**，不要自行改；工程实现层面的取舍可自行决定。开发阶段没有真实老用户，**不要为兼容留后门、旧链路、开关**，该删直接删干净。
 - 以下是**刻意设计，不是 bug，别「顺手修」**：1v1 目前**零产出**（F15 冻结，仅供娱乐）；Boss 讨伐按 **F14 双档奖励**、共斗按 **F16 通关奖励**由服务端发放（客户端无领取入口、伪上报 400）；共斗伤害不写 `BossDamageEvent`、没有共斗伤害榜（F16 只发通关奖）；`pvpSettled` / `coopSettled` 结算幂等；共斗非法意图服务端降级跳过而不是抛异常打崩整间房；`flee` 在入口层 400 `COOP_INTENT_INVALID`；「战力」只是六维之和，不参与任何判定。
-- 当前状态：**P0 ~ P4-2e 全部 ✅**，**P4-2 五阶段全部完成（a/b/c/d/e 均已验收）**；台账 **F01/F02 已偿还**（规范 §28）、**F14 Boss 双档奖励已偿还**（规范 §29）、**F16 共斗六房副本已实现并偿还**（规范 §30，世界 Boss 不排期）。**F15 1v1 零产出冻结**（仅供娱乐，未来排位赛再设计）。**F04 召唤师等级 / 徽章 / 成就已实现并偿还**（2026-11-10，规范 §31：人物等级 = 基础 5 + 徽章等级加成，**不写 `SaveData`、不动 `SCHEMA_VERSION`**；等级帽超帽不降级只冻结；捕获不钳等级；宠物经验只来自常规战斗；徽章 / 成就双 Tab 弹窗）。**F17 单档化已实现并偿还**（2026-11-10，规范 §32：删三档、一账号一档、直接进游戏不选档；实测 106 文件横切 `slot`、第 11 条迁移把 `SCHEMA_VERSION` 10→11，**唯一动版本号的阶段**，与 F04 拆开）。**F18 地图内容全阶段已收官**：**F18-a 地图锁已实现并偿还**（规范 §33，服务端权威解锁）、**F18-b 演武堂 ✅**（胜利发 `gym:<locationId>` 徽章）、**F18-c 地图首领 ✅**（独立层、不上榜、每日上限、胜发掉落 + 3×经验/5×金钱、禁捕获）、**F18-d 剧情 ✅**（21 beat 正式文案，占位债务已偿）；验证覆盖含核心循环串联 E2E 与 F18-a/b/c 375px UI 冒烟。**下一步：A 类运行时改造（A1/A2/A4/A5）与 P5-1 W0（接口抽象 + 单实例零行为变更）均已收官验收**（2026-11-12，bug_log §46/§47）；W1 起进入批次 B：**W1 ✅ 2026-11-12 已完成并验收**（provider 切 postgresql、11 条 SQLite 迁移归档、一条 PG 基线 init、`Save.revision` 提列并回填，**产品代码零改动**）。W1 用的是本机自建 PG 16.15 开发实例，正式实例到位只换 `DATABASE_URL`，schema / 迁移链不用再动；**W2 ✅ 2026-11-12 已完成并验收**（`lib/saveCas.ts` + `commitState` 条件更新，409 只由 `updateMany count` 裁决，双进程并发 1 赢 1 409，全量 **48/48 `VERIFY_OK`**，详见 bug_log §52）；**W3 ✅ 2026-11-12 已完成并验收**（本机自建 Redis 5.0.14.1 开发实例；`SET NX PX` 租约锁 + 命名空间 + `AsyncLocalStorage` 重入旁路 + watchdog 续租 + Lua token 安全释放；`REDIS_URL` 配了连不上即拒绝启动、不静默降级；`e2e:w3` 23 项含预占账号锁证明写路径跨进程互斥，全量 **49/49 `VERIFY_OK`**，详见 bug_log §54）；W9 已完成、已真正开第二实例做常规服务（反代 + 共享存储，见 bug_log §70）；接手先做只读核对。前端 dev 端口可用 `MPK_FRONT_PORT` 随时更换（默认 5173，本机 5174），启动服务与跑 verify 须在同一 shell 设同一个值。**P4-3（交易 / 赠送）当前冻结**：玩家↔玩家 C2C 所有权转移，11-09 口径「当前所有资产一律不可交易」，暂无可交付标的，不是删除。**编号口径**：P4-3 只指交易 / 赠送，排期文档 §7 旧文曾误写成周期结算，已修正。硬门槛：野怪 / 房间 / 锁都是单进程内存态，P5-1 多实例部署前统一迁共享存储。**实施层评估（只读稿，供排期拍板）见 `.trae/documents/P5-1_F10_共享存储迁移评估_2026-11-11.md`**：共 8 类进程内状态 + 6 个耦合点，评级 L、建议 8 阶段（1.1 完成前不开第二实例）；该评估修正了台账 F10「只换 adapter」的乐观口径（`revision` 非 DB 独立列、`RoomStorage` 同步且依赖对象引用、两个周期定时器每进程各跑一遍）。**实施设计定稿（2026-11-11，杰哥已拍板选型 B、工作顺序已排）见 `.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`**：实施以定稿为准，上面的评估稿降为初稿并挂 12 处勘误指针（三组独立后端架构专家只读复核，一致「需修正后可用」）。硬结论：切 Postgres 必须归档 11 条 SQLite 方言迁移并重置为一条 PG 基线，`schema.prisma:2` 注释「改 provider 即可」是错的，不存在「第 12 条迁移」；CAS 的 409 只能由 `updateMany count` 裁决；房间 quota `committed` 须改 DB 计数；广播是两频道 + 各实例本地裁剪。**选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，Redis 不存任何影响权益的真值**。顺序 W0~W9 四批，W0 接口抽象与单实例零行为变更**无需外部资源、可立即开工**；W2 已完成（跨实例存档 CAS 可用），但房间 / 野怪 / 定时器 / 广播未迁共享态，W9 已完成、已真正开第二实例做常规服务（反代 + 共享存储，见 bug_log §70）。原「6 项前置输入」已收敛为**仅外部资源一类**（PG/Redis 实例与凭据、域名与 HTTPS、停机窗口），设计层面无待决项；W1 的 PG、W3 的 Redis 均已由本地开发实例解决（见 bug_log §51 / §54），W4/W5 复用同一 Redis，W9 需域名 / HTTPS / 反代。
+- 当前状态：**P0 ~ P4-2e 全部 ✅**，**P4-2 五阶段全部完成（a/b/c/d/e 均已验收）**；台账 **F01/F02 已偿还**（规范 §28）、**F14 Boss 双档奖励已偿还**（规范 §29）、**F16 共斗六房副本已实现并偿还**（规范 §30，世界 Boss 不排期）。**F15 1v1 零产出冻结**（仅供娱乐，未来排位赛再设计）。**F04 召唤师等级 / 徽章 / 成就已实现并偿还**（2026-11-10，规范 §31：人物等级 = 基础 5 + 徽章等级加成，**不写 `SaveData`、不动 `SCHEMA_VERSION`**；等级帽超帽不降级只冻结；捕获不钳等级；宠物经验只来自常规战斗；徽章 / 成就双 Tab 弹窗）。**F17 单档化已实现并偿还**（2026-11-10，规范 §32：删三档、一账号一档、直接进游戏不选档；实测 106 文件横切 `slot`、第 11 条迁移把 `SCHEMA_VERSION` 10→11，**唯一动版本号的阶段**，与 F04 拆开）。**F18 地图内容全阶段已收官**：**F18-a 地图锁已实现并偿还**（规范 §33，服务端权威解锁）、**F18-b 演武堂 ✅**（胜利发 `gym:<locationId>` 徽章）、**F18-c 地图首领 ✅**（独立层、不上榜、每日上限、胜发掉落 + 3×经验/5×金钱、禁捕获）、**F18-d 剧情 ✅**（21 beat 正式文案，占位债务已偿）；验证覆盖含核心循环串联 E2E 与 F18-a/b/c 375px UI 冒烟。**下一步：A 类运行时改造（A1/A2/A4/A5）与 P5-1 W0（接口抽象 + 单实例零行为变更）均已收官验收**（2026-11-12，bug_log §46/§47）；W1 起进入批次 B：**W1 ✅ 2026-11-12 已完成并验收**（provider 切 postgresql、11 条 SQLite 迁移归档、一条 PG 基线 init、`Save.revision` 提列并回填，**产品代码零改动**）。W1 用的是本机自建 PG 16.15 开发实例，正式实例到位只换 `DATABASE_URL`，schema / 迁移链不用再动；**W2 ✅ 2026-11-12 已完成并验收**（`lib/saveCas.ts` + `commitState` 条件更新，409 只由 `updateMany count` 裁决，双进程并发 1 赢 1 409，全量 **48/48 `VERIFY_OK`**，详见 bug_log §52）；**W3 ✅ 2026-11-12 已完成并验收**（本机自建 Redis 5.0.14.1 开发实例；`SET NX PX` 租约锁 + 命名空间 + `AsyncLocalStorage` 重入旁路 + watchdog 续租 + Lua token 安全释放；`REDIS_URL` 配了连不上即拒绝启动、不静默降级；`e2e:w3` 23 项含预占账号锁证明写路径跨进程互斥，全量 **49/49 `VERIFY_OK`**，详见 bug_log §54）；W9 已完成、已真正开第二实例做常规服务（反代 + 共享存储，见 bug_log §70）；接手先做只读核对。前端 dev 端口可用 `MPK_FRONT_PORT` 随时更换（默认 5173，本机 5174），启动服务与跑 verify 须在同一 shell 设同一个值。**P4-3（交易 / 赠送）当前冻结**：玩家↔玩家 C2C 所有权转移，11-09 口径「当前所有资产一律不可交易」，暂无可交付标的，不是删除。**编号口径**：P4-3 只指交易 / 赠送，排期文档 §7 旧文曾误写成周期结算，已修正。历史硬门槛「野怪 / 房间 / 锁都是单进程内存态」已在 **W6~W9 全部解除**：房间 / 会话 / 广播 / 野怪池 / 战斗 / 馆主 CD 均已迁 PG + Redis 共享存储，W9 已真正开第二实例做常规服务（health 的 `lock` / `sweep` / `broadcast` / `wild.storage` / `w8` 均 `redis`）。**实施层评估（只读稿，供排期拍板）见 `.trae/documents/P5-1_F10_共享存储迁移评估_2026-11-11.md`**：共 8 类进程内状态 + 6 个耦合点，评级 L、建议 8 阶段（1.1 完成前不开第二实例）；该评估修正了台账 F10「只换 adapter」的乐观口径（`revision` 非 DB 独立列、`RoomStorage` 同步且依赖对象引用、两个周期定时器每进程各跑一遍）。**实施设计定稿（2026-11-11，杰哥已拍板选型 B、工作顺序已排）见 `.trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`**：实施以定稿为准，上面的评估稿降为初稿并挂 12 处勘误指针（三组独立后端架构专家只读复核，一致「需修正后可用」）。硬结论：切 Postgres 必须归档 11 条 SQLite 方言迁移并重置为一条 PG 基线，`schema.prisma:2` 注释「改 provider 即可」是错的，不存在「第 12 条迁移」；CAS 的 409 只能由 `updateMany count` 裁决；房间 quota `committed` 须改 DB 计数；广播是两频道 + 各实例本地裁剪。**选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/可重建临时态，Redis 不存任何影响权益的真值**。顺序 W0~W9 四批，W0 接口抽象与单实例零行为变更**无需外部资源、可立即开工**；W2 已完成（跨实例存档 CAS 可用），但房间 / 野怪 / 定时器 / 广播未迁共享态，W9 已完成、已真正开第二实例做常规服务（反代 + 共享存储，见 bug_log §70）。原「6 项前置输入」已收敛为**仅外部资源一类**（PG/Redis 实例与凭据、域名与 HTTPS、停机窗口），设计层面无待决项；W1 的 PG、W3 的 Redis 均已由本地开发实例解决（见 bug_log §51 / §54），W4/W5 复用同一 Redis，W9 需域名 / HTTPS / 反代。
 
 - **W4 ✅ 2026-11-12 已完成并验收**（定时器选主 + 幂等，bug_log §58）：`lib/sweepLeader.ts` 提供 `lock:sweep:global` 租约 + `sweep:fence` fencing + `idem:*` 幂等键 + `guardedCommit`（提交成功才 publish）；心跳的全局 sweep 只由 leader 跑，250ms 房间 timer 用本地 leader 缓存 + `withRoomLock` + `idem:room:<roomId>:<rev>` 短期 claim；`tickRoom` / `sweepRooms` 改 async 并纳入锁、结算标记提共享 CAS 门；本地心跳补 `sessionVersion` 比对踢旧 WS。复用 W3 的 Redis 连接，`initializeSweepLeader` **启动即抢一次租约**（否则 250ms 房间 timer 前 30s 停摆）；health 加 `sweep` 诊断。`w4SweepLeader.test.ts` 11 例 + `e2e_w4_sweep.mjs` 27 项（真 Redis 选主 / fence 递增 / kill 与 TTL 接管 / 四类幂等键 / 生产租约隔离），后端 447 单测、全量 **50/50 `VERIFY_OK`**。边界：房间 / 野怪仍是进程内内存真值，定稿的「双实例 5 分钟」长稳验收延后到 W6/W7；W9 已完成、已真正开第二实例做常规服务（反代 + 共享存储，见 bug_log §70）。E2E 测试键带独立前缀，不抢 :3001 租约。
 
@@ -57,7 +57,7 @@ git status --short                             # 必须为空
 python scripts/check_home_env.py               # ENV_CHECK_OK（[WARN] 按提示处理）
 python scripts/doc_check.py                    # DOC_CHECK_OK
 python scripts/sync_memory.py --check          # 镜像 [一致]
-npm run verify                                 # VERIFY_OK（阶段数与数字以输出为准）
+npm run verify -- --strict                     # VERIFY_OK 且 0 跳过（阶段数与数字以输出为准）
 ```
 
 起服务：前端 `npm run dev`（`vite.config.ts` 已固定 `host: '0.0.0.0'` + `strictPort`，端口读 `MPK_FRONT_PORT`，默认 5173）；后端 `cd backend && npm run dev`（3001）。**端口随时可换**：本机 5173 被微信等程序占用时，在**同一个 shell**里设 `MPK_FRONT_PORT=5174` 再起前端与跑 `verify`（`scripts/lib/devConfig.mjs` 是脚本侧单一真值源，backend E2E 与 CORS 默认值读同名 env），并把 `backend/.env` 的 `CORS_ORIGIN` 加上新端口的 origin；不要在命令行再传 `--port`，那会覆盖配置。用户级记忆 `C:\Users\<用户名>\.workbuddy\`（称呼与沟通口径）不随 git 走；项目级 `.workbuddy/memory/`、`.trae/documents/`、`HANDOFF.md` 都随 git 走。**后端依赖外部 Postgres**：`cd backend && npm run dev` 前先确认 `DATABASE_URL` 指向的实例在线；本机自建实例必须以受管前台进程启动（`pg_ctl start` 的 detach 守护进程会被宿主回收）。**W3 起还依赖 Redis**：`REDIS_URL` 配了就必须 PING 通（否则启动失败，不静默降级）；不配则保持进程内锁、**仅允许单实例**。本机 Redis 同样用受管前台进程：`redis-server.exe --port 6379 --bind 127.0.0.1 --save "" --appendonly no --protected-mode no`。
@@ -84,6 +84,8 @@ npm run verify                                 # VERIFY_OK（阶段数与数字�
 - **配置分层（11-12 杰哥定，跨机器 / 跨会话必看）**：环境类失败先分清三层，**禁止把 WorkBuddy 沙箱注入的 env 当成本机或项目配置**。① **沙箱 / 工具层**：`HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`，仅当前会话进程有效，**禁止写进仓库任何文件**；② **系统 / 本机层**：注册表 `ProxyServer` = 8693、PG / Redis / JDK 本机安装路径，可读、不得硬编码为产品默认值；③ **项目层（唯一可提交真值）**：`MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`，`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`）。规则：先核对变量归属，推送失败按 §1 的「一次只读探活 + 最多 5 次原样重试」处理，不换代理 / 不试直连 / 不改 git config；覆盖 env 的 `8693` 解法仅作历史排查记录、不再是执行口径；本地探活 `curl --noproxy '*'`；PG / Redis 用 `redis-cli PING` / `/api/health` 判活（HTTP `curl /` 的 000 不是判据）；诊断只做「读 env / 查端口归属 / 单次 curl 对照」。详见 bug_log §57。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，新机器必须补**：`backend/.env`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。存档唯一真值在服务端 PostgreSQL（连接串在 `backend/.env`），**不存在** `save_data.json` / `dev.db` 这类本机存档文件。
+- **另外四类本机资产，换机器最容易漏**（2026-11-15 补）：① **GitHub 凭据**（PAT / 凭据管理器 / `gh auth login`，clone 与 push 都要）；② **本机运行时**：PostgreSQL 16 服务、Redis、`start-mpk-runtime.bat`（仓库外，杰哥自己双击）、`start-mpk-backend.bat`（仓库根，随 git）；③ **Android 工具链**：JDK 21、Android SDK（android-36）、雷电模拟器 + adb、离线 Gradle 8.14.3 分发包（版本与核对命令见 `apk_build_guide.md §1`）；④ **发布材料**：正式 keystore 与 `mpk-deploy/handover.md` / `secrets.env`（仓库外，模板见 `.trae/documents/上线部署_杰哥配合清单_2026-11-15.md §10`）。**凭据、keystore、`secrets.env` 一律不入库、不贴聊天**；`*.p12` 目前没有 gitignore 规则，交接目录必须放仓库外。
+- **换机器当天带什么**：随 git 的东西不用带，`git clone` 即全量过去；真正要带的只有「用户级记忆 4 文件 + GitHub 凭据 + 本机运行时/工具链（可在新机重装，但版本要核）」。逐项清单与到公司第一小时的命令序列见 `.trae/documents/带回公司_交接清单_2026-11-16.md`；`backend/.env` 建议**在新机由 `.env.example` 重新生成**，不要拷开发机的（含 `JWT_SECRET`，且连接串指向另一台机器）。
 
 ## 2. 第 1 步：clone / 拉取（路径有硬约束）
 
@@ -105,7 +107,7 @@ git status --short          # 应为空
 
 ### 3.1 后端配置与数据库
 
-`dev.db` 不入库。若新机器是**全新空库**：账号要重新注册，管理员要重新授权；若本机已有 `.env` / `dev.db`（场景 A 或曾经建过），**跳过重建，别覆盖**。
+数据库是**外部 PostgreSQL 实例**（不是仓库内文件），`node_modules` / `.env` 都不入库。若新机器是**全新空库**：按下面顺序建表后，账号要重新注册、管理员要重新授权；若本机已有 `.env` 且指向的库已建过表（场景 A 或曾经建过），**跳过重建，别覆盖**。开发库里的测试账号与存档**不需要搬运**，新机器重新注册即可。
 
 ```bash
 cd "$REPO/backend"
@@ -143,8 +145,11 @@ cd "$REPO/backend" && npm install
 ### 3.3 起双服务（两个终端，或让 WorkBuddy 开后台任务）
 
 ```bash
-# 终端 1
-cd "$REPO" && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
+# 终端 1（host / strictPort 已固化在 vite.config.ts；端口只认 MPK_FRONT_PORT，默认 5173）
+cd "$REPO" && npm run dev
+#  端口被占用：在同一个 shell 里 export MPK_FRONT_PORT=5174（PowerShell：$env:MPK_FRONT_PORT="5174"）
+#  再起前端并跑 verify；同时把 backend/.env 的 CORS_ORIGIN 补上 http://localhost:5174
+#  ⚠️ 不要在命令行再传 --host/--port，那会覆盖 devConfig.mjs 的单一真值源
 # 终端 2
 cd "$REPO/backend" && npm run dev
 ```
@@ -152,8 +157,10 @@ cd "$REPO/backend" && npm run dev
 探活（全局代理环境必须绕过代理，否则是假 502）：
 
 ```bash
-curl -s --noproxy '*' -o /dev/null -w "front:%{http_code}\n" http://127.0.0.1:5173/
+FRONT_PORT=${MPK_FRONT_PORT:-5173}
+curl -s --noproxy '*' -o /dev/null -w "front:%{http_code}\n" "http://127.0.0.1:$FRONT_PORT/"
 curl -s --noproxy '*' -o /dev/null -w "back:%{http_code}\n"  http://127.0.0.1:3001/api/health
+curl -s --noproxy '*' http://127.0.0.1:3001/api/health   # 两个 200；health JSON 里 lock/sweep/broadcast/wild.storage/w8 均 redis 才算就绪
 ```
 
 ### 3.4 注册账号并授权管理员
@@ -242,13 +249,13 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 
 ## 6. 验收清单
 
-**首选：一条命令跑完全部（自动清理测试账号）**
+**首选：一条命令跑完全部严格验收（自动清理测试账号）**
 
 ```bash
-cd "$REPO" && npm run verify        # 期望 VERIFY_OK
+cd "$REPO" && npm run verify -- --strict   # 期望 VERIFY_OK、0 失败、0 跳过
 ```
 
-阶段数、分项用例数会随阶段增长，**以脚本输出为准**，不要照抄任何历史数字；分项数字见任务表时间线与当日日志。常用子集：
+**`--strict` 是默认口径**：前后端服务都要在线，被选中却因服务没起而无法执行的阶段直接判 FAIL；只有明确离线才用 `--only=check,unit,docs --strict` 或 `--allow-missing-services`（后者会记进报告）。`--skip=smoke` 只用于显式离线排查，**禁止当默认**（浏览器冒烟曾长期静默 SKIP 却仍报 VERIFY_OK）。阶段数、分项用例数会随阶段增长，**以脚本输出为准**，不要照抄任何历史数字；分项数字见任务表时间线与当日日志。常用子集：
 
 ```bash
 npm run verify:quick          # 只跑 check + unit，不需要服务（改完代码先跑这个）
@@ -304,14 +311,14 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 
 ## 8. 当前进度快照
 
-**P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / P2-1 ✅ / P2-2 ✅ / P3-1a·b·c ✅ / P3-2 ✅ / P4-0 ✅ / P4-1 ✅ / P4-2a·b·c·d·e ✅（五阶段全部完成）/ 台账 F01·F02 ✅ + F14 ✅ + F16 ✅（2026-11-09 偿还）+ F04 ✅（2026-11-10 偿还）。** **F15 1v1 零产出冻结**（仅供娱乐，未来排位赛再设计榜单/奖励）；**F16 共斗 6 房副本已偿还**（规范 §30，世界 Boss 不排期）。**F17 单档化已偿还**（2026-11-10，规范 §32，第 11 条迁移把 `SCHEMA_VERSION` 10→11）；**F18 地图内容 a/b/c/d 全部 ✅**（地图锁 / 演武堂 / 地图首领 / 正式剧情 21 beat）。**P5-1 共享存储迁移 W0~W9 全部 ✅（2026-11-12/14）**：W0 接口化 → W1 PG 基线 → W2 DB 条件更新 CAS → W3 Redis 租约锁 → W4 定时器选主+fencing+幂等键 → W5 广播/顶号（双频道+裁剪+跳号回源）→ W6.0~W6.3 房间/quota 迁 PG（工作单元+DB 原子计数）→ W6.4 quota 租约 token → W6.5 序列化归一化 → W6.6 裁剪视图+revision 区分 → W6.7 双实例跨实例送达 E2E → **W7 野怪池迁 Redis**（`WildStorage` 全 async 接口 + memory/redis 两实现，全量 key + 四组 Lua：claim/resolve/release/ensure+append，`useRedisStorage` 必须在心跳启动前装配，health 报 `wild.storage`）→ **W8 战斗/会话/馆主 CD 共享 KV + TTL**（`lib/kvStore.ts` 统一带 TTL 原语；战斗态 `BattleStorage` 四层同构、物理 TTL=逻辑×2 保证 `sweepExpired` 能释放 Boss 名额；馆主 CD 由「判→写」两步合并为原子 `acquire`；会话不搬全文，只修 `hydrate()` 丢弃新 DB 行的根因 + `sess:rev:*` 版本戳，health 报 `w8` 三模式）→ **W9 双实例横向扩展与故障注入（反代 + 真 Redis）**（`e2e:multi` **42/42**：harness 多 target 工厂 + 纯 Node 反代 HTTP 轮询 + WS Upgrade 透传 + Origin 白名单 + 四类故障注入——杀 leader 接管 / 杀非 leader 在途战斗不丢 / 杀连接实例经反代重连拉全量 / 租约迟到释放不误删；`SWEEP_KEY_PREFIX` 命名空间隔离 + `index.ts` SIGTERM 优雅释放租约；health 五项均 `redis`，**已真正开第二实例做常规服务**，详见 bug_log §70）。**房间 / 会话 / 广播 / 野怪池 / 战斗 / 馆主 CD 已全部迁 PG+Redis 共享存储**（health 的 `lock`/`sweep`/`broadcast` 三模式均 `redis`，`wild.storage=redis`，`w8` 三项均 `redis`）。**下一步 P5-3 Release 签名与渠道包（装到真机）+ W9 配套 HTTPS/`VITE_API_BASE`/`CORS_ORIGIN` 切云（域名 + TLS 终止在反代/CDN）**——双实例横向扩展与故障切换已验收（W9），下一步是上真机渠道包与切云。**P4-3（交易 / 赠送）当前冻结**（所有资产不可交易，无可交付标的）。完整时间线见任务表「进度记录」。
+**P0 五项 ✅ / P1-1 ✅ / P1-1b ✅ / P1-2 ✅ / P1-3 ✅ / P2-1 ✅ / P2-2 ✅ / P3-1a·b·c ✅ / P3-2 ✅ / P4-0 ✅ / P4-1 ✅ / P4-2a·b·c·d·e ✅（五阶段全部完成）/ 台账 F01·F02 ✅ + F14 ✅ + F16 ✅（2026-11-09 偿还）+ F04 ✅（2026-11-10 偿还）。** **F15 1v1 零产出冻结**（仅供娱乐，未来排位赛再设计榜单/奖励）；**F16 共斗 6 房副本已偿还**（规范 §30，世界 Boss 不排期）。**F17 单档化已偿还**（2026-11-10，规范 §32，第 11 条迁移把 `SCHEMA_VERSION` 10→11）；**F18 地图内容 a/b/c/d 全部 ✅**（地图锁 / 演武堂 / 地图首领 / 正式剧情 21 beat）。**P5-1 共享存储迁移 W0~W9 全部 ✅（2026-11-12/14）**：W0 接口化 → W1 PG 基线 → W2 DB 条件更新 CAS → W3 Redis 租约锁 → W4 定时器选主+fencing+幂等键 → W5 广播/顶号（双频道+裁剪+跳号回源）→ W6.0~W6.3 房间/quota 迁 PG（工作单元+DB 原子计数）→ W6.4 quota 租约 token → W6.5 序列化归一化 → W6.6 裁剪视图+revision 区分 → W6.7 双实例跨实例送达 E2E → **W7 野怪池迁 Redis**（`WildStorage` 全 async 接口 + memory/redis 两实现，全量 key + 四组 Lua：claim/resolve/release/ensure+append，`useRedisStorage` 必须在心跳启动前装配，health 报 `wild.storage`）→ **W8 战斗/会话/馆主 CD 共享 KV + TTL**（`lib/kvStore.ts` 统一带 TTL 原语；战斗态 `BattleStorage` 四层同构、物理 TTL=逻辑×2 保证 `sweepExpired` 能释放 Boss 名额；馆主 CD 由「判→写」两步合并为原子 `acquire`；会话不搬全文，只修 `hydrate()` 丢弃新 DB 行的根因 + `sess:rev:*` 版本戳，health 报 `w8` 三模式）→ **W9 双实例横向扩展与故障注入（反代 + 真 Redis）**（`e2e:multi` **42/42**：harness 多 target 工厂 + 纯 Node 反代 HTTP 轮询 + WS Upgrade 透传 + Origin 白名单 + 四类故障注入——杀 leader 接管 / 杀非 leader 在途战斗不丢 / 杀连接实例经反代重连拉全量 / 租约迟到释放不误删；`SWEEP_KEY_PREFIX` 命名空间隔离 + `index.ts` SIGTERM 优雅释放租约；health 五项均 `redis`，**已真正开第二实例做常规服务**，详见 bug_log §70）。**房间 / 会话 / 广播 / 野怪池 / 战斗 / 馆主 CD 已全部迁 PG+Redis 共享存储**（health 的 `lock`/`sweep`/`broadcast` 三模式均 `redis`，`wild.storage=redis`，`w8` 三项均 `redis`）。**P5-3 本机可做的部分已 ✅（2026-11-15，bug_log §75）**：release 签名 fail-closed、`usesCleartextTraffic` 仅 `src/debug`、版本号由 `android/gradle.properties` 管、`VITE_API_BASE` 一处覆盖 REST + WS；dev APK 已装真机走通登录 → 建档 → 野外 → 战斗 → 捕获 → 冷启动拉服务端存档（bug_log §71~§74）。**切云尚未开始**：等杰哥给域名 + TLS + 正式 keystore + 托管 PG/Redis，配套清单见 `apk_build_guide.md §5` 与 `.trae/documents/上线部署_杰哥配合清单_2026-11-15.md`。当天的待办与验收数字**不在本文固化**，以 `.workbuddy/memory/` 最新日志、`.trae/documents/bug_log.md` 与 `git log` 为准；换机器第一天先看 `.trae/documents/带回公司_交接清单_2026-11-16.md`。**P4-3（交易 / 赠送）当前冻结**（所有资产不可交易，无可交付标的）。完整时间线见任务表「进度记录」。
 
 北极星方向：**服务端权威 + WebSocket 实时多人同玩**，客户端瘦终端只发意图、收状态、渲染。**本地存档已于 2026-11-13 全部删除**（zustand persist / localStorage 副本 / LWW 冲突策略 / 离线重传队列 / rebase 标记），存档只有服务端一份真值，刷新由 `src/lib/saveBootstrap.ts` 走 `GET /api/save`，`BootGate` 拉到档之前不渲染路由。
 
 反作弊口径：测试菜单级数据只放行管理员；他人改档一律拦截 + 封号弹窗 + 强制登出；**改系统时间不封号，只要求「不生效」**。权威摘要不符 / 增量不符一律 400 + 中文原因，不封号。
 
-> **11-09 补充（跨机器必看）**：`npm install` 只装依赖，`npx prisma generate` 只重生成 Client，
-> **都不会给已有 `dev.db` 加列/加表**。换机器或拉到 schema 变更后必须再跑
+> **跨机器必看（原 11-09 补充，11-15 按 PG 口径订正）**：`npm install` 只装依赖，`npx prisma generate` 只重生成 Client，
+> **都不会给 PostgreSQL 实例建表 / 加列**。换机器或拉到 schema 变更后必须再跑
 > `cd backend && npx prisma migrate deploy`；否则注册接口直接 `P2022`，
 > `verify --strict` 会出现 20+ 个连锁假红（bug_log §34）。改 schema 前记得先停 :3001 释放 Prisma DLL。
 

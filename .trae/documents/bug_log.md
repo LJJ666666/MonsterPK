@@ -1999,4 +1999,26 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 #### 77.5 验收（只认输出与产物）
 `npm run verify -- --strict` → **VERIFY_OK，通过 60 / 失败 0 / 跳过 0，216.6s**：静态门禁 **32/32**、前端 161/161、后端 503/503、构建 4.85s、E2E 36 套全绿（W9 42/42、e2e:game 42/42、hardening 122、内容矩阵 47/47）、**15 套冒烟共 252 项全绿**（新 Auth 27/27）、doc_check **232 项** `DOC_CHECK_OK`、镜像一致 `sha256=728fa06b3cc1`、收尾清理 14 个测试账号。日志 `.verify-logs/2026-11-15T15-38-51-623Z-p28152/`。
 
+## §78 2026-11-16 交接文档整理（带回公司）
+
+#### 78.1 需求与取证
+- 杰哥 11-15 夜：「整理一下交接文档，明天需要带回公司了」。先取证再定方案：`HANDOFF.md` 已是 323 行的「机器无关」跨机器手册，但存在 6 处与最新状态冲突的旧口径；`.verify-logs/` 被 `.gitignore:45` 忽略（家里验收日志不会到公司）；`start-mpk-runtime.bat` 在仓库外；正式 keystore / 域名 / TLS / `mpk-deploy/` 交接材料**当前均不存在**；家里 JDK 21.0.10+7、android-36、PG 5432、Redis 6379、3001、5173 实测全部 LISTENING。
+- 判定：长期手册只做定点订正、不塞会过期的当天数字；另出一份「当天快照 + 行动清单」给杰哥明天照着走。
+
+#### 78.2 `HANDOFF.md` 六处订正（doc_check 锚点全保留、断言未放宽）
+1. §1 补四类本机资产与「换机器当天带什么」：GitHub 凭据 / PG+Redis 运行时 / Android 工具链 / 发布材料；明确 `backend/.env` 不拷、凭据与 `*.p12` 不入库（`*.p12` 目前无 gitignore 规则）。
+2. §A 把 W0 前的「野怪 / 房间 / 锁都是单进程内存态，P5-1 多实例部署前统一迁共享存储」改为 **W6~W9 已解除**，health 的 `lock/sweep/broadcast/wild.storage/w8` 均 `redis`。
+3. §3.1 删 SQLite `dev.db` 口径 → 外部 PostgreSQL 全新空库，开发库测试账号 / 存档不搬，新机重新注册 + `grant`。
+4. §3.3 起服务去掉命令行 `--host 0.0.0.0 --port 5173 --strictPort`（会覆盖 `devConfig.mjs` 单一真值源）→ `npm run dev` + `MPK_FRONT_PORT`；探活改用端口变量并加 health JSON 判据。
+5. §C 落地自检与 §6 首选统一为 `npm run verify -- --strict`，写明「`--strict` 是默认口径、服务缺失判 FAIL、`--skip=smoke` 禁止当默认」。
+6. 末尾 11-09 补充改 PG 迁移口径；§8 进度快照改为「P5-3 本机部分已 ✅、切云等域名/TLS/keystore/托管 PG+Redis」，当天数字指向最新日志与 bug_log，并指向新清单。
+
+#### 78.3 新增 `带回公司_交接清单_2026-11-16.md`
+- 结论先行：**代码 / 文档 / 项目记忆不用带**（git 会带），真正要带只有用户级记忆 4 文件 + GitHub 凭据 + 本机运行时 / 工具链；`backend/.env` 与开发库数据明确不带。
+- 9 节：一页纸 7 步、带 / 不带清单、到公司第一小时命令序列（步骤 0 先查工具链 → clone → `.env`+依赖 → PG/Redis+prisma → 双服务探活 → 三件套自检 → `verify -- --strict`）、家里 vs 公司环境差异核对表、状态快照（60/60 基线 + 现场核命令）、P1~P6 待拍板、三条线、文档索引、10 条红线、WorkBuddy 第一段话术、卡住排查表。
+
+#### 78.4 验收（只改文档，零产品代码改动）
+`python scripts/doc_check.py` → **DOC_CHECK_OK（232 项）**；`python scripts/sync_memory.py --check` → 镜像一致 `sha256=41d54894f33d`；`npm run verify -- --only=check,unit,docs --strict` → **VERIFY_OK 8/8、0 失败 0 跳过、17.6s**（静态门禁 32、前端 161、后端 503、内容表一致、doc_check 232、镜像一致）。全量 **60/60** 为 §77 基线，本轮未重跑全量；公司现场按清单复现。教训：**长期手册与当天快照要分开**，前者机器无关、后者带日期并给现场复核命令；`.verify-logs/` 是本地产物，写交接时必须注明「日志不会跟过去」。
+
+
 

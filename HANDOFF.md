@@ -83,7 +83,7 @@ npm run verify                                 # VERIFY_OK（阶段数与数字�
 - **「恒 502」澄清（23:40 杰哥问）**：§56 的「恒 502」特指 11-12 那次沙箱代理 `11811` 自生成 502、累计约 30 次全败的**环境类持续阻断**；**本地 `git commit` 一直在工具沙箱内照常做，只有 `git push` 达到上限才交本机终端**，文档从无「不在沙箱提交」的说法。
 - **配置分层（11-12 杰哥定，跨机器 / 跨会话必看）**：环境类失败先分清三层，**禁止把 WorkBuddy 沙箱注入的 env 当成本机或项目配置**。① **沙箱 / 工具层**：`HTTPS_PROXY` / `HTTP_PROXY` = 11811（`sandbox-cli.exe`）、`CODEBUDDY_*`，仅当前会话进程有效，**禁止写进仓库任何文件**；② **系统 / 本机层**：注册表 `ProxyServer` = 8693、PG / Redis / JDK 本机安装路径，可读、不得硬编码为产品默认值；③ **项目层（唯一可提交真值）**：`MPK_FRONT_PORT` → `scripts/lib/devConfig.mjs`，`DATABASE_URL` / `REDIS_URL` / `CORS_ORIGIN` → `backend/.env`（模板 `backend/.env.example`）。规则：先核对变量归属，推送失败按 §1 的「一次只读探活 + 最多 5 次原样重试」处理，不换代理 / 不试直连 / 不改 git config；覆盖 env 的 `8693` 解法仅作历史排查记录、不再是执行口径；本地探活 `curl --noproxy '*'`；PG / Redis 用 `redis-cli PING` / `/api/health` 判活（HTTP `curl /` 的 000 不是判据）；诊断只做「读 env / 查端口归属 / 单次 curl 对照」。详见 bug_log §57。
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
-- **不随 git 走，新机器必须补**：`backend/.env`、`backend/prisma/dev.db`、`save_data.json`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。
+- **不随 git 走，新机器必须补**：`backend/.env`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。存档唯一真值在服务端 PostgreSQL（连接串在 `backend/.env`），**不存在** `save_data.json` / `dev.db` 这类本机存档文件。
 
 ## 2. 第 1 步：clone / 拉取（路径有硬约束）
 
@@ -165,7 +165,7 @@ cd "$REPO/backend" && npm run admin -- grant <你的用户名>
 ```
 
 > ⚠️ **不授权就用测试菜单会被风控封号**，这是设计不是 bug。管理员身份只在服务端判定（`User.role='admin'` 或 `.env` 的 `ADMIN_USERNAMES`），前端 `useIsAdmin()` 只是 UI 收敛。
-> `save_data.json` 不存在时 dev/preview 的 `/api/save` 返回 404 属正常。
+> 存档唯一真值在服务端 PostgreSQL；dev/preview 不再提供 `/api/save`，业务请求一律经 `VITE_API_BASE` 打到后端 :3001。
 
 ## 4. 第 3 步：记忆恢复（三层，别搞混）
 

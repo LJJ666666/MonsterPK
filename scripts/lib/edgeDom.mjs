@@ -10,7 +10,7 @@
  * 3 次**（后续尝试换一个 `--user-data-dir`，避免上次进程未完全释放）。断言逻辑
  * 完全不变：如果前端真的挂了，3 次后仍返回错误页，该红还是红，不掩盖问题。
  *
- * 15 个 `scripts/ui_smoke_*.mjs` 的 `runEdge()` 都只调用 `execFileSync(EDGE, args, opts)`，
+ * 14 个 `scripts/ui_smoke_*.mjs` 的 `runEdge()` 都只调用 `execFileSync(EDGE, args, opts)`，
  * 因此只需把 import 别名为 `rawExecFileSync` 并用本函数生成同名 `execFileSync`，
  * 无需逐个改函数体。非 `--dump-dom` 调用直接透传。
  */

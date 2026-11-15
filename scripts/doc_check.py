@@ -987,6 +987,15 @@ checks = [
      and "P5-1 W6.3 收官" in task_text
      and "W6.3 ✅ 2026-11-13" in text(ROOT / ".trae/documents/P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md")
      and "W6.3 DB 计数" in memory_text),
+    # ——— 2026-11-15 测试资产审核：静态门禁 / 冒烟宿主 ———
+    ("测试资产门禁已接入 verify（STAGES + GROUPS 两处齐全）",
+     (ROOT / "scripts" / "test_inventory.mjs").exists()
+     and text(ROOT / "scripts" / "verify.mjs").count("check:inventory") >= 2
+     and "TEST_INVENTORY_RESULT" in text(ROOT / "scripts" / "test_inventory.mjs")),
+    ("Vite 冒烟探针中间件存在且本地存档后门已删",
+     "devProbePlugin" in text(ROOT / "vite.config.ts")
+     and "localSaveMiddleware" not in text(ROOT / "vite.config.ts")
+     and "save_data.json" not in text(ROOT / "vite.config.ts")),
 ]
 
 for name, ok, *detail in checks:

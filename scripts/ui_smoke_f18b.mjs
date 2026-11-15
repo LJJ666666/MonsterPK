@@ -58,7 +58,7 @@ window.onerror = function (msg) { out.errors.push('error:' + msg); finish(); };
 function finish() {
   var t = txt();
   out.modalStillOpen = t.indexOf('兽域演武堂') >= 0;
-  out.arenaReturnBtn = t.indexOf('回程') >= 0;
+  out.arenaActionVisible = t.indexOf('选择行动') >= 0;
   out.fightError = t.indexOf('无法开始挑战') >= 0 || t.indexOf('无法开始') >= 0;
   out.hash = (function () { try { return f.contentWindow.location.hash; } catch (e) { return ''; } })();
   out.path = (function () { try { return f.contentWindow.location.pathname; } catch (e) { return ''; } })();
@@ -107,18 +107,6 @@ function findButton(label) {
 function buttons() {
   var d = doc(); if (!d) return [];
   return [].slice.call(d.querySelectorAll('button'));
-}
-function buttonInRow(text) {
-  var d = doc(); if (!d) return null;
-  var btns = [].slice.call(d.querySelectorAll('button'));
-  for (var i = 0; i < btns.length; i++) {
-    var p = btns[i].parentElement;
-    for (var k = 0; k < 6 && p; k++) {
-      if (p.textContent && p.textContent.indexOf(text) >= 0) return btns[i];
-      p = p.parentElement;
-    }
-  }
-  return null;
 }
 function once(label, fn) {
   return function () { if (completed[label]) return; completed[label] = true; fn(); };
@@ -193,15 +181,18 @@ f.addEventListener('load', function () {
         var fight = allBtns[0];
         if (!fight) { out.errors.push('no-fight-btn'); return finish(); }
         fight.click();
-        // 3) 开局成功：GymModal 关闭 + Arena 出现「回程」
+        // 3) 开局成功：跳到 /arena，且战斗页渲染「演武堂馆主 + 固定行动区」。
+        // UI 改造后「回程」只在未开战空态 / 结算态出现，战斗进行中不渲染（Arena.tsx），
+        // 故与 f18c 对齐改用路径 + 战斗特征判定，避免把 UI 契约变更误判成链路断开。
         waitFor('arena', function () {
-          return txt().indexOf('兽域演武堂') < 0 && txt().indexOf('回程') >= 0;
+          return path() === '/arena' && txt().indexOf('演武堂馆主') >= 0
+            && txt().indexOf('选择行动') >= 0;
         }, once('arena', function () {
           var t2 = txt();
           out.step = 'done';
           out.fightStarted = true;
           out.arenaPath = path();
-          out.arenaReturn = t2.indexOf('回程') >= 0;
+          out.arenaAction = t2.indexOf('演武堂馆主') >= 0 && t2.indexOf('选择行动') >= 0;
           out.scrollWidth2 = overflow();
           finish();
         }));
@@ -270,7 +261,7 @@ async function main() {
     Number.isFinite(p.scrollWidth) && p.scrollWidth <= 375, `scrollWidth=${p.scrollWidth}`);
   check('点「挑战馆主」进入战斗并跳转到 /arena',
     p.fightStarted === true && p.arenaPath === '/arena', brief(p));
-  check('战斗页显示「回程」按钮（确已离开营地）', p.arenaReturn === true, brief(p));
+  check('战斗页显示演武堂遭遇与固定行动区（确已离开营地）', p.arenaAction === true, brief(p));
   check('战斗页 375px 无横向溢出',
     Number.isFinite(p.scrollWidth2) && p.scrollWidth2 <= 375, `scrollWidth=${p.scrollWidth2}`);
 

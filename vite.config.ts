@@ -5,50 +5,40 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 
-function localSaveMiddleware(req: any, res: any, next: any) {
-  if (req.url === '/api/save' && req.method === 'GET') {
-    const savePath = path.resolve(process.cwd(), 'save_data.json');
-    if (fs.existsSync(savePath)) {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(fs.readFileSync(savePath, 'utf-8'));
-    } else {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Not found' }));
-    }
-  } else if (req.url === '/api/save' && req.method === 'POST') {
-    let body = '';
-    req.on('data', (chunk: any) => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body);
-        const savePath = path.resolve(process.cwd(), 'save_data.json');
-        fs.writeFileSync(savePath, data.value, 'utf-8');
-        res.setHeader('Content-Type', 'application/json');
-        res.statusCode = 200;
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Internal Server Error' }));
-      }
-    });
-  } else {
-    next();
-  }
+/**
+ * 开发 / 预览服务器：把 public/_*.html 原样返回（14 个 375px UI 冒烟的 seed / probe 页）。
+ *
+ * 背景（2026-11-15 实证）：Vite 6.4.2 会把任意 *.html 请求当作 SPA 入口交给
+ * transformIndexHtml，public/ 下的 _*.html 在 root 下并不存在，于是回退成 index.html
+ * （带 /@react-refresh 注入）。冒烟拿到的是首页而不是 seed 页，14 套全红且共享
+ * 同一根因「seed 注入登录态」。txt / 字体等 public 静态资源不受影响，故只需放行 HTML。
+ *
+ * 这里注册在 configureServer / configurePreviewServer，执行顺序早于 Vite 内部中间件，
+ * 命中即原样返回、不命中一律 next()；不参与 build，生产产物零影响。
+ * 同时移除本地存档时代对 /api/save 的文件读写：存档唯一真值是后端 3001 的 PostgreSQL，
+ * 前端 api.ts 与全部冒烟都带 API_BASE 直连后端，不存在相对路径命中该中间件的合法调用。
+ */
+function devProbeMiddleware(req: any, res: any, next: any) {
+  const pathname = String(req.url || '').split('?')[0];
+  const m = /^\/(_[\w-]+\.html)$/.exec(pathname);
+  if (!m) return next();
+  const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'public');
+  const file = path.resolve(publicDir, m[1]);
+  if (!fs.existsSync(file)) return next();
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(fs.readFileSync(file, 'utf8'));
 }
 
-function localSavePlugin(): Plugin {
+function devProbePlugin(): Plugin {
   return {
-    name: 'local-save-plugin',
+    name: 'dev-probe-plugin',
     configureServer(server) {
-      server.middlewares.use(localSaveMiddleware);
+      server.middlewares.use(devProbeMiddleware);
     },
-    // 生产预览（vite preview）同样挂载存档接口，避免被 SPA 回退成 index.html
     configurePreviewServer(server) {
-      server.middlewares.use(localSaveMiddleware);
+      server.middlewares.use(devProbeMiddleware);
     }
   };
 }
@@ -118,6 +108,6 @@ export default defineConfig({
         ],
       },
     }),
-    localSavePlugin()
+    devProbePlugin()
   ],
 })

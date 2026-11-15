@@ -1949,3 +1949,28 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 ### 75.7 待杰哥给材料（切云阶段）
 域名 + TLS 证书、正式 keystore（别名 / 密码）、托管 PG/Redis 地址与凭据、渠道包口径（单 / 多渠道）、W9 双实例是否一起上云。补齐后按指南 §7 回归清单重出包。另：低端 ARM 真机性能补测（`性能基线_web.md` §112）仍待 P5-3 阶段。
 
+## §76 2026-11-15 测试脚本审核与补强：救活 14 套冒烟 + 静态门禁
+
+### 76.1 起因与范围
+杰哥要求「回归代码和游戏」，先审核既有测试脚本、找需修正项、评估是否新增，再跑最新一轮。全量只读盘点：`verify.mjs` 58 阶段 / 6 分组；前端 vitest 20 文件 158 例；后端 node:test 47 文件 503 例；后端 E2E 36 套；浏览器冒烟 14 套；文档自检 230 项。详细清单见 `.trae/documents/测试脚本审核与补强清单_2026-11-15.md`。零产品语义 / 数值 / 风控改动。
+
+### 76.2 编排核对：当前全对齐，但无自动门禁
+程序化解析结果 `STAGES=58`、`GROUPS=check:3 unit:2 build:1 e2e:36 smoke:14 docs:2`，`UNGROUPED=[]`、`GHOST_IN_GROUPS=[]`，36 条 `e2e*` npm script 与 14 个 `ui_smoke_*` 全部登记，所有阶段引用的 npm script / 文件均存在；`backend/tests/lib/harness.mjs` 的 `Suite.done()` 失败时确实 `process.exitCode = 1`。**没有漏跑，也没有主路径假绿**，缺的是把这些不变量固化成断言。
+
+### 76.3 两个真故障（都是长期 `--skip=smoke` 掩盖的）
+1. **14 套冒烟整体失效**：首跑 `npm run verify -- --only=smoke --strict` → `通过 0 / 失败 14`，14 套共享 `[FAIL] seed 注入登录态 <!DOCTYPE html>…/@react-refresh`。对照实验：Vite 6.4.2 dev server 对 `public/_mpk_probe_test.html` 返回带 react-refresh 注入的 `index.html`，同目录 `.txt` 返回 `TXT_OK`、字体 200/12512 B —— **只有 `.html` 被 `transformIndexHtml` 接管**，public 下 seed/probe 页全部被 SPA 回退。顺带发现 `vite.config.ts` 仍挂着本地存档时代的 `localSaveMiddleware`（读写 `save_data.json`），全仓只剩 `.gitignore`/HANDOFF/历史日志提到该文件，是 11-13 单档化漏网旧链路。修法：删旧中间件，新增 `devProbeMiddleware`（命中 `^/_[\w-]+\.html$` 且文件存在则原样返回 `text/html` + `no-store`，否则 `next()`），`configureServer` / `configurePreviewServer` 双挂载；14 个冒烟脚本零改动、生产构建零影响。复验 `curl` 返回 `PROBE_OK`、首页仍 200，重跑 13/14 全绿。
+2. **`ui_smoke_f18b` 4 条失败**：探针 `PROBE_DUMP` 显示 `path:"/arena"` 且战斗 UI 完整，却 `timeout:arena`。根因是 `waitFor('arena')` 要求文本含「回程」，而 `Arena.tsx` 只在未开战空态(:138)/结算态(:409)渲染「回程」，战斗进行中只有固定行动区；同样进战斗的 f18c 用 `path() === '/arena' + 战斗特征` 判定故 18/18 全绿。修法：f18b 对齐 f18c（`/arena` + `演武堂馆主` + `选择行动`），断言改为「战斗页显示演武堂遭遇与固定行动区」，**未放宽**（仍要求真进战斗 + 375px 无横溢）。单跑 `UI_SMOKE_F18B_RESULT pass=15 fail=0`。
+
+### 76.4 假绿口径与静态门禁
+- `verify.mjs` 原先「服务没起 → SKIP，非 strict 仍打印 `VERIFY_OK`」是 F1 能藏两个月的机制。改为：被选中却跑不了的阶段默认 `FAIL`，新增 `--allow-missing-services` 显式退回 SKIP；`--strict` 保留「有 SKIP 即 INCOMPLETE」；汇总前给可操作提示。反证：`MPK_FRONT_PORT=5999 node scripts/verify.mjs --only=smoke` → `失败 14 / VERIFY_FAILED / exit 1`；加 `--allow-missing-services` → `跳过 14 / VERIFY_OK / exit 0`。
+- 新增 `scripts/test_inventory.mjs`（29 条静态断言：编排完整性 11 / 防假绿 5 / P5-3 发布配置 10 / 冒烟宿主 3），接入 `check:inventory` 并登记 `GROUPS.check`；`doc_check.py` 加 2 条断言锁死注册与 Vite 修复。
+- 门禁首版按「`.check(` ≥3 且 `.done()`」误报 6 套老 E2E；取证后确认老范式是自定义 `function check()` + `E2E_*_RESULT`/`[SUMMARY]` + `process.exit(1)`，改为兼容两代范式，仍要求 ≥3 断言与失败退出路径，**未放宽为零检查**。另：`e2e_content_matrix.mjs` 尾部 `mapBossStart()` 看似死代码，实际在 :201 调用（函数提升），不是漏跑断言。
+
+### 76.5 补齐覆盖、清理与文档
+- 新增 `src/lib/accountSwitch.test.ts` 3 条（stop 双通道 / 清 token·渲染副本·revision 基线·展示态 / **零网络请求**；`resetAccountState` 保留 token；退出后新档不混旧副本），spy-through mock 保留真实实现。踩坑：`auth.clearToken()` 内部也会 `forgetAllRevisions()`，故该 spy 只断言 `toHaveBeenCalled()` 不锁次数；`beforeEach` 末尾要清调用记录，避免准备动作被计入。
+- 删 `ui_smoke_f18b/f18c` 内嵌 probe 里未使用的 `buttonInRow()`；`edgeDom.mjs` 注释 15→14；`verify.mjs` 头部「六组 E2E」→「36 套 E2E、14 套冒烟」；`HANDOFF.md` 删「新机器必须补 `save_data.json`/`dev.db`」与旧 `/api/save` 404 说明，改为「唯一真值在服务端 PostgreSQL」。
+- 评估后**不新增** E2E（零产品语义改动，36 套已覆盖全玩法）、`perf-*.mjs` 不进 verify（阶段性基线取样）；注册页一屏的 headless 冒烟列为下一轮候选。
+
+### 76.6 验收（只认输出与产物）
+`npm run verify -- --strict` → **VERIFY_OK，通过 59 / 失败 0 / 跳过 0，205.9s**：静态门禁 29/29、前端单测 **161/161**、后端单测 503/503、构建 4.42s、E2E 36 套全绿（W9 42/42、e2e:game 42/42、hardening 122、内容矩阵 47/47）、**14 套浏览器冒烟共 225 项全绿**（f18b 15/15）、文档自检 **232 项** `DOC_CHECK_OK`、记忆镜像一致 `sha256=3249856bfa4e`、收尾清理 14 个测试账号。教训：**不要再默认 `--skip=smoke`**；改 `vite.config.ts` 后必须真跑一次冒烟；UI 文案变更后同步检查依赖该文案的断言，优先用路径 + 稳定结构特征。
+

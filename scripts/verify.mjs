@@ -3,7 +3,7 @@
  * 一键全量验收编排器（2026-11-07）。
  *
  * 背景：项目此前要手动按顺序敲 8~10 条命令（前后端 check/test/build、内容表、
- * 六组 E2E、浏览器冒烟、文档自检），漏跑、顺序错、看错结果都很常见。
+ * 36 套 E2E、14 套浏览器冒烟、文档自检），漏跑、顺序错、看错结果都很常见。
  * 本脚本把它们收敛成一条命令，并给出机器可读报告。
  *
  * 用法：
@@ -11,17 +11,21 @@
  *   node scripts/verify.mjs --only=check,unit # 只跑类型检查与单测（无需服务）
  *   node scripts/verify.mjs --skip=e2e,smoke  # 跳过需要服务的阶段
  *   node scripts/verify.mjs --only=e2e:hardening
- *   node scripts/verify.mjs --strict          # 服务没起时视为失败（CI 用）
+ *   node scripts/verify.mjs --strict          # 有任何 SKIP 也视为不完整（CI 用）
+ *   node scripts/verify.mjs --allow-missing-services # 服务未起时改为 SKIP（离线排查用）
  *
  * 分组别名：
- *   check  前端/后端类型检查 + 内容表一致性
+ *   check  前端/后端类型检查 + 内容表一致性 + 测试资产静态门禁
  *   unit   前端 vitest + 后端 node:test
  *   build  前端构建
  *   e2e    后端端到端（含对抗套件，阶段数以脚本输出为准）
  *   smoke  375px 浏览器冒烟
  *   docs   文档与记忆镜像自检
  *
- * 退出码：0 全绿（允许 SKIP）；1 有失败。
+ * 退出码：0 全绿（允许显式 --skip 的 SKIP）；1 有失败。
+ * 被选中却因服务未起而无法执行的阶段默认判 FAIL（2026-11-15：14 个浏览器冒烟
+ * 长期静默 SKIP 却仍输出 VERIFY_OK，掩盖了 seed 页失效两个月），
+ * 只有 --allow-missing-services 才退回 SKIP；显式 --skip/--only 排除的阶段不受影响。
  * 报告：`.verify-report.json`（已 gitignore），供排查与趋势对比。
  */
 import { spawnSync } from 'node:child_process';
@@ -42,6 +46,8 @@ const PY = IS_WIN ? 'python' : 'python3';
 
 /** @type {Stage[]} */
 const STAGES = [
+  // 纯静态门禁：不依赖任何服务，先跑，编排/假绿/P5-3 配置有问题时立刻红。
+  { id: 'check:inventory', name: '测试资产与构建配置静态门禁', cwd: ROOT, cmd: 'node', args: ['scripts/test_inventory.mjs'] },
   { id: 'front:check', name: '前端类型检查', cwd: ROOT, cmd: NPM, args: ['run', 'check'] },
   { id: 'front:test', name: '前端单测（vitest）', cwd: ROOT, cmd: NPM, args: ['test'], timeout: 300_000 },
   { id: 'front:build', name: '前端构建', cwd: ROOT, cmd: NPM, args: ['run', 'build'], timeout: 300_000 },
@@ -126,7 +132,7 @@ const STAGES = [
 ];
 
 const GROUPS = {
-  check: ['front:check', 'back:check', 'back:content'],
+  check: ['check:inventory', 'front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
   e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
@@ -146,6 +152,8 @@ const onlyRaw = valueOf('only');
 const skipRaw = valueOf('skip');
 const strict = argv.includes('--strict');
 const quiet = argv.includes('--quiet');
+/** 默认「服务未起 → 判失败」；只有显式声明才退回旧的 SKIP 行为。 */
+const allowMissingServices = argv.includes('--allow-missing-services');
 /** 默认在跑完 E2E 后统一清理测试账号；--no-clean 可保留以便排查。 */
 const noClean = argv.includes('--no-clean');
 
@@ -190,6 +198,8 @@ function summarize(out) {
   // 后端 E2E：两代格式并存（E2E_RESULT pass=N / [SUMMARY] 39/39 通过）
   const mE2E = out.match(/E2E\w*_RESULT pass=(\d+) fail=(\d+)/);
   if (mE2E) return `${mE2E[1]} 项通过${Number(mE2E[2]) ? `，${mE2E[2]} 失败` : ''}`;
+  const mInventory = out.match(/TEST_INVENTORY_RESULT pass=(\d+) fail=(\d+)/);
+  if (mInventory) return `${mInventory[1]} 项通过${Number(mInventory[2]) ? `，${mInventory[2]} 失败` : ''}`;
   const mSummary = out.match(/\[SUMMARY\] (\d+)\/(\d+) 通过/);
   if (mSummary) return `${mSummary[1]}/${mSummary[2]} 通过`;
 
@@ -322,7 +332,9 @@ for (const stage of stages) {
     const reason = stage.need === 'both'
       ? `需要前端 ${FRONT_PORT} 与后端 3001 同时在线`
       : `需要${stage.need === 'front' ? `前端 ${FRONT_PORT}` : '后端 3001'}在线`;
-    if (strict) {
+    // 显式 --skip/--only 排除的阶段根本不在这里；走到这的是「被选中却跑不了」。
+    // 默认判 FAIL，避免整套冒烟静默失效还输出 VERIFY_OK。
+    if (strict || !allowMissingServices) {
       results.push({ id: stage.id, name: stage.name, status: 'FAIL', ms: 0, metric: reason, out: '' });
       console.log(`✗ ${stage.name} — ${reason}`);
     } else {
@@ -373,6 +385,11 @@ const passed = results.filter((r) => r.status === 'PASS').length;
 const failed = results.filter((r) => r.status === 'FAIL').length;
 const skipped = results.filter((r) => r.status === 'SKIP').length;
 const totalMs = results.reduce((a, r) => a + r.ms, 0);
+
+const missingServices = results.filter((r) => r.status === 'FAIL' && /需要.*在线/.test(r.metric)).length;
+if (missingServices > 0 && !allowMissingServices) {
+  console.log(`\n提示：${missingServices} 个阶段因服务未启动判失败。只跑离线部分用 --only=check,unit,docs 或 --skip=smoke；确需跳过用 --allow-missing-services。`);
+}
 
 console.log('\n══ 验收汇总 ══');
 for (const r of results) {

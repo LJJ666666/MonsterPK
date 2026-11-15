@@ -80,18 +80,6 @@ function buttons() {
   var d = doc(); if (!d) return [];
   return [].slice.call(d.querySelectorAll('button'));
 }
-function buttonInRow(text) {
-  var d = doc(); if (!d) return null;
-  var btns = [].slice.call(d.querySelectorAll('button'));
-  for (var i = 0; i < btns.length; i++) {
-    var p = btns[i].parentElement;
-    for (var k = 0; k < 6 && p; k++) {
-      if (p.textContent && p.textContent.indexOf(text) >= 0) return btns[i];
-      p = p.parentElement;
-    }
-  }
-  return null;
-}
 function storyAdvance() {
   var d = doc(); if (!d) return null;
   var all = [].slice.call(d.querySelectorAll('button'));

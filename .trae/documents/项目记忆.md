@@ -11,11 +11,13 @@
 - **2026-11-15 追加（bug_log §74）✅**：注册页紧凑态一屏（687→616）、删 `.safe-top` 24px 兜底、修换账号残留旧渲染副本（404 清空 + `signOut()`）；`npm test` 158/158，真机换账号全流程 + UI 建档复验通过。
 - **P5-3 本机可做部分 ✅（2026-11-15，bug_log §75）**：`android/gradle.properties` 管版本号（`-P` 覆盖）；`app/build.gradle` release 签名只读 `MPK_KEYSTORE_FILE` / `MPK_KEYSTORE_PASSWORD` / `MPK_KEY_ALIAS` / `MPK_KEY_PASSWORD`，缺材料 `assembleRelease` fail-closed（不产 unsigned）；main manifest 禁明文、仅 `src/debug` 叠加放行；正式包不带 `MPK_DEV_APK`（默认 androidScheme=https → origin `https://localhost`，CORS 必须列它），`VITE_API_BASE` 一处覆盖 REST+WS。权威 `apk_build_guide.md`（含产物取证与发布回归清单）。**下一步待杰哥给域名 + TLS + 正式 keystore + 托管 PG/Redis 再切云出正式渠道包**；待排期 UX：剧情 intro 每次进 Camp 重播（`Camp.tsx:167`）。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/临时态，**Redis 不存权益真值**。权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
+- **2026-11-15 测试资产审核与补强 ✅（bug_log §76）**：救活 14 套 UI 冒烟、修 f18b 过时断言、verify 服务缺失改判 FAIL、新增 `check:inventory` 静态门禁 + 账号边界单测；`verify -- --strict` **59/59、0 跳过**（前端 161 / 后端 503 / doc_check 232 / 冒烟 225 项）。**不要再默认 `--skip=smoke`**。
 
 ## 2. 技术栈 / 入口 / 测试
 - 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`；`useGameStore.ts` **无 persist**，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=11，**BattleState 不进存档**。
 - 后端 Fastify4+Prisma5+Postgres16+zod+tsx；模型含 `Room`/`RoomQuotaDaily`/`BossDamageEvent`/`BossRewardGrant`/`CoopRewardGrant`/`BadgeGrant`/`AchievementGrant`，迁移链 12 条，**改 schema 前停 :3001**（Windows DLL 文件锁）。`Save.data` 存 JSON 文本、`revision` 独立列。
 - 测试：前端 vitest `src/**/*.test.{ts,tsx}`（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。
+- 测试资产（§76 审核）：`verify.mjs` **59 阶段 / 6 分组**（`check:inventory` 纯静态门禁排最前）；前端 **161**、后端 **503**、E2E **36** 套（老 6 套自定义 `check()`+`_RESULT`/`[SUMMARY]`，新 30 套共享 `Suite.done()`，失败都置 exitCode=1）、UI 冒烟 **14** 套 375px headless、doc_check **232**。`scripts/test_inventory.mjs` 锁编排对齐 / 防假绿 / P5-3 发布配置 / 冒烟宿主；新增阶段必须改 `STAGES`+`GROUPS` 两处。
 
 ## 3. 改代码前必读硬约束
 - 新增持久化字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `saveValidator.ts` 的 `EXPECTED_SAVE_VERSION`。**前端已无 migrate**，结构校验只在服务端。
@@ -29,6 +31,7 @@
 
 ## 4. 运行 / 环境 / Git
 - 前端 `npm run dev -- --host 0.0.0.0 --port $MPK_FRONT_PORT --strictPort`（默认 5173，本机 5174）；后端 `cd backend && npm run dev`（3001）。换会话不自动恢复，先 `curl --noproxy '*'` 探活。校验 `npm run verify`（新增阶段改两处 `STAGES`+`GROUPS`，漏 `GROUPS` 静默少跑）；`npm run clean:e2e`；`npm run admin`。node 22.22.2，remote `LJJ666666/MonsterPK.git`。新机：`cp .env.example .env`→前后端 `npm install`→`prisma migrate deploy`+`generate`→`npm run dev`。
+- **verify 口径（§76 起）**：全量用 `npm run verify -- --strict`，前后端都要在线，59 阶段含 14 套冒烟；服务缺失默认判 FAIL，只有 `--allow-missing-services` 才退回 SKIP；`--skip=smoke` 仅用于明确离线排查，**不得当默认**。改 `vite.config.ts` 后必须真跑一次 `--only=smoke`。
 - Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾写验收数字）→push master→核对 `HEAD==origin/master`、工作树干净、tag 全在远端。推送失败只读探活 + 最多 5 次原样重试（不换代理/不改 config），持续 502 交本机 `push-mpk.bat`（`fetch`+`push master --tags`，**不含 add/commit**）。**Git 状态汇报只给一句话**。
 - **配置分层硬约束（§57，勿回退）**：沙箱层（`HTTPS_PROXY=11811` / `CODEBUDDY_*`）≠ 系统层（注册表 `ProxyServer=8693`、本机 PG/Redis/JDK 路径）≠ 项目层（`MPK_FRONT_PORT`→`devConfig.mjs`；`DATABASE_URL`/`REDIS_URL`/`CORS_ORIGIN`→`backend/.env`）。沙箱值禁写仓库，覆盖 env 只用一次性前缀，**项目层是唯一可提交真值**。出公网只能走注入代理（直连被墙），代理对 GitHub 间歇 502、对 npm 稳定；只共享 localhost（PG/Redis 用 127.0.0.1）。git 502 恒现交本机 `push-mpk.bat`（只读探活 + 最多 5 次原样重试，不换代理/不试直连/不改 config）。
 - **本机 PowerShell + GBK（§61，勿回退）**：① npm script 不许裸 glob（`"tests/**/*.test.ts"` 带引号交 Node 22 glob）；② Python stdout 必须 `reconfigure(errors="replace")`；③ 保留 `server.watch.ignored: ['**/public/_*.html']`；④ 不测选主的双实例 E2E 子进程必须 `MPK_DISABLE_SWEEP=1`（残留 `lock:sweep:global` 60s TTL 挡 :3001）；⑤ 沙箱冒烟用 puppeteer 的 `chrome-headless-shell`（`EDGE_PATH`）。`authority.expected` 追随落库值，并发测试两路候选值必须相邻递减。
@@ -49,6 +52,7 @@
 - 通用：冒烟 `\d` 被吃、等「元素可用」非「存在」、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖。**E2E 一律 `127.0.0.1` 不用 `localhost`**（Node 首选 ::1，后端只听 IPv4 → 全 ABORT）；`harness.BASE` 默认 127，但 **`ORIGIN` 必须留 `localhost`**（WS 握手 Origin，CORS 精确匹配）。
 - **APK WebView 联调**：`androidScheme:"http"` → WebView origin = `http://localhost`（无端口），`API_BASE` 默认 `http://localhost:3001`；`CORS_ORIGIN` 必须精确列 `http://localhost`，`isOriginAllowed` **精确匹配 fail-closed**（杰哥 2026-11-15 拍板删 `*`）。dev APK 需 `usesCleartextTraffic="true"`；StatusBar 由 `MPK_DEV_APK=1 npx cap sync android` 烘焙（`Style.Dark="DARK"` = 深底浅图标，勿按 README 改 LIGHT）。设备 `localhost:3001` 靠 `adb reverse`，断连测试 `--remove-all`。
 - **健康探测禁缓存**：`api.health()` 不带 `cache:"no-store"` 时断网后 Chromium 返回缓存 200 → 假在线；现强制 `no-store` + `AbortController` 超时 + 防堆积，`apiHealth.test.ts` 锁死。流程踩坑复盘 §71/§73。
+- **冒烟宿主（§76，勿回退）**：Vite 6 会把任意 `*.html` 请求当 SPA 入口 transform，`public/_*.html` 的 seed/probe 页必须由 `devProbePlugin` 原样返回（dev/preview 双挂载）；`localSaveMiddleware` / `save_data.json` 本地存档旧链路已删净。UI 文案变更要同步检查依赖该文案的冒烟断言（优先路径 + 稳定结构特征）；`Arena.tsx` 的「回程」只在空态/结算态渲染，别拿它判定「进入战斗」。
 
 ## 8. 收官索引与验收锚点（勿删）
 - **doc_check 结构锚点（2026-11-15 精简时误删过，勿再删）**：P4-0 写入并发控制（规范 §21）、P4-1 ✅、**P4-2 五阶段全部完成**（P4-2a ✅ / P4-2b ✅ / P4-2c ✅ / P4-2d ✅ / P4-2e ✅，排期契约 `P4-2_多人玩法排期_2026-11-07.md`，下一步由 F16 → F04 推进）；F01/F02 已偿还、F17 单档化已实现并偿还；P5-1 / F10 共享存储迁移评估 → 实施设计定稿（W0 起解除「不改产品代码」）；P5-1 W4 ✅（50/50）、W6.2 事务边界、W6.3 DB 计数。

@@ -2020,5 +2020,11 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 #### 78.4 验收（只改文档，零产品代码改动）
 `python scripts/doc_check.py` → **DOC_CHECK_OK（232 项）**；`python scripts/sync_memory.py --check` → 镜像一致 `sha256=41d54894f33d`；`npm run verify -- --only=check,unit,docs --strict` → **VERIFY_OK 8/8、0 失败 0 跳过、17.6s**（静态门禁 32、前端 161、后端 503、内容表一致、doc_check 232、镜像一致）。全量 **60/60** 为 §77 基线，本轮未重跑全量；公司现场按清单复现。教训：**长期手册与当天快照要分开**，前者机器无关、后者带日期并给现场复核命令；`.verify-logs/` 是本地产物，写交接时必须注明「日志不会跟过去」。
 
+#### 78.5 订正「用户级记忆 4 文件必须带」（杰哥 00:28 追问）
+- 逐个读文件取证：根 `~/.workbuddy/MEMORY.md`（581 B）文件头自述「权威在 personal/MEMORY.md，本文件仅用于兼容环境自检与旧版读取」，内容只是权威文件 4 条口径的子集；`IDENTITY.md`（582 B）是未填写模板（"Fill this in during your first conversation"）；`SOUL.md`（1792 B）是 WorkBuddy 默认 `SOUL.md Template`；**只有 `user-*-personal/MEMORY.md`（2290 B）含完整硬规则**。
+- `scripts/check_home_env.py` 的 user-level memory 段检查 4 个路径，缺 1~3 只给 `[WARN]`（非 FAIL，退出码 0）；公司新装 WorkBuddy 会自建前 3 个模板；云端记忆跟账号但会被概括重写，不含「最多 5 次 / Git 一句话」这类可判定硬条件；个性化指令全文在 `HANDOFF.md §4.1`（随 git）。
+- **结论：只需带 1 个权威文件**，另 3 个可选（一起拷只为自检全 `[OK]`）。已订正 `HANDOFF.md §1 / §4 表格与段落 / §5 话术` 与 `带回公司_交接清单_2026-11-16.md §0 / §1.2 / §8`。教训：**交接清单里的「必带项」要逐个读内容验证，别照抄旧手册口径**。
+- 同轮 Temp 目录（12G）清理请求：按个人文件安全规则本轮**只做只读盘点，零删除**，等待明确确认具体类别后再按小批量 + 回收站执行。
+
 
 

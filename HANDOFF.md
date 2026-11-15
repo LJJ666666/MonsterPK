@@ -85,7 +85,7 @@ npm run verify -- --strict                     # VERIFY_OK 且 0 跳过（阶段
 - **随 git 走**：全部源码、`backend/`、`.trae/documents/`（PRD / 路线图 / 任务表 / bug_log / 后端规范 / 项目记忆镜像）、`.workbuddy/memory/`（MEMORY.md + 每日日志）、`scripts/`、`.impeccable.md`、`apk_build_guide.md`、锁文件、`HANDOFF.md`。
 - **不随 git 走，新机器必须补**：`backend/.env`、`node_modules/`（前后端各一份）、`.vtmp/`、`C:\Users\<用户名>\.workbuddy\`（用户级记忆）。存档唯一真值在服务端 PostgreSQL（连接串在 `backend/.env`），**不存在** `save_data.json` / `dev.db` 这类本机存档文件。
 - **另外四类本机资产，换机器最容易漏**（2026-11-15 补）：① **GitHub 凭据**（PAT / 凭据管理器 / `gh auth login`，clone 与 push 都要）；② **本机运行时**：PostgreSQL 16 服务、Redis、`start-mpk-runtime.bat`（仓库外，杰哥自己双击）、`start-mpk-backend.bat`（仓库根，随 git）；③ **Android 工具链**：JDK 21、Android SDK（android-36）、雷电模拟器 + adb、离线 Gradle 8.14.3 分发包（版本与核对命令见 `apk_build_guide.md §1`）；④ **发布材料**：正式 keystore 与 `mpk-deploy/handover.md` / `secrets.env`（仓库外，模板见 `.trae/documents/上线部署_杰哥配合清单_2026-11-15.md §10`）。**凭据、keystore、`secrets.env` 一律不入库、不贴聊天**；`*.p12` 目前没有 gitignore 规则，交接目录必须放仓库外。
-- **换机器当天带什么**：随 git 的东西不用带，`git clone` 即全量过去；真正要带的只有「用户级记忆 4 文件 + GitHub 凭据 + 本机运行时/工具链（可在新机重装，但版本要核）」。逐项清单与到公司第一小时的命令序列见 `.trae/documents/带回公司_交接清单_2026-11-16.md`；`backend/.env` 建议**在新机由 `.env.example` 重新生成**，不要拷开发机的（含 `JWT_SECRET`，且连接串指向另一台机器）。
+- **换机器当天带什么**：随 git 的东西不用带，`git clone` 即全量过去；真正要带的只有「**`user-*-personal/MEMORY.md` 这 1 个权威文件** + GitHub 凭据 + 本机运行时/工具链（可在新机重装，但版本要核）」。2026-11-16 逐个读文件取证：`~/.workbuddy/MEMORY.md` 只是「兼容环境自检与旧版读取」的镜像（文件头自己写明权威在 personal 目录），`IDENTITY.md` / `SOUL.md` 是**未填写的默认模板**（公司新装 WorkBuddy 会自动生成同款），带它们只为让 `check_home_env.py` 少一条 `[WARN]`，不是必需；真正含硬规则（称呼 / Git 一句话 / 不为兼容留后门 / 先查再猜）的只有 personal 目录下那份。逐项清单与到公司第一小时的命令序列见 `.trae/documents/带回公司_交接清单_2026-11-16.md`；`backend/.env` 建议**在新机由 `.env.example` 重新生成**，不要拷开发机的（含 `JWT_SECRET`，且连接串指向另一台机器）。
 
 ## 2. 第 1 步：clone / 拉取（路径有硬约束）
 
@@ -180,10 +180,17 @@ cd "$REPO/backend" && npm run admin -- grant <你的用户名>
 |---|---|---|---|
 | 云端记忆（偏好画像） | WorkBuddy 账号 | 跟账号 | **用同一个 WorkBuddy 账号登录**即自动注入（每晚自动整理，只装身份 / 偏好 / 当前关注，不放硬规则）；要找回旧讨论用 `conversation_search` |
 | 项目级工作记忆 | `<项目>/.workbuddy/memory/` + `.trae/documents/` | ✅ | clone 后自动在，**用 WorkBuddy 打开该项目目录**即注入 |
-| 用户级长期记忆 | `C:\Users\<用户名>\.workbuddy\` | ❌ | 手动搬下面 4 个文件，或用第 5 节话术兜底 |
+| 用户级长期记忆 | `C:\Users\<用户名>\.workbuddy\` | ❌ | **只搬下面第 4 个权威文件**（另 3 个可选，是模板 / 兼容镜像），或用第 5 节话术兜底 |
 | **WorkBuddy 个性化指令** | `C:\Users\<用户名>\.workbuddy\app\app-config.json` 的 `personalization` | ❌ | **按「要粘一次」准备**（未证实随账号同步）：设置 → 个性化 → 「给 WorkBuddy 的指令」，文案见 §4.1 |
 
-用户级 4 个文件（`<用户名>` 与 `user-*-personal` 目录名以**本机实际生成**的为准）：
+用户级 4 个文件（`<用户名>` 与 `user-*-personal` 目录名以**本机实际生成**的为准）；**2026-11-16 逐个读文件取证后，只有第 4 个必须带**：
+
+| # | 路径 | 实际内容 | 要带吗 |
+|---|---|---|---|
+| 1 | `...\.workbuddy\MEMORY.md`（根） | 文件头自述「仅用于兼容环境自检与旧版读取」的镜像，只有 4 条沟通口径（第 4 个的子集） | 可选 |
+| 2 | `...\.workbuddy\IDENTITY.md` | 未填写的默认模板（"Fill this in during your first conversation"） | 不必带 |
+| 3 | `...\.workbuddy\SOUL.md` | WorkBuddy 默认 `SOUL.md Template`，零用户数据 | 不必带 |
+| 4 | `...\.workbuddy\user-*-personal\MEMORY.md` | **权威硬规则**：称呼 / Git 一句话 / 不为兼容留后门 / 先查再猜 / 项目边界 | **必带** |
 
 ```
 C:\Users\<用户名>\.workbuddy\MEMORY.md
@@ -192,9 +199,11 @@ C:\Users\<用户名>\.workbuddy\SOUL.md
 C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 ```
 
+`check_home_env.py` 会检查这 4 个路径是否都存在，缺 1~3 只给 `[WARN] user-level memory incomplete`（退出码仍为 0）。想让自检全 `[OK]` 就把 4 个一起拷（都是几 KB 文本，成本近乎为零）；公司新装 WorkBuddy 也会自动生成 2/3 的模板。**云端记忆跟账号走，但会被概括重写、不含这些可判定的硬规则**，所以第 4 个文件仍然要带。
+
 搬运方式：网盘 / 文件传输 / 公司云盘均可，**不要用 exFAT U 盘**。若只能用 U 盘，传前后各算一次 `sha256sum` 比对，防止静默损坏。目标机器放到对应用户目录，**把内容合并进去，别整文件覆盖**（目标机器可能已有其他项目偏好）。两边记忆镜像改任一侧后跑 `python scripts/sync_memory.py`（`--reverse` 反向 / `--check` 只校验）。
 
-> **兜底**：就算这 4 个文件没带，第 5 节话术里已写全称呼、语气和硬约束，新会话照样能进入状态。
+> **兜底**：就算这 4 个文件没带，第 5 节话术里已写全称呼、语气和硬约束，新会话照样能进入状态；`HANDOFF.md §4.1` 的四条常驻指令也在仓库里，不用另外带文件。
 
 ### 4.1 换机器必补：WorkBuddy 个性化指令
 
@@ -232,8 +241,9 @@ C:\Users\<用户名>\.workbuddy\user-*-personal\MEMORY.md
 2. 称呼我「杰哥」，你自称「tx」。中文回复、结论先行、一轮多问就分点逐条答；
    给可复现证据（命令输出、哈希、日志原文），不接受「应该是因为」；
    不要半成品，做不到或不确定就直接说。
-3. 如果本机 ~/.workbuddy 下没有用户级记忆，请把第 2 条的偏好写进本机用户级
-   MEMORY.md，之后长期遵守；并确认设置 → 个性化 → 「给 WorkBuddy 的指令」里
+3. 把带过来的 user-*-personal/MEMORY.md 内容合并进本机同路径文件（别整文件覆盖），
+   之后长期遵守；若没带过来，就把第 2 条的偏好写进本机用户级 MEMORY.md。
+   并确认设置 → 个性化 → 「给 WorkBuddy 的指令」里
    §4.1 那四条已在（没带过来就原样粘一次，check_home_env.py 会用 WARN 提示）。
 4. 复述三件事，确认记忆已加载：
    ① 当前做到哪一步、下一步候选是什么（等杰哥排期，别自己开工）；

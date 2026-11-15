@@ -1,104 +1,134 @@
-# 云端沙盒 Capacitor + Android SDK 编译 APK 指南
+# APK 构建与 Release 发布指南（P5-3）
 
-因为云端沙盒（Workspace）环境每次长时间休眠后会被重置，且默认不包含 Android SDK、Java 和 Gradle 环境。因此如果需要在云端直接编译打包 APK，需要通过以下完整流程从零配置。
+> 唯一权威入口。旧「云端沙盒 apt-get 装 JDK / sdkmanager 拉 SDK / gradlew 联网 / 18080 代理」流程
+> 已废弃：2026-11-14 实测 gradlew 下载发行包卡在 60% 约 1h43m，本机直调离线 Gradle 只需 8~13s（bug_log §71）。
 
-## 1. 安装基础环境 (Java 21)
+## 0. 三条硬约束
 
-云端可能预装了不兼容的高版本 Java (如 25)，因此需要明确安装 JDK 21 并进行环境配置：
+1. **凭据不入库**：keystore 与密码只从环境变量 / 用户级 `~/.gradle/gradle.properties` 读，仓库里只有模板与说明。
+2. **正式包零调试选项**：release 不带 `MPK_DEV_APK`；`android/app/src/main/AndroidManifest.xml` 默认禁明文，只有 `src/debug/AndroidManifest.xml` 叠加放行。
+3. **业务地址构建期注入**：`VITE_API_BASE` 必须是 HTTPS 域名。`src/lib/api.ts` 的 `API_BASE` 同时供 REST 与 `wsUrl()` 使用（https → wss），一处注入覆盖两条链路，`ws.test.ts` 已锁死。
+
+## 1. 工具链（先核再用，勿猜）
+
+本机 Windows 已装 JDK 21 / Android SDK（android-36）/ Gradle 8.14.3 发行包缓存，具体路径见
+`.workbuddy/memory/MEMORY.md` §5。开工前一条命令确认存在：
 
 ```bash
-apt-get update && apt-get install -y openjdk-21-jdk unzip wget
-export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-export PATH=$JAVA_HOME/bin:$PATH
+ls -d "$JAVA_HOME" "$ANDROID_HOME" \
+  "$HOME/.gradle/wrapper/dists/gradle-8.14.3-all/99x8n45tzh0zr4vi9rz6hydd7/gradle-8.14.3/bin/gradle"
 ```
 
-## 2. 安装并配置 Android SDK
-
-沙盒中默认没有 SDK，必须通过官方命令行工具拉取：
+一次性设置（**不要**写 `android/local.properties`，不要改 `gradle-wrapper.properties` 去联网）：
 
 ```bash
-mkdir -p /opt/android-sdk/cmdline-tools
-cd /opt/android-sdk/cmdline-tools
-wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-unzip -q cmdline-tools.zip
-mv cmdline-tools latest
-rm cmdline-tools.zip
-
-# 接受所有霸王条款许可证
-yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-
-# 安装平台工具、指定 Android 版本的 SDK (例如 36) 和 Build-tools (例如 35.0.0)
-/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
-
-# 导出环境变量
-export ANDROID_HOME=/opt/android-sdk
+export JAVA_HOME="<JDK21 绝对路径>"
+export ANDROID_HOME="<Android SDK 绝对路径>"
+export PATH="$HOME/.gradle/wrapper/dists/gradle-8.14.3-all/99x8n45tzh0zr4vi9rz6hydd7/gradle-8.14.3/bin:$JAVA_HOME/bin:$PATH"
 ```
 
-## 3. Capacitor 项目初始化
+所有 Gradle 命令一律 `gradle -p android <task> --offline --console=plain --no-daemon`。
 
-将 Web 项目构建后与原生 Android 工程同步：
+## 2. 前端产物与 Capacitor 同步
 
 ```bash
-cd /workspace
-# 本项目已包含 Capacitor 依赖（见 package.json），通常无需重复安装
-npx cap init "游戏名" "com.game.package" --web-dir dist
-
-# 确保前端产物存在
+# debug（本地 adb reverse 回连 http://localhost:3001）
 npm run build
+MPK_DEV_APK=1 npx cap sync android
 
-# 添加或同步 android 目录
-rm -rf android  # 如果环境混乱，可以先删掉重建
-npx cap add android
-# 如果已经 add 过，就直接使用： npx cap sync
+# release（生产 HTTPS 域名；域名由杰哥切云时提供）
+VITE_API_BASE=https://api.example.com npm run build
+npx cap sync android          # 注意：不带 MPK_DEV_APK
 ```
 
-## 4. 解决 Gradle 网络墙与依赖超时问题 (关键)
+`MPK_DEV_APK=1` 只影响 `capacitor.config.ts` 生成的 `server` 段（http scheme / cleartext / mixed content）。
+正式包不带这段，Capacitor 默认 `androidScheme=https`（源码实证 `CapConfig.java` 的
+`CAPACITOR_HTTPS_SCHEME`），WebView origin = `https://localhost`。
 
-由于沙盒处于特定的网络环境中，Gradle 自动拉取发行包和访问 Google Maven 仓库会超时失败，必须通过代理或手动下载的方式解决。
+取证：`unzip -p <apk> assets/capacitor.config.json` → debug 应有 `server` 段，release 必须没有。
 
-### 4.1 手动配置 Gradle 发行版离线包
-```bash
-cd /workspace
-# 下载 Gradle (如果超时可以换用腾讯云镜像)
-wget -q --show-progress https://services.gradle.org/distributions/gradle-8.14.3-all.zip || wget -q --show-progress https://mirrors.cloud.tencent.com/gradle/gradle-8.14.3-all.zip
+## 3. 版本号
 
-# 修改 wrapper 属性，指向本地文件
-cd /workspace/android
-sed -i "s|distributionUrl=.*|distributionUrl=file:///workspace/gradle-8.14.3-all.zip|g" gradle/wrapper/gradle-wrapper.properties
+唯一真值在 `android/gradle.properties`：
+
+```properties
+mpkVersionCode=1
+mpkVersionName=1.0
 ```
 
-### 4.2 穿透代理执行编译
-执行 `./gradlew assembleDebug` 时，需要带上沙盒的本地代理端口（例如 `18080`），并建议关闭守护进程避免卡死：
-
-```bash
-cd /workspace/android
-# 清理缓存与停掉多余的守护进程防卡死
-./gradlew --stop
-rm -rf ~/.gradle/caches
-
-# 开始编译（建议在同一个终端“同步阻塞”等待，直到看到 BUILD SUCCESSFUL）
-./gradlew assembleDebug -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=18080 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=18080 --no-daemon
-```
-
-### 4.3 Release 产物（可选）
-
-如果需要 Release 包（未签名，仅验证流程），可用：
+发版可用 `-P` 覆盖，不必改文件：
 
 ```bash
-cd /workspace/android
-./gradlew assembleRelease -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=18080 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=18080 --no-daemon
+gradle -p android assembleRelease --offline --console=plain --no-daemon \
+  -PmpkVersionCode=2 -PmpkVersionName=1.0.0
 ```
 
-## 5. 提取产物
+用 `aapt dump badging <apk> | head -3` 核产物里的 `versionCode` / `versionName`。
 
-当看到 `BUILD SUCCESSFUL` 后，APK 即打包完成。将深层目录中的 APK 提取到根目录方便下载：
+## 4. Release 签名（fail-closed）
 
 ```bash
-cp /workspace/android/app/build/outputs/apk/debug/app-debug.apk /workspace/游戏-测试版.apk
+export MPK_KEYSTORE_FILE="<仓库外的 keystore 绝对路径>"
+export MPK_KEYSTORE_PASSWORD="<store password>"
+export MPK_KEY_ALIAS="<key alias>"
+export MPK_KEY_PASSWORD="<key password>"
+
+gradle -p android assembleRelease --offline --console=plain --no-daemon -PmpkVersionCode=2 -PmpkVersionName=1.0.0
+# 产物：android/app/build/outputs/apk/release/app-release.apk
 ```
 
----
-**避坑总结：**
-- **网络墙问题**：永远不要干等 Gradle 自己下载，必须配合 `wget` 本地替换并加上 `proxyHost` 代理运行。
-- **JDK 版本不匹配**：Gradle 报错 `Unsupported class file major version` 时，通常是因为沙盒内的默认 JDK 太高或者太低。必须强制使用 `export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`。
-- **守护进程假死**：`--no-daemon` 或者在编译前执行 `./gradlew --stop` 可以避免因为守护进程内存溢出或卡死导致的构建无限期挂起。
+`android/app/build.gradle` 在 task 图就绪时校验四要素与 keystore 文件存在性：
+**缺任一项直接 `BUILD FAILED`，绝不产出 unsigned APK**（避免把未签名包误当渠道包）。debug 构建不受影响。
+
+验签：
+
+```bash
+java -jar "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" verify --print-certs \
+  android/app/build/outputs/apk/release/app-release.apk
+```
+
+## 5. 切云时的后端配套
+
+`backend/.env`（项目层真值，gitignored）：
+
+```dotenv
+CORS_ORIGIN="https://app.example.com,https://localhost"
+```
+
+- 第二项是 Capacitor Android WebView 的默认 origin，**漏配会让正式包所有请求被拒**。
+- HTTP CORS 与 WS 握手 Origin 共用这份逗号分隔清单，精确匹配；`'*'` 不是通配（杰哥 2026-11-15 拍板删通配，fail-closed）。
+- 同时换：`JWT_SECRET`（随机长串）、`DATABASE_URL` / `REDIS_URL`（托管实例）、`JWT_TTL` 缩短；
+  TLS 终止在反代 / CDN，WS `Upgrade` 必须透传（W9 `reverseProxy.mjs` 已具备）。
+- 发奖 / 风控口径不变，切云只改地址与凭据，不改产品语义。
+
+## 6. 产物取证清单（每次出包逐条核，只认产物不认日志尾）
+
+| 项 | 命令 / 判据 |
+|---|---|
+| 产物新鲜度 | APK mtime + sha256；debug 增量构建内容未变时 mtime 可能保留，以内容为准 |
+| 版本号 | `aapt dump badging <apk>` → `versionCode` / `versionName` 与本次发版一致 |
+| 明文 | `aapt dump xmltree <apk> AndroidManifest.xml \| grep -i cleartext` → release **必须 NONE**，debug 必须 `0xffffffff` |
+| 调试配置 | `unzip -p <apk> assets/capacitor.config.json` → release 无 `server` 段 |
+| 业务地址 | `unzip -p <apk> "assets/public/assets/index-*.js" \| grep -o "https://api.example.com"` → release 命中 |
+| 签名 | `apksigner verify --print-certs` 通过，证书 DN 与正式 keystore 一致 |
+| 权限 / 包体 | `aapt dump badging <apk> \| grep -E "uses-permission|application-label"`；当前仅 `INTERNET`，包体记入发版记录 |
+
+## 7. 发布前回归清单
+
+- `npm run verify -- --skip=smoke`（前端 dev 未起时跳过浏览器冒烟）；条件允许跑全量含 UI 冒烟。
+- 真机逐项：登录 → 建档 → 野外 → 战斗 → 捕获 → 队伍 → 冷启动拉服务端存档 → WS 实时 → 顶号 → 断网重连。
+- CORS 反证：把 Origin 改成未列入的值，HTTP 与 WS 都必须拒绝。
+- 低端 ARM 真机性能补测（`性能基线_web.md` §112 遗留项，P5-3 阶段补）。
+- 发布前用正式域名 + 正式 keystore 重出包；**测试证书 / 占位域名不得进渠道包**。
+
+## 8. 2026-11-15 实测记录（本机跑通，非可发布包）
+
+| 变体 | capacitor.config.json | cleartext | 版本 | bundle API_BASE | 签名 |
+|---|---|---|---|---|---|
+| debug | 含 `server`（http / cleartext / mixed） | `usesCleartextTraffic=true` | `1` / `1.0` | `http://localhost:3001` | debug keystore |
+| release | 无 `server` 段（默认 https） | **NONE** | `2` / `1.0.0`（`-P` 覆盖） | `https://api.example.com` | `apksigner verify` 通过（临时测试证书 `CN=MonsterPK Test`） |
+
+- 缺签名材料反证：`BUILD FAILED in 6s`、退出码 1，错误信息明确列出四个变量名。
+- 回归：前端 158/158、后端 503/503，全量 E2E（含 W9 `e2e:multi` 42/42、`e2e:game` 42/42、hardening 122）全绿，
+  `DOC_CHECK_OK`、记忆镜像一致。
+- release 包 API 地址是占位域名、证书是临时自签名，**仅用于验证签名 / 明文 / 注入链路，不能上线**。

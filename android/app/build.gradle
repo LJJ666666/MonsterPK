@@ -1,14 +1,42 @@
 apply plugin: 'com.android.application'
 
+// P5-3: version + release signing are build-time inputs, not hardcoded here.
+// Version truth lives in android/gradle.properties (override per build with
+// -PmpkVersionCode=N -PmpkVersionName=x.y.z). Never commit the keystore or passwords.
+def mpkVersionCode = (project.findProperty('mpkVersionCode') ?: '1').toString().toInteger()
+def mpkVersionName = (project.findProperty('mpkVersionName') ?: '1.0').toString()
+
+// Release signing material comes ONLY from env vars / user-level gradle properties.
+// MPK_KEYSTORE_FILE / MPK_KEYSTORE_PASSWORD / MPK_KEY_ALIAS / MPK_KEY_PASSWORD
+def mpkKeystoreFile = System.getenv('MPK_KEYSTORE_FILE') ?: project.findProperty('mpkKeystoreFile')
+def mpkKeystorePassword = System.getenv('MPK_KEYSTORE_PASSWORD') ?: project.findProperty('mpkKeystorePassword')
+def mpkKeyAlias = System.getenv('MPK_KEY_ALIAS') ?: project.findProperty('mpkKeyAlias')
+def mpkKeyPassword = System.getenv('MPK_KEY_PASSWORD') ?: project.findProperty('mpkKeyPassword')
+def mpkKeystore = mpkKeystoreFile ? file(mpkKeystoreFile.toString()) : null
+def mpkReleaseSigningReady = mpkKeystore != null && mpkKeystore.exists()
+        && [mpkKeystorePassword, mpkKeyAlias, mpkKeyPassword].every {
+            it != null && it.toString().trim().length() > 0
+        }
+
 android {
     namespace = "com.monster.game"
     compileSdk = rootProject.ext.compileSdkVersion
+    signingConfigs {
+        if (mpkReleaseSigningReady) {
+            release {
+                storeFile mpkKeystore
+                storePassword mpkKeystorePassword.toString()
+                keyAlias mpkKeyAlias.toString()
+                keyPassword mpkKeyPassword.toString()
+            }
+        }
+    }
     defaultConfig {
         applicationId "com.monster.game"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode mpkVersionCode
+        versionName mpkVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,7 +48,18 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (mpkReleaseSigningReady) signingConfig signingConfigs.release
         }
+    }
+}
+
+// Fail-closed: an unsigned APK must never be mistaken for a channel/release build.
+// Debug builds are unaffected (they keep using the platform debug keystore).
+gradle.taskGraph.whenReady { graph ->
+    if (!mpkReleaseSigningReady && graph.allTasks.any { it.name == 'assembleRelease' }) {
+        throw new GradleException(
+            'Release signing material missing: set MPK_KEYSTORE_FILE / MPK_KEYSTORE_PASSWORD / ' +
+            'MPK_KEY_ALIAS / MPK_KEY_PASSWORD (see apk_build_guide.md).')
     }
 }
 

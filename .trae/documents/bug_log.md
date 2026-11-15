@@ -1916,3 +1916,36 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 
 `aabbcc` 是 17:26 新注册、**还没建档**的账号；重新登录后会看到「开始新旅程」，点一下选初始伙伴即可正式开玩。之前看到的「旅行者 ¥0 / 发现3 捕获2」是 `gametest001` 的旧渲染副本，不是新账号的进度。临时验证账号 `uinosave001/002` 已从库清理。
 
+## §75 2026-11-15 P5-3 零依赖收尾：Release 构建配置 / 明文分离 / 回归清单
+
+### 75.1 起因与范围
+杰哥拍板「先走 1 + 2」：① 零依赖收尾（推提交、起后端、跑回归、对齐 P5-2 文档口径）；② P5-3 本机可做的部分（版本号 / 签名 / 明文 / 生产注入 / 回归清单）。云凭据（域名、TLS、正式 keystore、托管 PG/Redis）未给，切云联调不本期。**零产品语义 / 数值 / 风控代码改动**。
+
+### 75.2 环境收尾取证
+- 13:32 探活：`:3001` OPEN（`/api/health` 正常）、`:5432` / `:6379` OPEN、`:5173` / `:5174` CLOSED、雷电未连；与 12:11 那次「3001 CLOSED」不同，是杰哥重跑 `start-mpk-backend.bat` 之后的状态，两轮都以当次实测为准。
+- Git：本地 HEAD `bcab2e6` == `origin/master`（一次只读 `git ls-remote`，本轮 502 已消失），工作树干净，本地 99 个 rollback tag 全在远端（`comm -23` 无差）。
+
+### 75.3 文档口径
+任务表 P5-2 由 ⬜ 改「✅ 已偿还（2026-11-13）」，路线图「存档云同步与多端一致（当前仅本地 + 手动导入导出）」划掉并改写。此前精简 `MEMORY.md` 误删 `doc_check` 锚点的问题见 75.5。
+
+### 75.4 代码改动
+- `android/app/build.gradle`：版本号改读 `android/gradle.properties` 的 `mpkVersionCode` / `mpkVersionName`（`-P` 可覆盖）；release 签名只读 `MPK_KEYSTORE_FILE` / `MPK_KEYSTORE_PASSWORD` / `MPK_KEY_ALIAS` / `MPK_KEY_PASSWORD`（环境变量或用户级属性）；`gradle.taskGraph.whenReady` 在缺材料时直接抛 `GradleException`（fail-closed，不产 unsigned 包），debug 不受影响。
+- `android/app/src/main/AndroidManifest.xml` 删掉全局 `usesCleartextTraffic="true"`；明文只在既有 `src/debug/AndroidManifest.xml` 叠加。原来两份都是 true，**release 也带明文**，属真实泄漏点。
+- `capacitor.config.ts` 注释钉死：正式包不带 `MPK_DEV_APK`，默认 `androidScheme=https`（`CapConfig.java` 的 `CAPACITOR_HTTPS_SCHEME` 源码实证），WebView origin `https://localhost`，`VITE_API_BASE` 一处覆盖 REST + WS（`wsUrl()` https→wss 由 `ws.test.ts` 锁死）。
+- `backend/.env.example`：本机模板补 debug APK 的 `http://localhost` origin；新增生产精确白名单示例 `https://app.example.com,https://localhost`、`'*'` 非通配与漏配后果说明。**`isOriginAllowed` / `index.ts` / `realtime.ts` 一行未改**。
+- `apk_build_guide.md` 重写为 P5-3 权威指南（旧云端 gradlew 联网流程标注废弃），含构建命令、签名环境变量、产物取证清单、发布前回归清单、切云配套与实测记录。
+
+### 75.5 回归与踩坑（11 条 DOC_CHECK FAIL）
+- 全量 `npm run verify -- --skip=smoke`：前端 **158/158**、后端 **503/503**、全部 E2E 全绿（W9 `e2e:multi` 42/42、`e2e:game` 42/42、hardening 122），但**文档一致性自检 11 条 FAIL**。
+- 根因不是断言太严，而是 2026-11-15 精简 `MEMORY.md` 时删掉了 `scripts/doc_check.py` 依赖的结构锚点：`P4-2 五阶段全部完成`、`P4-0 写入并发控制`、`F01/F02 已偿还`、`F17 单档化已实现并偿还`、`P5-1 / F10 共享存储迁移评估`、`8693`、`配置分层硬约束`、`P5-1 W4 ✅`、`W6.2 事务边界`、`W6.3 DB 计数`。
+- 修法：把这些事实补回 §4 与 §8 的紧凑索引（标注「精简时误删过，勿再删」），`sync_memory.py` 同步镜像后 `python scripts/doc_check.py` → **DOC_CHECK_OK**，**没有放宽任何断言**。教训：精简记忆前先跑一次 `doc_check.py`，别等全量 verify 才暴露。
+
+### 75.6 双变体构建实证（本机、凭据不入库）
+- debug：`MPK_DEV_APK=1 npx cap sync android` + 离线 Gradle **8s**；`capacitor.config.json` 含 `server`（http / cleartext / mixed）、manifest `usesCleartextTraffic=true`、version `1 / 1.0`、bundle 默认 `http://localhost:3001`。增量构建内容未变时 APK mtime 保留（02:01:53），**判定只认内容**。
+- release：`VITE_API_BASE=https://api.example.com npm run build` + 不带 dev 的 `cap sync` + 离线 Gradle **13s**，产物 `app-release.apk`（13:46:26）；config 无 `server` 段、manifest cleartext **NONE**、version `2 / 1.0.0`（`-P` 覆盖生效）、bundle 命中生产域名、`apksigner verify --print-certs` 通过（临时测试证书 `CN=MonsterPK Test`）。
+- 反证：清掉四个签名变量再 `assembleRelease` → `BUILD FAILED in 6s`、退出码 1、错误信息明确列出变量名，未产出未签名包。
+- 临时 keystore 在系统 temp（`mpk-release-test.p12`），**未入库**；本次 release 包是配置 / 签名链路冒烟包，API 域名与证书都是占位，**不能上线**。
+
+### 75.7 待杰哥给材料（切云阶段）
+域名 + TLS 证书、正式 keystore（别名 / 密码）、托管 PG/Redis 地址与凭据、渠道包口径（单 / 多渠道）、W9 双实例是否一起上云。补齐后按指南 §7 回归清单重出包。另：低端 ARM 真机性能补测（`性能基线_web.md` §112）仍待 P5-3 阶段。
+

@@ -1,8 +1,12 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-// 本地调试 APK 开关（MPK_DEV_APK=1）：WebView 走 http scheme 并允许明文，
-// 以便把业务请求发到宿主机的 http://<局域网IP>:3001 后端。
-// 默认不设置时行为零变更，正式包（P5-3）不会带上这些调试选项。
+// 构建期开关（MPK_DEV_APK=1）：仅本地调试 APK 使用。WebView 改走 http scheme 并允许明文，
+// 以便把业务请求发到宿主机的 http://localhost:3001（靠 adb reverse 回连）。
+// 正式包（P5-3）不带此开关：Capacitor 默认 androidScheme=https
+// （源码实证 @capacitor/android CapConfig.java 的 CAPACITOR_HTTPS_SCHEME），
+// WebView origin = https://localhost，必须列入后端 CORS_ORIGIN；
+// 业务地址由构建期 VITE_API_BASE 注入 HTTPS 域名，REST 与 WS 共用一份 API_BASE。
+// 明文流量只由 android/app/src/debug/AndroidManifest.xml 在 debug 变体放行。
 const devApk = process.env.MPK_DEV_APK === '1';
 
 const config: CapacitorConfig = {

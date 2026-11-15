@@ -1974,3 +1974,29 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 ### 76.6 验收（只认输出与产物）
 `npm run verify -- --strict` → **VERIFY_OK，通过 59 / 失败 0 / 跳过 0，205.9s**：静态门禁 29/29、前端单测 **161/161**、后端单测 503/503、构建 4.42s、E2E 36 套全绿（W9 42/42、e2e:game 42/42、hardening 122、内容矩阵 47/47）、**14 套浏览器冒烟共 225 项全绿**（f18b 15/15）、文档自检 **232 项** `DOC_CHECK_OK`、记忆镜像一致 `sha256=3249856bfa4e`、收尾清理 14 个测试账号。教训：**不要再默认 `--skip=smoke`**；改 `vite.config.ts` 后必须真跑一次冒烟；UI 文案变更后同步检查依赖该文案的断言，优先用路径 + 稳定结构特征。
 
+---
+
+### 77. 2026-11-15 晚：默认口径固化 / Auth 页冒烟 / 玩法缺口复核（VERIFY_OK 60/60）
+
+#### 77.1 建议①：把「不默认跳过冒烟」写进文档与门禁
+- `HANDOFF.md`、`apk_build_guide.md §7`、`.trae/documents/上线部署_杰哥配合清单_2026-11-15.md §10.5`、`scripts/verify.mjs` 头部与提示语统一口径：**全量 `npm run verify -- --strict` 是默认**；离线只跑 `--only=check,unit,docs --strict`；`--skip=smoke` 仅显式离线排查、禁止当默认；服务缺失只有 `--allow-missing-services` 才退回 SKIP。
+- `scripts/test_inventory.mjs` 加 3 条断言（29→**32**）：`package.json` 的 verify 不含 `--skip=smoke`、服务缺失默认判 FAIL、HANDOFF/发布指南把 `--strict` 写成默认口径。
+
+#### 77.2 建议②：新增 `ui_smoke_auth.mjs`（15 套冒烟 / 27 项）
+- 与既有 14 套不同：视口用**真机 360×616**（其余是 375×812）；iframe 指向 `/auth`，head 里先 `localStorage.removeItem('mpk_token')` 保证未登录态，不注入 seed。
+- 覆盖 6 种形态：登录态 / 登录态 2 条字段错误 / 注册紧凑态 / 注册态 3 条字段错误 / 切回登录 / 忘记密码提示 / 服务端 401 错误横幅；每态都断言 `360px 无横溢 + .page-shell 无纵向滚动（scrollHeight<=clientHeight+1）+ padding-top=0`（锁 §74 的 24px 兜底不回潮）。
+- 登记 `verify.mjs` 的 `smoke:auth`（`STAGES`+`GROUPS` 两处），`check:inventory` 的「全部冒烟脚本都登记」自动通过。
+
+#### 77.3 冒烟首跑抓到并修掉的 2 个真问题
+- 首跑 `23/25`：登录态空表单提交后字段错误态 `.page-shell` `scrollHeight=632 > 616`；点「忘记密码？」展开提示后 `619 > 616`。两处都会产生细微纵向滚动，此前真机 CDP 只验过 base 与注册三字段报错态，没覆盖到。
+- 修法：只收紧 `src/pages/Auth.tsx` **登录态**区块间距 —— header `pb-5→pb-4`、标题 `mt-5→mt-4`、表单 `mt-5→mt-4` 且 `gap-3→gap-2`、服务状态区 `pt-5→pt-4`；**注册紧凑态、产品语义、数值、风控零改动**。复跑 25/25；补登录失败横幅态后 **27/27**。
+
+#### 77.4 建议③：玩法缺口复核（只读，交杰哥拍板）
+- **roadmap 两条「未完成」是过时条目**：`开发任务优先级_2026-11-04.md:44` 记 P1-3（2026-11-06）已闭环。证据：进化石 `backend/src/game/mutations.ts:162-177`、护符金币 `backend/src/game/battle.ts:123-126`、学习装置 `battle.ts:124, 343-351, 371-379`；`e2e_p32_mutations.mjs:250-264` 与 `mutations.test.ts:146-163` 已有回归。
+- **真实剩余**：① 4 种进化石只有 `stone_thunder` 有适配物种（`src/game/data.ts:539` 全仓唯一 `type:"item"`），另 3 种在 4 个商店卖 ¥2100 但背包无可用目标（`Camp.tsx:453-455`）；② `amulet_coin`/`exp_share` 实现是「持有即生效 `>0`」，文案却写「携带后/开启后」（`data.ts:403-404`），无装备位/开关与持久化字段；③ `exp_share` 对每只存活队员各发**全额** `expGain`（`battle.ts:371-375`），N 人队总经验 N 倍，口径从未拍板。
+- 产出 `.trae/documents/玩法缺口评估_进化石与关键道具_2026-11-15.md`（四方案 A/B/C/D + P1~P6 拍板清单 + 验收口径），推荐 A 最小闭环（补 3 只适配物种 + 文案对齐，不升 `SCHEMA_VERSION`）。订正 `开发路线图_roadmap.md:122-123` 两条过时条目并指向评估文档。**本轮零产品语义改动**。
+
+#### 77.5 验收（只认输出与产物）
+`npm run verify -- --strict` → **VERIFY_OK，通过 60 / 失败 0 / 跳过 0，216.6s**：静态门禁 **32/32**、前端 161/161、后端 503/503、构建 4.85s、E2E 36 套全绿（W9 42/42、e2e:game 42/42、hardening 122、内容矩阵 47/47）、**15 套冒烟共 252 项全绿**（新 Auth 27/27）、doc_check **232 项** `DOC_CHECK_OK`、镜像一致 `sha256=728fa06b3cc1`、收尾清理 14 个测试账号。日志 `.verify-logs/2026-11-15T15-38-51-623Z-p28152/`。
+
+

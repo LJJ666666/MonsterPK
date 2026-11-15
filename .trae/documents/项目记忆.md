@@ -12,12 +12,13 @@
 - **P5-3 本机可做部分 ✅（2026-11-15，bug_log §75）**：`android/gradle.properties` 管版本号（`-P` 覆盖）；`app/build.gradle` release 签名只读 `MPK_KEYSTORE_FILE` / `MPK_KEYSTORE_PASSWORD` / `MPK_KEY_ALIAS` / `MPK_KEY_PASSWORD`，缺材料 `assembleRelease` fail-closed（不产 unsigned）；main manifest 禁明文、仅 `src/debug` 叠加放行；正式包不带 `MPK_DEV_APK`（默认 androidScheme=https → origin `https://localhost`，CORS 必须列它），`VITE_API_BASE` 一处覆盖 REST+WS。权威 `apk_build_guide.md`（含产物取证与发布回归清单）。**下一步待杰哥给域名 + TLS + 正式 keystore + 托管 PG/Redis 再切云出正式渠道包**；待排期 UX：剧情 intro 每次进 Camp 重播（`Camp.tsx:167`）。
 - 选型 B：Postgres 唯一真值 + Redis 锁/租约/TTL/pub-sub/临时态，**Redis 不存权益真值**。权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`。
 - **2026-11-15 测试资产审核与补强 ✅（bug_log §76）**：救活 14 套 UI 冒烟、修 f18b 过时断言、verify 服务缺失改判 FAIL、新增 `check:inventory` 静态门禁 + 账号边界单测；`verify -- --strict` **59/59、0 跳过**（前端 161 / 后端 503 / doc_check 232 / 冒烟 225 项）。**不要再默认 `--skip=smoke`**。
+- **2026-11-15 晚「下一步建议」执行 ✅（bug_log §77）**：口径固化（全量 `--strict` 为默认，门禁 32 条）+ 新增 `ui_smoke_auth.mjs`（真机 360×616、6 种形态 27 项）→ `VERIFY_OK 60/60、0 跳过、216.6s`（15 套冒烟 252 项）。冒烟抓到登录态字段报错 632px / 忘记密码 619px 溢出 616px 视口，只收紧 `Auth.tsx` 登录态间距修好。**玩法缺口复核**：roadmap 两条「未完成」过时（P1-3 已闭环，三个效果都在服务端），真实剩余是 3 种进化石无适配物种 + 「持有即生效」文案/经验全额复制口径；评估文档 `玩法缺口评估_进化石与关键道具_2026-11-15.md` 待杰哥拍板 P1~P6，**零产品语义改动**。
 
 ## 2. 技术栈 / 入口 / 测试
 - 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`；`useGameStore.ts` **无 persist**，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=11，**BattleState 不进存档**。
 - 后端 Fastify4+Prisma5+Postgres16+zod+tsx；模型含 `Room`/`RoomQuotaDaily`/`BossDamageEvent`/`BossRewardGrant`/`CoopRewardGrant`/`BadgeGrant`/`AchievementGrant`，迁移链 12 条，**改 schema 前停 :3001**（Windows DLL 文件锁）。`Save.data` 存 JSON 文本、`revision` 独立列。
 - 测试：前端 vitest `src/**/*.test.{ts,tsx}`（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。
-- 测试资产（§76 审核）：`verify.mjs` **59 阶段 / 6 分组**（`check:inventory` 纯静态门禁排最前）；前端 **161**、后端 **503**、E2E **36** 套（老 6 套自定义 `check()`+`_RESULT`/`[SUMMARY]`，新 30 套共享 `Suite.done()`，失败都置 exitCode=1）、UI 冒烟 **14** 套 375px headless、doc_check **232**。`scripts/test_inventory.mjs` 锁编排对齐 / 防假绿 / P5-3 发布配置 / 冒烟宿主；新增阶段必须改 `STAGES`+`GROUPS` 两处。
+- 测试资产（§76 审核 / §77 追加）：`verify.mjs` **60 阶段 / 6 分组**（`check:inventory` 纯静态门禁排最前，**32 条**）；前端 **161**、后端 **503**、E2E **36** 套（老 6 套自定义 `check()`+`_RESULT`/`[SUMMARY]`，新 30 套共享 `Suite.done()`，失败都置 exitCode=1）、UI 冒烟 **15** 套（14 套 375px + `ui_smoke_auth` 360×616，共 252 项）、doc_check **232**。`scripts/test_inventory.mjs` 锁编排对齐 / 防假绿 / P5-3 发布配置 / 冒烟宿主 / 默认口径；新增阶段必须改 `STAGES`+`GROUPS` 两处。
 
 ## 3. 改代码前必读硬约束
 - 新增持久化字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `saveValidator.ts` 的 `EXPECTED_SAVE_VERSION`。**前端已无 migrate**，结构校验只在服务端。
@@ -31,7 +32,7 @@
 
 ## 4. 运行 / 环境 / Git
 - 前端 `npm run dev -- --host 0.0.0.0 --port $MPK_FRONT_PORT --strictPort`（默认 5173，本机 5174）；后端 `cd backend && npm run dev`（3001）。换会话不自动恢复，先 `curl --noproxy '*'` 探活。校验 `npm run verify`（新增阶段改两处 `STAGES`+`GROUPS`，漏 `GROUPS` 静默少跑）；`npm run clean:e2e`；`npm run admin`。node 22.22.2，remote `LJJ666666/MonsterPK.git`。新机：`cp .env.example .env`→前后端 `npm install`→`prisma migrate deploy`+`generate`→`npm run dev`。
-- **verify 口径（§76 起）**：全量用 `npm run verify -- --strict`，前后端都要在线，59 阶段含 14 套冒烟；服务缺失默认判 FAIL，只有 `--allow-missing-services` 才退回 SKIP；`--skip=smoke` 仅用于明确离线排查，**不得当默认**。改 `vite.config.ts` 后必须真跑一次 `--only=smoke`。
+- **verify 口径（§76 起，§77 固化）**：全量用 `npm run verify -- --strict`，前后端都要在线，**60 阶段含 15 套冒烟**；服务缺失默认判 FAIL，只有 `--allow-missing-services` 才退回 SKIP；`--skip=smoke` 仅用于明确离线排查，**不得当默认**（HANDOFF / apk_build_guide / 上线部署清单三处同口径，门禁锁死）；离线只跑 `--only=check,unit,docs --strict`。改 `vite.config.ts` 后必须真跑一次 `--only=smoke`。
 - Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾写验收数字）→push master→核对 `HEAD==origin/master`、工作树干净、tag 全在远端。推送失败只读探活 + 最多 5 次原样重试（不换代理/不改 config），持续 502 交本机 `push-mpk.bat`（`fetch`+`push master --tags`，**不含 add/commit**）。**Git 状态汇报只给一句话**。
 - **配置分层硬约束（§57，勿回退）**：沙箱层（`HTTPS_PROXY=11811` / `CODEBUDDY_*`）≠ 系统层（注册表 `ProxyServer=8693`、本机 PG/Redis/JDK 路径）≠ 项目层（`MPK_FRONT_PORT`→`devConfig.mjs`；`DATABASE_URL`/`REDIS_URL`/`CORS_ORIGIN`→`backend/.env`）。沙箱值禁写仓库，覆盖 env 只用一次性前缀，**项目层是唯一可提交真值**。出公网只能走注入代理（直连被墙），代理对 GitHub 间歇 502、对 npm 稳定；只共享 localhost（PG/Redis 用 127.0.0.1）。git 502 恒现交本机 `push-mpk.bat`（只读探活 + 最多 5 次原样重试，不换代理/不试直连/不改 config）。
 - **本机 PowerShell + GBK（§61，勿回退）**：① npm script 不许裸 glob（`"tests/**/*.test.ts"` 带引号交 Node 22 glob）；② Python stdout 必须 `reconfigure(errors="replace")`；③ 保留 `server.watch.ignored: ['**/public/_*.html']`；④ 不测选主的双实例 E2E 子进程必须 `MPK_DISABLE_SWEEP=1`（残留 `lock:sweep:global` 60s TTL 挡 :3001）；⑤ 沙箱冒烟用 puppeteer 的 `chrome-headless-shell`（`EDGE_PATH`）。`authority.expected` 追随落库值，并发测试两路候选值必须相邻递减。

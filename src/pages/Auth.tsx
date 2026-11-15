@@ -71,6 +71,8 @@ export default function Auth() {
   const [forgotHint, setForgotHint] = useState(false);
   // 注册态用紧凑排版：砍掉品牌描述/分割线/API 行、收紧各处间距。
   // 真机 360×616 实测普通态 687px 溢出 71px，紧凑态约 530px，仍留得下字段错误提示。
+  // 登录态虽是宽松排版，区块间距也按「最坏态」收紧过：字段报错 / 忘记密码提示 /
+  // 服务端 401 错误横幅展开时都不允许出现纵向滚动（ui_smoke_auth.mjs 锁 360×616 一屏）。
   const compact = mode === "register";
   const inputPad = compact ? padTight : padLoose;
 
@@ -177,7 +179,7 @@ export default function Auth() {
     // 登录态与注册态在 360×616 真机上都不出现滚动；字段报错时仍有余量。
     <div className="page-shell safe-top safe-bottom overflow-y-auto">
       {/* 品牌区：注册态压成一行，给三个输入框让出垂直空间 */}
-      <header className={compact ? "flex-none px-6 pb-2 pt-3" : "flex-none px-6 pb-5"}>
+      <header className={compact ? "flex-none px-6 pb-2 pt-3" : "flex-none px-6 pb-4"}>
         <div className="flex items-center gap-3">
           <BrandMark className={compact ? "h-9 w-9 shrink-0" : "h-11 w-11 shrink-0"} />
           <div>
@@ -230,7 +232,7 @@ export default function Auth() {
             ))}
           </div>
 
-          <div className={compact ? "mt-3 text-base font-semibold text-[color:var(--text)]" : "mt-5 text-lg font-semibold text-[color:var(--text)]"}>
+          <div className={compact ? "mt-3 text-base font-semibold text-[color:var(--text)]" : "mt-4 text-lg font-semibold text-[color:var(--text)]"}>
             {mode === "login" ? "欢迎回来，旅行者" : "创建你的冒险账号"}
           </div>
           <div className={compact ? "mt-0.5 text-[11px] text-[color:var(--muted)]" : "mt-1 text-xs text-[color:var(--muted)]"}>
@@ -239,7 +241,7 @@ export default function Auth() {
               : "注册后自动登录，立即开始旅程"}
           </div>
 
-          <form onSubmit={submit} className={compact ? "mt-3 flex flex-col gap-2" : "mt-5 flex flex-col gap-3"} noValidate>
+          <form onSubmit={submit} className={compact ? "mt-3 flex flex-col gap-2" : "mt-4 flex flex-col gap-2"} noValidate>
             <Field
               label={compact ? "用户名 · 3–20 位" : "用户名"}
               htmlFor="auth-username"
@@ -377,7 +379,7 @@ export default function Auth() {
         </div>
 
         {/* 服务状态（贴底，始终可见） */}
-        <div className={compact ? "pb-1 pt-3" : "pb-1 pt-5"}>
+        <div className={compact ? "pb-1 pt-3" : "pb-1 pt-4"}>
           <div className="flex items-center gap-2 text-xs text-[color:var(--muted)]">
             <span
               className={[

@@ -143,6 +143,16 @@ check('每个 UI 冒烟都打印 UI_SMOKE_*_RESULT 汇总', smokeNoResult.length
 check('每个 UI 冒烟失败时都会非零退出', smokeNoExit.length === 0, smokeNoExit.join(', '));
 check('verify 的 summarize 能识别静态门禁结果',
   /TEST_INVENTORY_RESULT/.test(verify));
+// 默认口径（2026-11-15 补）：全量必须真跑冒烟，服务缺失不得悄悄退回 SKIP。
+check('verify 默认不跳过冒烟（package.json 的 verify 无 --skip=smoke）',
+  !/--skip=smoke/.test(rootPkg.scripts?.verify ?? ''));
+check('verify 服务缺失默认判 FAIL，只有显式开关退回 SKIP',
+  /argv\.includes\('--allow-missing-services'\)/.test(verify)
+  && /if \(strict \|\| !allowMissingServices\)/.test(verify));
+check('HANDOFF / 发布指南把全量 --strict 写成默认验收口径',
+  /--strict[^\n]*默认口径/.test(read('HANDOFF.md'))
+  && /npm run verify -- --strict/.test(read('apk_build_guide.md'))
+  && /不得用 `--skip=smoke` 冒充全绿/.test(read('apk_build_guide.md')));
 
 // ─────────────────────── 3. 发布构建配置（P5-3）不变量 ───────────────────────
 const mainManifest = read('android/app/src/main/AndroidManifest.xml');

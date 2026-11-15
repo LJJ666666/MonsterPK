@@ -257,8 +257,10 @@ npm run verify:e2e            # 只跑 E2E 组
 npm run verify:hardening      # 只跑对抗套件
 npm run verify:smoke          # 只跑浏览器冒烟
 npm run verify -- --only=check,unit     # 任意分组组合
-npm run verify -- --skip=smoke          # 跳过浏览器冒烟
-npm run verify -- --strict              # CI：服务没起视为失败
+npm run verify -- --strict              # 默认口径：全量严格验收，0 跳过，服务缺失直接判失败
+npm run verify -- --only=check,unit,docs --strict  # 明确离线时只跑静态部分
+npm run verify -- --allow-missing-services        # 仅离线排查：服务没起退回 SKIP（会记进报告）
+npm run verify -- --skip=smoke          # 仅明确离线排查时显式跳过冒烟，禁止当默认
 npm run verify -- --no-clean            # 保留测试账号便于排查
 cd backend && npm run clean:e2e -- --dry   # 看有多少历史测试账号待清
 ```

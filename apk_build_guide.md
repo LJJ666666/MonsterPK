@@ -115,7 +115,7 @@ CORS_ORIGIN="https://app.example.com,https://localhost"
 
 ## 7. 发布前回归清单
 
-- `npm run verify -- --skip=smoke`（前端 dev 未起时跳过浏览器冒烟）；条件允许跑全量含 UI 冒烟。
+- `npm run verify -- --strict`（**发布前默认口径**：前后端 dev 都起起来，全量含 UI 冒烟，0 跳过）。确实起不来前端 dev 时，只能显式跑 `npm run verify -- --only=check,unit,docs --strict` 并在发版记录里注明「冒烟未跑」，不得用 `--skip=smoke` 冒充全绿。
 - 真机逐项：登录 → 建档 → 野外 → 战斗 → 捕获 → 队伍 → 冷启动拉服务端存档 → WS 实时 → 顶号 → 断网重连。
 - CORS 反证：把 Origin 改成未列入的值，HTTP 与 WS 都必须拒绝。
 - 低端 ARM 真机性能补测（`性能基线_web.md` §112 遗留项，P5-3 阶段补）。

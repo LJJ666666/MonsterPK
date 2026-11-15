@@ -3,7 +3,7 @@
  * 一键全量验收编排器（2026-11-07）。
  *
  * 背景：项目此前要手动按顺序敲 8~10 条命令（前后端 check/test/build、内容表、
- * 36 套 E2E、14 套浏览器冒烟、文档自检），漏跑、顺序错、看错结果都很常见。
+ * 36 套 E2E、15 套浏览器冒烟、文档自检），漏跑、顺序错、看错结果都很常见。
  * 本脚本把它们收敛成一条命令，并给出机器可读报告。
  *
  * 用法：
@@ -19,13 +19,14 @@
  *   unit   前端 vitest + 后端 node:test
  *   build  前端构建
  *   e2e    后端端到端（含对抗套件，阶段数以脚本输出为准）
- *   smoke  375px 浏览器冒烟
+ *   smoke  360/375px 浏览器冒烟（含 Auth 页 360×616 一屏）
  *   docs   文档与记忆镜像自检
  *
  * 退出码：0 全绿（允许显式 --skip 的 SKIP）；1 有失败。
  * 被选中却因服务未起而无法执行的阶段默认判 FAIL（2026-11-15：14 个浏览器冒烟
  * 长期静默 SKIP 却仍输出 VERIFY_OK，掩盖了 seed 页失效两个月），
  * 只有 --allow-missing-services 才退回 SKIP；显式 --skip/--only 排除的阶段不受影响。
+ * 默认口径是全量 --strict，不要默认 --skip=smoke（离线时改用 --only=check,unit,docs）。
  * 报告：`.verify-report.json`（已 gitignore），供排查与趋势对比。
  */
 import { spawnSync } from 'node:child_process';
@@ -127,6 +128,8 @@ const STAGES = [
   { id: 'smoke:f18c', name: '375px 地图首领 UI（F18-c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18c.mjs'], need: 'both', timeout: 300_000 },
   // 回归 C：Start 页三种状态文案 + 剧情/徽章弹窗 + 全局封号/顶号弹窗的滚动、换行与可关闭。
   { id: 'smoke:ux', name: '375px 全局状态与弹窗 UX（回归 C）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_ux.mjs'], need: 'both', timeout: 300_000 },
+  // Auth 页：登录/注册切换 + 紧凑态 + 三字段报错态，360×616 真机视口一屏约束（§74 回归）。
+  { id: 'smoke:auth', name: '360×616 Auth 页一屏与报错态', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_auth.mjs'], need: 'both', timeout: 300_000 },
   { id: 'docs:doc', name: '文档一致性自检', cwd: ROOT, cmd: PY, args: ['scripts/doc_check.py'] },
   { id: 'docs:memory', name: '记忆镜像校验', cwd: ROOT, cmd: PY, args: ['scripts/sync_memory.py', '--check'] },
 ];
@@ -136,7 +139,7 @@ const GROUPS = {
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
   e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:ux'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:ux', 'smoke:auth'],
   docs: ['docs:doc', 'docs:memory'],
 };
 
@@ -388,7 +391,7 @@ const totalMs = results.reduce((a, r) => a + r.ms, 0);
 
 const missingServices = results.filter((r) => r.status === 'FAIL' && /需要.*在线/.test(r.metric)).length;
 if (missingServices > 0 && !allowMissingServices) {
-  console.log(`\n提示：${missingServices} 个阶段因服务未启动判失败。只跑离线部分用 --only=check,unit,docs 或 --skip=smoke；确需跳过用 --allow-missing-services。`);
+  console.log(`\n提示：${missingServices} 个阶段因服务未启动判失败。离线只跑静态部分用 --only=check,unit,docs；确需整体放行用 --allow-missing-services（会记 SKIP）。`);
 }
 
 console.log('\n══ 验收汇总 ══');

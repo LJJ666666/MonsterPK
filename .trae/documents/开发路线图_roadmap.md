@@ -119,8 +119,8 @@
 ### 🐞 已知遗留缺口（本仓库已落地功能相关的待修项）
 
 - [x] ~~**存档版本迁移脱钩**~~：已随本地存档删除而消失（2026-11-13）。现由 `SCHEMA_VERSION`（前端）与 `EXPECTED_SAVE_VERSION`（后端）两处常量对齐，前端不再有 migrate。
-- [ ] **道具进化全链路未完成**：`EvolutionCondition` 已支持 `item`，进化石已在商店售卖，但 `useItemOutsideBattle` 只处理 `kind === "heal"`，进化石买了用不了：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)、[EvolutionModal.tsx](file:///workspace/src/components/EvolutionModal.tsx)
-- [ ] **关键道具无效**：`amulet_coin`（金钱翻倍）、`exp_share`（经验分享）已在商店售卖但无任何效果代码：入口 [useGameStore.ts](file:///workspace/src/stores/useGameStore.ts)
+- [x] ~~**道具进化全链路未完成**~~ → **已闭环（P1-3，2026-11-06）**：`backend/src/game/mutations.ts:162-177` 已实现 `use_item` 的 `evolution` 分支（服务端内容表判定 / 扣石 / 替换个体 / 图鉴），`e2e_p32_mutations.mjs:250-264` 有回归。**剩余内容表缺口**：4 种进化石仅 `stone_thunder` 有适配幻兽（`src/game/data.ts:539`），其余 3 种在商店售卖但无目标，详见 `玩法缺口评估_进化石与关键道具_2026-11-15.md`。
+- [x] ~~**关键道具无效**~~ → **已闭环（P1-3，2026-11-06）**：`backend/src/game/battle.ts:123-126, 343-351, 371-379` 已实现护符金币金钱 ×2 与学习装置全队经验。**剩余语义待定**：文案「携带后 / 开启后」与「持有即生效」不一致、经验为全额复制而非分摊，属产品语义，详见同上评估文档，待杰哥拍板。
 
 ---
 

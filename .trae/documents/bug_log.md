@@ -2026,5 +2026,14 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 - **结论：只需带 1 个权威文件**，另 3 个可选（一起拷只为自检全 `[OK]`）。已订正 `HANDOFF.md §1 / §4 表格与段落 / §5 话术` 与 `带回公司_交接清单_2026-11-16.md §0 / §1.2 / §8`。教训：**交接清单里的「必带项」要逐个读内容验证，别照抄旧手册口径**。
 - 同轮 Temp 目录（12G）清理请求：按个人文件安全规则本轮**只做只读盘点，零删除**，等待明确确认具体类别后再按小批量 + 回收站执行。
 
+## §79 2026-11-16 换机器路径脱敏（公司机器首次核对 + 运行时 bat 修正）
 
-
+- **触发**：杰哥带回公司后指出「JDK / Android SDK 本机有，交接文档路径与当前目录必然不一致 —— 两台电脑，目录没建成一样」，要求修掉文档里的死路径，并审 `E:\Six\start-mpk-runtime.bat` 是否适配本机。
+- **本机实测（公司）**：JDK21 `E:/Six/jdk/jdk-21`（注意系统 `JAVA_HOME` 指向 Temurin **17**，AGP 会报「无效的目标发行版 21」）；SDK `E:/Six/android-sdk`，android-36，**build-tools 只有 35.0.0**；Gradle `E:/Six/gradle-dist/gradle-8.14.3`；`GRADLE_USER_HOME=E:/Six/gradle-user-home`（513 MB AGP 缓存）；雷电 adb 两台都在 `D:/game/leidian/LDPlayer14/adb.exe`。家里记录值是 `D:/jdk21/jdk-21.0.10+7` + `D:/android-sdk` + `$HOME/.gradle/wrapper/dists/...`。
+- **bat 四个问题（家里版）**：① **整文件是 LF** —— `cmd.exe` 会把 `if (...)` 块解析错导致闪退，MEMORY §5 早有 CRLF 硬约束；② `BASE` 只认 `D:\Six` / `E:\Six`，不认 bat 自身位置；③ 末尾提示写死 `D:\MyJob\MonsterPK`；④ 服务存在性靠 `if errorlevel 1060` 判 `sc query`。
+- **改法**：`pushd "%~dp0"` 取 `%CD%` 作 BASE（三行分开写 —— `%CD%` 在批处理里按行解析，同一行 `&&` 串会提前展开成原目录）；回退链 `D:\Six` → `E:\Six`；用 `findstr /C:"SERVICE_NAME"` 判服务是否注册；提示段改 `%BASE%\MonsterPK` 且先判 `package.json` 存在。写回后转 CRLF，取证 **110 行 CRLF / 0 裸 LF**。**结论：bat 放在与 `pg-runtime\`、`redis-runtime\` 同级的目录（两台机器都在 `X:\Six`）即可，现在放哪台机器都能跑。**
+- **文档脱敏**：`apk_build_guide.md §1` 从「`$HOME/.gradle/wrapper/dists/...` + `<绝对路径>` 占位」改成探测式（先 `ls -d` 探 JDK/SDK/Gradle/build-tools，再 export 四个变量），§3/§4 的 `gradle -p android` 全改 `"$GRADLE_BIN"`（本机 PATH 里没有 gradle），验签与 `aapt` 的 build-tools 由 `36.0.0` 改 `<ver>`（**原值本来就是错的**）；`上线部署_杰哥配合清单` 的 keytool 与 `C:\Users\Administrator\` 全改 `$env:JAVA_HOME` / `$env:USERPROFILE`；`雷电模拟器_adb操作规范` 的 adb 改探测 + `MPK_ADB`，`emulator-5558` 改「以 `adb devices -l` 为准」，§4 标注「那是某一台机器的记录」；`带回公司_交接清单` 步骤 0 改探测式、§3 补两台机器实测值。
+- **脚本**：`perf-adb.mjs` 加 `MPK_ADB` + 常见路径探测；`check_home_env.py` 新增 Android 工具链只读检查，并修两个自身 bug —— `JAVA_HOME` 指向 17 被误判 OK（加 `_is_jdk21` 版本串校验）、空 env 被 `Path("")` 解析成当前目录（`_probe` 跳过空串，回退读 `local.properties` 的 `sdk.dir`）。
+- **新增硬约束**（MEMORY §3）：文档 / 脚本 / 配置**禁写死单机绝对路径**，一律「env 覆盖 → 常见位置探测 → 明确报错」三段式。
+- **验收**：`npm run verify -- --only=check,unit,docs --strict` → **8/8、0 失败 0 跳过、38.4s、`VERIFY_OK`**（门禁 32 / 前端 161 / 后端 481 / doc_check 232 / 镜像 `0e2b26c7629f`）；`check_home_env.py` → `ok=19 warn=3 fail=0`。
+- **教训**：换机器的第一件事不是跑服务，是**把「某台机器的记录值」和「全仓通用口径」在文档层面分开**。写死路径的文档在单机上永远是对的，换机器就全错，而且错在「看着像真的」——比缺文档更难发现。

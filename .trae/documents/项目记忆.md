@@ -41,6 +41,7 @@
 
 ## 5. 本机环境（PG / Redis / Android）
 - **PG = Windows 服务 `PostgreSQL16`**（127.0.0.1:5432），本机 `Start-Service PostgreSQL16` / `sc.exe start`（⚠️ PowerShell 里 `sc` 是 `Set-Content` 别名）。Redis `X:/Six/redis-runtime/redis-server.exe --port 6379`（X=D 家用 / E 公司），`redis-cli PING` 用 `127.0.0.1`。
+- ⚠️ **`pg-runtime` 目录布局两台不同**（2026-11-16 公司实测）：家里 `pg-runtime\native\bin`，公司 `pg-runtime\package\native\bin`。`start-mpk-runtime.bat` 已改成两处都探（探不到直接报错退出，不静默跑一半）；写这类脚本时别假设单一布局。
 - **启动约定（杰哥 2026-11-13 定）**：PG/Redis 由杰哥双击 `start-mpk-runtime.bat`（仓库外、幂等）启动；tx 开工前只探活（5432/6379、`health`），缺失**明确告知杰哥去启动**，不自行注册服务或拉进程顶替。后端脱离 AI 会话用 `start-mpk-backend.bat`（仓库根，CRLF）。
 - ⚠️ **bat 必须 CRLF + 块内 echo 禁裸 `()`**：`Write` 产出 LF 会让 `cmd.exe` 把 `if (...)` 解析错→闪退；用 `sed -i 's/\r$//; s/$/\r/'` 转 CRLF。沙箱 Bash 禁调 `cmd.exe`。
 - 后端 `.env`：`DATABASE_URL=postgresql://mpk@127.0.0.1:5432/monsterpk`、`REDIS_URL=redis://127.0.0.1:6379`、`PORT=3001`、`CORS_ORIGIN=http://localhost:5173,http://localhost`。

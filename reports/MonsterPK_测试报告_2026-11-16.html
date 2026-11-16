@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MonsterPK 自动化测试报告 · 2026-11-16</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--green:#16a34a;--red:#dc2626;--amber:#d97706;--blue:#2563eb}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);padding:28px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto}
+header{text-align:center;margin-bottom:24px}
+header h1{font-size:26px;margin-bottom:6px}
+header p{color:var(--muted);font-size:13px}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:12px;font-weight:600;margin-top:8px}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.card .v{font-size:30px;font-weight:750;letter-spacing:-.5px}
+.card .l{font-size:12px;color:var(--muted);margin-top:4px}
+.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)}
+.two{display:grid;grid-template-columns:1fr 1.25fr;gap:14px;margin-bottom:20px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px}
+.panel h2{font-size:15px;margin-bottom:14px}
+.donut-wrap{display:flex;align-items:center;gap:18px;justify-content:center}
+.donut{transform:rotate(-90deg)}
+.donut .bg{stroke:#eef2f7} .donut .fg{stroke:var(--green);stroke-linecap:round}
+.legend{font-size:13px;color:var(--muted)}
+.legend b{display:block;color:var(--green);font-size:24px}
+.bar-row{display:grid;grid-template-columns:170px 1fr 68px;align-items:center;gap:10px;margin:9px 0;font-size:13px}
+.bar-label{color:var(--text)}
+.bar-sub{display:block;font-size:11px;color:var(--muted)}
+.bar-track{height:12px;background:#eef2f7;border-radius:999px;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,#22c55e,#16a34a);border-radius:999px}
+.bar-value{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+h2.sec{font-size:17px;margin:26px 0 12px}
+.group{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.group summary{cursor:pointer;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:600;list-style:none}
+.group summary::-webkit-details-marker{display:none}
+.group summary::before{content:"▸";margin-right:8px;color:var(--muted)}
+.group[open] summary::before{content:"▾"}
+.gmeta{font-size:12px;color:var(--muted);font-weight:400}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 14px;text-align:left;border-top:1px solid var(--border)}
+th{background:#fafbfd;color:var(--muted);font-weight:500;font-size:12px}
+.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.ok{color:var(--green);white-space:nowrap}
+.bug-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--amber);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.bug-title{font-weight:650;margin-bottom:8px}
+.bid{display:inline-block;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 7px;font-size:12px;margin-right:6px}
+.sev{font-size:11px;padding:2px 8px;border-radius:4px;margin-left:6px}
+.sev.major{background:#fef2f2;color:var(--red)}
+.sev.minor{background:#ecfdf5;color:var(--green)}
+.sev.中{background:#fffbeb;color:var(--amber)}
+.sev.低{background:#f1f5f9;color:var(--muted)}
+.bug-line{font-size:13px;color:var(--muted);margin-top:4px}
+.bug-line b{display:inline-block;min-width:82px;color:var(--text)}
+.risk{display:flex;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:8px;font-size:13px}
+.risk b{font-size:14px}
+.risk p{color:var(--muted);margin-top:3px}
+.risk-tag{flex:none;height:22px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#fffbeb;color:var(--amber)}
+.empty{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:14px 16px;font-size:14px;margin-bottom:12px}
+footer{text-align:center;color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid var(--border);padding-top:14px}
+@media (max-width:760px){.two{grid-template-columns:1fr}.bar-row{grid-template-columns:120px 1fr 58px}body{padding:14px}}
+</style>
+</head>
+<body><div class="wrap">
+<header>
+  <h1>🎮 MonsterPK 自动化测试报告</h1>
+  <p>游戏自动化测试专家团 · 林测（测试总监） · 生成时间 2026-11-16 18:52:48</p>
+  <p>数据源：<code>npm run verify -- --strict</code> · 2026-11-16 18:39 全量复跑</p>
+  <div class="badge">VERIFY_OK · 63 阶段全绿 · 0 跳过</div>
+</header>
+
+<div class="summary">
+  <div class="card"><div class="v b">63</div><div class="l">验收阶段（通过）</div></div>
+  <div class="card"><div class="v b">2,442</div><div class="l">测试项总数</div></div>
+  <div class="card"><div class="v g">100%</div><div class="l">通过率</div></div>
+  <div class="card"><div class="v">281.6s</div><div class="l">总耗时（阶段累计 276.0s）</div></div>
+  <div class="card"><div class="v g">0</div><div class="l">新增 Bug</div></div>
+</div>
+
+<div class="two">
+  <div class="panel"><h2>通过率总览</h2>
+    <div class="donut-wrap">
+      <svg class="donut" width="130" height="130" viewBox="0 0 130 130">
+        <circle class="bg" cx="65" cy="65" r="52" fill="none" stroke-width="14"/>
+        <circle class="fg" cx="65" cy="65" r="52" fill="none" stroke-width="14" stroke-dasharray="326.7 326.7"/>
+        <text x="65" y="61" text-anchor="middle" font-size="24" font-weight="700" fill="#16a34a" transform="rotate(90 65 65)">100%</text>
+        <text x="65" y="80" text-anchor="middle" font-size="11" fill="#64748b" transform="rotate(90 65 65)">63 阶段</text>
+      </svg>
+      <div class="legend">通过 <b>63</b>失败 <b style="color:var(--red)">0</b>跳过 <b style="color:var(--muted)">0</b></div>
+    </div>
+  </div>
+  <div class="panel"><h2>各分组测试项分布</h2><div class="bar-row"><div class="bar-label">静态门禁 / 构建<span class="bar-sub">4 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:2.8%"></div></div><div class="bar-value">34</div></div><div class="bar-row"><div class="bar-label">单元测试<span class="bar-sub">2 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:54.8%"></div></div><div class="bar-value">676</div></div><div class="bar-row"><div class="bar-label">E2E 服务端 / 集成<span class="bar-sub">38 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div><div class="bar-value">1,234</div></div><div class="bar-row"><div class="bar-label">UI 冒烟（浏览器）<span class="bar-sub">16 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:21.6%"></div></div><div class="bar-value">266</div></div><div class="bar-row"><div class="bar-label">文档 / 镜像<span class="bar-sub">2 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:18.8%"></div></div><div class="bar-value">232</div></div><div class="bar-row"><div class="bar-label">环境 / 内容<span class="bar-sub">1 阶段</span></div><div class="bar-track"><div class="bar-fill" style="width:0.0%"></div></div><div class="bar-value">0</div></div></div>
+</div>
+
+<h2 class="sec">📋 阶段明细（点击分组展开）</h2>
+
+<details class="group" open>
+  <summary><span class="gname">静态门禁 / 构建</span><span class="gmeta">4 阶段 · 34 项 · 16.8s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">测试资产与构建配置静态门禁</td><td class="num">34</td><td class="num">0.3s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">前端类型检查</td><td class="num">—</td><td class="num">4.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">前端构建</td><td class="num">—</td><td class="num">8.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">后端类型检查</td><td class="num">—</td><td class="num">3.7s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+<details class="group" open>
+  <summary><span class="gname">单元测试</span><span class="gmeta">2 阶段 · 676 项 · 18.7s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">前端单测（vitest）</td><td class="num">161</td><td class="num">13.3s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">后端单测（node:test）</td><td class="num">515</td><td class="num">5.4s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+<details class="group">
+  <summary><span class="gname">E2E 服务端 / 集成</span><span class="gmeta">38 阶段 · 1,234 项 · 167.5s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">E2E 存档校验与风控</td><td class="num">61</td><td class="num">2.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 权威裁决（P1-2）</td><td class="num">30</td><td class="num">1.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 实时通道（P2-1）</td><td class="num">41</td><td class="num">5.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 在线权威态（P2-2）</td><td class="num">25</td><td class="num">1.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 服务端战斗（P3-1）</td><td class="num">48</td><td class="num">1.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 服务端存档写操作（P3-2）</td><td class="num">52</td><td class="num">1.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 写入并发控制（P4）</td><td class="num">41</td><td class="num">2.8s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W2 DB 条件更新 CAS（含双进程并发）</td><td class="num">25</td><td class="num">7.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W3 Redis 分布式锁（含双进程并发）</td><td class="num">23</td><td class="num">11.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W4 定时器选主与幂等（真 Redis）</td><td class="num">27</td><td class="num">3.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W5 广播与跨实例顶号（真 Redis 双实例）</td><td class="num">23</td><td class="num">7.6s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W6.2 房间工作单元事务边界（真 PG）</td><td class="num">13</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W6.3 quota 每日上限不超卖（真 PG 并发）</td><td class="num">13</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W6.7 房间跨实例送达（真 Redis 双实例）</td><td class="num">18</td><td class="num">8.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W7 野怪池跨实例互斥与归还（真 Redis 双实例）</td><td class="num">14</td><td class="num">6.8s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W8 战斗/会话/馆主 CD 跨实例共享（真 Redis 双实例）</td><td class="num">18</td><td class="num">6.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E W9 双实例横向扩展与故障注入（反代 + 真 Redis）</td><td class="num">42</td><td class="num">31.3s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 全链路游戏冒烟（注册→玩法→多人→反作弊）</td><td class="num">42</td><td class="num">3.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 顶号与共享野怪（P4-1）</td><td class="num">30</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 只读派生榜（P4-2a）</td><td class="num">39</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 房间内核（P4-2b）</td><td class="num">43</td><td class="num">10.4s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 单人 Boss 讨伐（P4-2c）</td><td class="num">44</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 1v1 玩家对战（P4-2d）</td><td class="num">16</td><td class="num">4.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 共斗 Boss / 副本（P4-2e）</td><td class="num">20</td><td class="num">3.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E nonce 去重确定性复现（p42e §85）</td><td class="num">14</td><td class="num">3.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 周期结算与榜单奖励（F01/F02）</td><td class="num">31</td><td class="num">2.4s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E Boss 双档奖励（F14）</td><td class="num">46</td><td class="num">1.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 六房副本发奖（F16）</td><td class="num">14</td><td class="num">4.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 徽章 / 成就 / 等级（F04）</td><td class="num">25</td><td class="num">1.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 单档化（F17）</td><td class="num">25</td><td class="num">1.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 地图锁（F18-a）</td><td class="num">8</td><td class="num">1.4s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 演武堂挑战（F18-b）</td><td class="num">18</td><td class="num">1.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 地图首领（F18-c）</td><td class="num">34</td><td class="num">1.6s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 地图首领防御性越权（F18-c）</td><td class="num">35</td><td class="num">2.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 剧情已读进度（F18-d）</td><td class="num">18</td><td class="num">1.6s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 核心循环串联（野怪→演武堂→Boss→地图首领→共斗）</td><td class="num">49</td><td class="num">2.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 内容完整度 / 边界 / 只读闸门矩阵（回归 B·E）</td><td class="num">47</td><td class="num">1.5s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">E2E 对抗攻防（115 项）</td><td class="num">122</td><td class="num">4.4s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+<details class="group">
+  <summary><span class="gname">UI 冒烟（浏览器）</span><span class="gmeta">16 阶段 · 266 项 · 70.2s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">375px 浏览器冒烟</td><td class="num">15</td><td class="num">6.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 前端服务端战斗链路（P3-1c）</td><td class="num">15</td><td class="num">4.2s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 共享野怪 UI（P4-1）</td><td class="num">13</td><td class="num">4.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 只读派生榜 UI（P4-2a）</td><td class="num">17</td><td class="num">4.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 讨伐 UI（P4-2c）</td><td class="num">19</td><td class="num">4.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 1v1 对战 UI（P4-2d）</td><td class="num">15</td><td class="num">4.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 共斗 UI（P4-2e）</td><td class="num">16</td><td class="num">4.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 周期榜与奖励 UI（F01/F02）</td><td class="num">17</td><td class="num">4.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 六房副本 UI（F16）</td><td class="num">15</td><td class="num">4.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 徽章 / 成就 UI（F04）</td><td class="num">15</td><td class="num">4.2s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 地图地区锁定 UI（F18-a）</td><td class="num">9</td><td class="num">3.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 演武堂 UI（F18-b）</td><td class="num">15</td><td class="num">4.0s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 地图首领 UI（F18-c）</td><td class="num">18</td><td class="num">4.1s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 剧情已读进度 UI（F18-d）</td><td class="num">14</td><td class="num">5.8s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">375px 全局状态与弹窗 UX（回归 C）</td><td class="num">26</td><td class="num">5.9s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">360×616 Auth 页一屏与报错态</td><td class="num">27</td><td class="num">2.8s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+<details class="group">
+  <summary><span class="gname">文档 / 镜像</span><span class="gmeta">2 阶段 · 232 项 · 1.2s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">文档一致性自检</td><td class="num">232</td><td class="num">0.7s</td><td class="ok">✓ 通过</td></tr><tr><td class="sname">记忆镜像校验</td><td class="num">—</td><td class="num">0.5s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+<details class="group">
+  <summary><span class="gname">环境 / 内容</span><span class="gmeta">1 阶段 · 0 项 · 1.6s</span></summary>
+  <table><thead><tr><th>阶段</th><th>测试项</th><th>耗时</th><th>结果</th></tr></thead><tbody><tr><td class="sname">服务端内容表一致性</td><td class="num">—</td><td class="num">1.6s</td><td class="ok">✓ 通过</td></tr></tbody></table>
+</details>
+
+<h2 class="sec">🐛 Bug 清单</h2>
+<div class="empty">本轮验收 <b>0 个新增 Bug</b>；以下为今日已修复的 3 个缺陷（P1 / P3 / P4），均经「旧实现必红 → 新实现全绿」取证。</div>
+<div class="bug-card"><div class="bug-title"><span class="bid">P1</span> 配额 CAS 重跑重复扣 <span class="sev major">Major</span></div>
+<div class="bug-line"><b>根因</b>retryCas 在事务内整段重跑，finishQuota 的一次性副作用执行两次，静默多扣每日次数。</div><div class="bug-line"><b>修复 + 取证</b>拆 markQuota（只改内存态随房间 CAS）+ applyQuota（bump 成功后落计数）；旧实现单测 3/3 红 → 新实现 3/3 绿。</div></div><div class="bug-card"><div class="bug-title"><span class="bid">P3</span> 被拒 nonce 不烧，下回合重放被当合法首提 <span class="sev major">Major</span></div>
+<div class="bug-line"><b>根因</b>先判 TURN_ALREADY_SUBMITTED 再 push，且 loadAndMutate 只在 res.ok 时落库，调顺序也没用。</div><div class="bug-line"><b>修复 + 取证</b>先烧 nonce + persistEvenIfFailed；e2e:nonce 第 13 条断言跨回合重放必 409 INTENT_REPLAY。</div></div><div class="bug-card"><div class="bug-title"><span class="bid">P4</span> nonce 未绑座位，跨座位抢占 <span class="sev major">Major</span></div>
+<div class="bug-line"><b>根因</b>seenNonces 是全房间共用一维数组，座位 A 用过的 nonce 让座位 B 被判 INTENT_REPLAY。</div><div class="bug-line"><b>修复 + 取证</b>去重键改 ${seat}:${nonce}，submitIntent / offerAutopilot 同改；红测 1 红 2 绿 → 3/3 绿；e2e:nonce 加 S4。</div></div>
+
+<h2 class="sec">⚠️ 质量风险 / 明确留白</h2>
+<div class="risk"><span class="risk-tag">中</span><div><b>64 条 nonce 窗口淘汰</b><p>超过 64 条后老 nonce 重放可能被接受（专家评审 §2.1 / §3.1）。建议独立表 + (roomId, seat, nonce) 唯一约束，级联清理；不要换成固定时间窗口。</p></div></div><div class="risk"><span class="risk-tag">低</span><div><b>P5：normalizeRoom 不补数组</b><p>读到字段引入前的旧行时 seenNonces 为 undefined，submitIntent 的 includes 会抛 TypeError → 500。</p></div></div><div class="risk"><span class="risk-tag">低</span><div><b>P6：注释口径与实现不一致</b><p>roomRegistry 中部分注释仍写旧口径，需随房间态重构一起清理。</p></div></div><div class="risk"><span class="risk-tag">低</span><div><b>并行负载下的偶发红</b><p>首轮全量 verify 出现 smoke:p42d「创建房间等待态 timeout:waiting」4 项红；单跑 --only=smoke:p42d 15/15、全量复跑 63/63。本轮未碰建房/WS 路径，判为并行偶发，原始日志在 .verify-logs/。</p></div></div>
+
+<footer>
+  自包含 HTML（无 CDN / 无外部字体）· 测试资产：静态门禁 34 / 前端 161 / 后端 515 / E2E 38 套 / UI 冒烟 16 套 / doc_check 232<br>
+  专家团边界：本项目为浏览器 + Capacitor WebView 的 H5 游戏，Airtest / AltTester 框架不适用；本报告基于项目自建 verify 体系真实日志，非模拟数据。
+</footer>
+</div></body></html>

@@ -9,7 +9,7 @@
  *  - **单实例内无交错**：Node 单线程下一个方法调用内部不会交错；跨 await 的「读→判定→写」
  *    由路由层的 `withRoomLock()` 串行（W3 起为 Redis 租约锁）。
  *  - **load-once / set-once**：一次逻辑操作只 `get` 一次、只 `set` 一次（末尾 `bump`）。
- *    子方法（`settleRoom`/`abandonRoom`/`advanceTurn`/`finishQuota`/`autoSubmit`）都改「传入的
+ *    子方法（`settleRoom`/`abandonRoom`/`advanceTurn`/`markQuota`/`autoSubmit`）都改「传入的
  *    room 对象」而不再各自 `get`，避免 clone-on-get 后各自 CAS 互相踩（W6.1 行版本 CAS 前提）。
  *  - 客户端只发意图、只收 `RoomView` 全量快照；这里没有任何「按客户端上报的状态写字段」的路径。
  */
@@ -168,6 +168,13 @@ export class RoomQuotaExceededError extends Error {
 const DEFAULT_QUOTA_LIMIT = 3;
 
 const MAX_SEEN_NONCES = 64;
+
+/**
+ * 一次待落的 quota 计数变更（bug_log §88 P1）。
+ * 只由 `markQuota()` 产生、必须由 `applyQuota()` 在 **CAS bump 成功之后** 消费：
+ * 放在 bump 之前会在 `retryCas` 重跑时被重复扣（CAS 冲突 → 整段重来 → 计数加两次）。
+ */
+type QuotaSettle = { key: string; limit: number; commit: boolean };
 const ROOM_ID_MAX_LEN = 96;
 const INTENT_MAX_LEN = 64;
 
@@ -324,14 +331,29 @@ export class RoomRegistry {
     return this.storage.tryHoldQuota(key, limit);
   }
 
-  /** commit / release 都幂等；已 committed 的房间再 abandon 不会倒扣。改传入 room，不写 room 行。 */
-  private async finishQuota(room: RoomState, commit: boolean): Promise<void> {
+  /**
+   * 标记一次 quota 状态迁移：**只改内存态、不碰 DB 计数**，随 room 一起走 revision CAS。
+   * CAS 冲突时整段重跑、内存改动被丢弃，所以重跑多少次都不会重复扣（§88 P1）。
+   */
+  private markQuota(room: RoomState, commit: boolean, out: QuotaSettle[]): void {
     const q = room.quota;
     if (!q || q.state !== 'held') return;
-    const limit = q.limit ?? DEFAULT_QUOTA_LIMIT;
-    const ok = await this.storage.settleQuota(q.key, commit, limit);
-    if (!ok) throw new RoomQuotaExceededError(q.key, limit);
     q.state = commit ? 'committed' : 'released';
+    out.push({ key: q.key, limit: q.limit ?? DEFAULT_QUOTA_LIMIT, commit });
+  }
+
+  /**
+   * 真正落 quota 计数：**只允许在 bump 成功之后调用**。任一条返回 false 就抛错，
+   * 让 W6.2 的工作单元整包回滚（房间态与计数一起回退，绝不留半扣）。
+   * `out.length = 0` 保证同一次尝试不会重复消费。
+   */
+  private async applyQuota(out: QuotaSettle[]): Promise<void> {
+    for (const q of out) {
+      const { key, commit, limit } = q;
+      const ok = await this.storage.settleQuota(q.key, commit, limit);
+      if (!ok) throw new RoomQuotaExceededError(key, limit);
+    }
+    out.length = 0;
   }
 
   async create(params: {
@@ -552,7 +574,9 @@ export class RoomRegistry {
     nonce: string;
     now: number;
   }): Promise<RoomResult<{ room: RoomState; advanced: boolean }>> {
+    const quotaOut: QuotaSettle[] = [];
     return this.loadAndMutate(params.roomId, async (room) => {
+      quotaOut.length = 0; // 重跑时清空上次尝试的标记
       if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
       if (room.status !== 'active' && room.status !== 'paused') {
         return fail('ROOM_CLOSED', '房间已结束');
@@ -563,29 +587,40 @@ export class RoomRegistry {
       if (!validIntent(params.intent)) return fail('ROOM_BAD_INTENT', '意图不合法');
       if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
       if (room.seenNonces.includes(params.nonce)) return fail('INTENT_REPLAY', '该意图已提交');
+      // §88 P3：nonce 是「这次尝试的唯一编号」，**被拒也要烧掉**。原来先判
+      // TURN_ALREADY_SUBMITTED 再 push，导致本回合被判重的那条 nonce 下回合重放
+      // 会被当成合法首提（迟到意图落到错回合）。配合 persistEvenIfFailed 落库。
+      room.seenNonces.push(params.nonce);
+      if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
       if (room.submitted.includes(seat.seat)) {
         return fail('TURN_ALREADY_SUBMITTED', '本回合已提交过意图');
       }
-      room.seenNonces.push(params.nonce);
-      if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
       room.submitted.push(seat.seat);
       room.turnIntents.push({ seat: seat.seat, intent: params.intent });
       room.lastAction = { seat: seat.seat, intent: params.intent, kind: 'manual', at: params.now };
       let advanced = false;
       if (room.submitted.length >= room.seats.length) {
-        await this.advanceTurn(room, params.now, this.configFor(room.mode));
+        await this.advanceTurn(room, params.now, this.configFor(room.mode), quotaOut);
         advanced = true;
       }
       return ok({ room, advanced });
-    }, params.now);
+    }, params.now, {
+      persistEvenIfFailed: true,
+      afterCas: () => this.applyQuota(quotaOut),
+    });
   }
 
   /**
    * 推进回合：清空本回合提交，turn+1。
    * P4-2d：若房间带 1v1 战斗态，先按双方意图结算一回合（可能分出胜负 → settled）。
-   * 改传入 room，不写 room 行；quota 走 finishQuota（独立写）。
+   * 改传入 room，不写 room 行；quota 走 markQuota → applyQuota（bump 之后落地，§88 P1）。
    */
-  private async advanceTurn(room: RoomState, now: number, cfg: RoomConfig): Promise<void> {
+  private async advanceTurn(
+    room: RoomState,
+    now: number,
+    cfg: RoomConfig,
+    quotaOut: QuotaSettle[],
+  ): Promise<void> {
     if (room.pvp && !room.pvp.finished) {
       const rng = Math.random;
       const actions = room.turnIntents
@@ -600,7 +635,7 @@ export class RoomRegistry {
             room.status = 'settled';
             room.endReason = 'pvp_finished';
             room.deadlineAt = 0;
-            await this.finishQuota(room, true);
+            this.markQuota(room, true, quotaOut);
           }
         }
       }
@@ -619,7 +654,7 @@ export class RoomRegistry {
           room.status = 'settled';
           room.endReason = 'coop_finished';
           room.deadlineAt = 0;
-          await this.finishQuota(room, true);
+          this.markQuota(room, true, quotaOut);
         }
       }
     }
@@ -629,7 +664,7 @@ export class RoomRegistry {
     room.deadlineAt = now + cfg.roundTimeoutMs;
   }
 
-  /** 正常结算：quota `hold → commit`，次数只有到这里才真的扣。改 room，finishQuota 独立写。 */
+  /** 正常结算：quota `hold → commit`，次数只有到这里才真的扣。改 room，计数由 applyQuota 落。 */
   private settleRoom(room: RoomState, now: number): void {
     if (room.status === 'settled' || room.status === 'abandoned') return;
     room.status = 'settled';
@@ -646,25 +681,29 @@ export class RoomRegistry {
   }
 
   async settle(roomId: string, now: number): Promise<RoomResult<RoomState>> {
+    const quotaOut: QuotaSettle[] = [];
     return this.loadAndMutate(roomId, async (room) => {
+      quotaOut.length = 0;
       if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
       if (room.status === 'settled') return ok(room);
       if (room.status === 'abandoned') return fail('ROOM_CLOSED', '房间已解散');
       this.settleRoom(room, now);
-      if (room.quota && room.quota.state === 'held') await this.finishQuota(room, true);
+      this.markQuota(room, true, quotaOut);
       return ok(room);
-    }, now);
+    }, now, { afterCas: () => this.applyQuota(quotaOut) });
   }
 
   async abandon(roomId: string, now: number, reason: string): Promise<RoomResult<RoomState>> {
+    const quotaOut: QuotaSettle[] = [];
     return this.loadAndMutate(roomId, async (room) => {
+      quotaOut.length = 0;
       if (!room) return fail('ROOM_NOT_FOUND', '房间不存在或已解散');
       if (room.status === 'abandoned') return ok(room);
       if (room.status === 'settled') return fail('ROOM_CLOSED', '房间已结算');
       this.abandonRoom(room, now, reason);
-      if (room.quota && room.quota.state === 'held') await this.finishQuota(room, false);
+      this.markQuota(room, false, quotaOut);
       return ok(room);
-    }, now);
+    }, now, { afterCas: () => this.applyQuota(quotaOut) });
   }
 
   /** 服务端代放：托管座位走 `autopilot`，超时未交的座位走 `timeout`。改传入 room。 */
@@ -704,12 +743,14 @@ export class RoomRegistry {
   async tick(roomId: string, now: number, rng: Rng, report: TickReport): Promise<void> {
     // CAS 冲突（如 WS 掉线标记并发写）整段重跑。report 的 deleted/abandoned/changedRoomIds
     // 都在 bump 成功后才 push，重跑不重复；timedOut/autopiloted 计数在极小概率冲突下会多计一次，
-    // 仅影响日志口径，房间态与 quota 由 CAS + finishQuota 幂等保证精确。
+    // 仅影响日志口径，房间态与 quota 由 CAS 成功后才落计数（applyQuota）保证精确（§88 P1）。
     await this.retryCas(() => this.tickOnce(roomId, now, rng, report));
   }
 
   private async tickOnce(roomId: string, now: number, rng: Rng, report: TickReport): Promise<void> {
     const room = await this.storage.get(roomId);
+    // 每次尝试都从空列表开始：CAS 冲突重跑时上一步的标记必须丢弃（§88 P1）。
+    const quotaOut: QuotaSettle[] = [];
     if (!room) return;
     const cfg = this.configFor(room.mode);
     if (room.status === 'abandoned' || room.status === 'settled') {
@@ -721,16 +762,18 @@ export class RoomRegistry {
     }
     if (room.status === 'forming' && now - room.createdAt > cfg.ttlMs) {
       this.abandonRoom(room, now, 'forming_timeout');
-      if (room.quota && room.quota.state === 'held') await this.finishQuota(room, false);
+      this.markQuota(room, false, quotaOut);
       await this.bump(room, now);
+      await this.applyQuota(quotaOut);
       report.abandoned.push(roomId);
       report.changedRoomIds.push(roomId);
       return;
     }
     if (room.allOfflineSince !== null && now - room.allOfflineSince >= cfg.allOfflineGraceMs) {
       this.abandonRoom(room, now, 'all_offline');
-      if (room.quota && room.quota.state === 'held') await this.finishQuota(room, false);
+      this.markQuota(room, false, quotaOut);
       await this.bump(room, now);
+      await this.applyQuota(quotaOut);
       report.abandoned.push(roomId);
       report.changedRoomIds.push(roomId);
       return;
@@ -746,7 +789,7 @@ export class RoomRegistry {
     }
     // 2) 全员交齐 → 立即推进。
     if (room.submitted.length >= room.seats.length) {
-      await this.advanceTurn(room, now, cfg);
+      await this.advanceTurn(room, now, cfg, quotaOut);
       changed = true;
     } else if (room.deadlineAt > 0 && now >= room.deadlineAt) {
       // 3) 回合超时 → 服务端用注入 RNG 代放所有未提交座位，正常推进回合。
@@ -754,11 +797,12 @@ export class RoomRegistry {
         if (room.submitted.includes(seat.seat)) continue;
         this.autoSubmit(room, seat, 'timeout', now, rng, report);
       }
-      await this.advanceTurn(room, now, cfg);
+      await this.advanceTurn(room, now, cfg, quotaOut);
       changed = true;
     }
     if (changed) {
       await this.bump(room, now);
+      await this.applyQuota(quotaOut);
       report.changedRoomIds.push(roomId);
     }
   }
@@ -796,24 +840,31 @@ export class RoomRegistry {
    * 包裹单次房间操作：load 一次 → fn(room) 改对象（不写）→ 仅当 fn 返回 ok 且房间确有变更时 bump 一次。
    * 路由层已持 `withRoomLock(roomId)` 串行，故本方法内 load→set 不会被同实例其它持锁写打断；
    * 但 WS 掉线/重连标记未持房间锁，冲突时整段重跑（乐观并发，效果等价于串行）。
-   * fn 内部已自行处理 quota 写（finishQuota）；bump 只写 room 行。
+   * quota 计数不在 fn 里写：fn 只 markQuota，bump 成功后才由 afterCas 落计数（§88 P1）。
    */
   private loadAndMutate<T>(
     roomId: string,
     fn: (room: RoomState | undefined) => Promise<RoomResult<T>>,
     now: number,
+    opts?: {
+      /** CAS 成功（bump 之后）执行一次；quota 计数这类一次性副作用走这里。 */
+      afterCas?: (room: RoomState) => Promise<void>;
+      /** 失败结果也要落库：nonce 去重必须「被拒也记账」（§88 P3）。 */
+      persistEvenIfFailed?: boolean;
+    },
   ): Promise<RoomResult<T>> {
     return this.retryCas(async () => {
       const room = await this.storage.get(roomId);
       const before = room ? JSON.stringify(room) : null;
       const res = await fn(room);
-      if (res.ok) {
+      if (res.ok || opts?.persistEvenIfFailed) {
         // fn 直接改传入的 room 对象（load-once / set-once）；按 room 序列化判定是否真有变更。
         // 注意：用 room 而非 res.value —— submitIntent 返回 { room, advanced }，res.value 不是 RoomState。
         const after = room ? JSON.stringify(room) : null;
         // 无实际变更（如托管已是目标状态）则不抬 revision，与原行为一致。
         if (room && before !== after) await this.bump(room, now);
       }
+      if (res.ok && opts?.afterCas && room) await opts.afterCas(room);
       return res;
     });
   }

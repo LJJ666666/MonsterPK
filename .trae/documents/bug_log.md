@@ -2265,6 +2265,76 @@ puppeteer 缓存里的 headless-shell 能跑。桌面环境没有这个缓存时
 **验收**：`e2e:p42b` **43/43 × 3 轮**（8.1s / 8.2s / 8.4s）；断言一条没放宽
 （仍要求 `lastAction.kind==='timeout'` 且 `turn>=3`）。
 
+### §88 立项修 P1/P3：配额重复计数 + 被拒不烧 nonce（2026-11-16）
+
+来源：`p42e_后端设计评审_专家意见_2026-11-16.md` 的 P1 / P3。杰哥定「先立项修 P1/P3」。
+
+#### P1 配额在 CAS 重跑时被扣两次
+
+**根因（代码级）**：`finishQuota()` 是「改 DB 计数」的一次性副作用，却被放在
+`retryCas` 的重试块里执行 —— `tickOnce` / `loadAndMutate` 一旦 CAS 冲突就整段重跑，
+`settleQuota` 于是执行两次（`held-1`、`committed+1`、每日账 `+1` 各多一次）。
+`Room.data` 里的 `quota.state` 是随房间写回的，冲突时被丢弃，所以重跑时仍读到 `held`，
+压根拦不住第二次。
+
+**修法（把副作用挪到 CAS 之后）**：
+
+| 原来 | 现在 |
+|---|---|
+| `finishQuota(room, commit)` 立刻调 `storage.settleQuota` | `markQuota(room, commit, out)` **只改内存态**（随 room 走 CAS），把意图塞进 `out` |
+| — | `applyQuota(out)` 在 **bump 成功之后**才落计数；返回 false 仍抛 `RoomQuotaExceededError`，让工作单元整包回滚 |
+| — | `loadAndMutate` 新增 `afterCas` 回调（bump 之后执行一次） |
+| `tickOnce` 四处 `await finishQuota(...)` | 四处 `markQuota(...)`；每个 `await bump(...)` 之后紧跟 `applyQuota` |
+
+**这保留了 W6.2 的原子性**：计数仍在同一事务内，失败仍整包回滚；只是顺序从
+「先扣计数、后写房间」变成「先写房间（CAS 裁决）、后扣计数」——重跑时前一步会被丢弃，
+扣计数只可能发生一次。
+
+#### P3 被拒的 nonce 没记账，下回合重放被当合法首提
+
+**根因（比评审说的更深一层）**：不只是 `submitIntent` 先判 `TURN_ALREADY_SUBMITTED`
+再 push nonce；**`loadAndMutate` 只在 `res.ok` 时才 bump**，所以即使调换顺序，
+被拒路径的 nonce 也根本不会落库。两处都得改。
+
+**修法**：① `seenNonces.push` 提到状态判定之前（nonce 是「这次尝试的编号」，被拒也要烧）；
+② `loadAndMutate` 新增 `persistEvenIfFailed` 选项，`submitIntent` 开启 —— 失败结果也落库。
+副作用：被拒那次也会 `revision+1`、也走一次 CAS 重试路径，代价可忽略。
+
+#### 红 → 绿证据（先让用例在旧实现上红）
+
+新增 `backend/tests/p1p3RoomSettle.test.ts`（3 条，纯内存假存储，可注入 CAS 冲突）：
+
+| 用例 | 旧实现 | 新实现 |
+|---|---|---|
+| P1 settle 遇 CAS 冲突，`commit` 次数 | **红：2 次**（`[{key:p1_q,commit:true},{key:p1_q,commit:true}]`） | 绿：1 次 |
+| P1 abandon 遇 CAS 冲突，`release` 次数 | **红：2 次** | 绿：1 次 |
+| P3 被拒 nonce 是否落库 + 下回合重放 | **红** | 绿 |
+
+取证方式：`git checkout -- src/lib/roomRegistry.ts` 换回旧实现 → 3 条全红；恢复新实现 → 3 条全绿。
+E2E 侧 `e2e:nonce` 追加一条 HTTP 断言（13 项）：上回合被判 `TURN_ALREADY_SUBMITTED` 的
+nonce，新回合重放必须 `409 INTENT_REPLAY`。
+
+#### 本轮**不做**的（明确留白）
+
+- **P4**（nonce 未绑座位，全房间共用一维数组）：改动会污染已落库的 `seenNonces` 语义，
+  需要配数据迁移，单独立项。注意：P3 修好后，A 用过的 nonce 现在连「被拒」也会烧，
+  P4 的症状（队友用过的 nonce 让本方被判重放）会比以前更容易撞到 —— 客户端 nonce 需保证唯一。
+- **P5**（`normalizeRoom` 不补数组）、**P6**（注释口径）：低风险清理项，随房间态整包写回的
+  重构一起做。
+
+#### 验收
+
+- 后端单测 **509 → 512**（新增 3 条）；`e2e:nonce` **13/13**；
+- 房间相关回归：`e2e:p42b` 43/43 ×3、`e2e:p42d` 16/16、`e2e:p42e` 20/20、`e2e:f16` 14/14、
+  `e2e:w62` 13/13、`e2e:w63` 13/13；
+- 全量 `npm run verify -- --strict` → **63 通过 / 0 失败 / 0 跳过 / 425.1s / `VERIFY_OK`**
+  （门禁 34 / 前端 161 / 后端 512 / E2E 38 套 / 冒烟 16 套 / doc_check 232 / 镜像一致）。
+
+**踩到的一个门禁细节**：`doc_check` 的 W6.3 断言硬绑字面量
+`this.storage.settleQuota(q.key, commit, limit)`。重构后写法变了就红 —— 没有放宽断言，
+而是把 `applyQuota` 的解构写成能保留该调用形状（`const { key, commit, limit } = q;`），
+保证「仍在用原子原语、没退回 `setQuota` 的 read-modify-write」这条契约照旧可检。
+
 ### §87 p42b 回合超时代放：又是「等时间窗」，改成先挂监听再等条件（2026-11-16）
 
 **现象**：终态全量 `verify --strict` 62/1，唯一红的是

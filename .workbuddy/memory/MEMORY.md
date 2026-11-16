@@ -50,7 +50,7 @@
 ## 6. 后端架构快照（细节 §60/§64~§70/§80）
 - 存档三层校验 `saveValidator`→`antiCheat`→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前拦整包 PUT 夹带真值。W6 PG 行版本 CAS + `roomUnitOfWork` 事务 + DB 原子 quota + 租约 token（WS 监听器必须在**任何 await 之前**挂载）；W7 `WildStorage` 全 async + 四组 Lua（`useRedisStorage` 须在心跳启动前装配，内容生成不能进 Lua）；W8 `kvStore` TTL（空前缀 `clear()` 拒绝执行）、`BattleStorage` 物理 TTL=逻辑×2、馆主 CD 原子 `acquire`、会话 `hydrate()` + `sess:rev:*`。
 - F18-d：`StoryBeatSeen` + `GET/POST /api/story/seen`，白名单来自 `CONTENT.storyBeatIds`（`gen-content` 从 `src/game/story.ts` 生成，`check:content` 防漂移），校验纯函数 `game/storyBeats.ts`。
-- ⚠️ **p42e nonce 已定案（§85）**：产品去重成立（23 次构造全绿），红的是 `e2e:p42e` 断言假定「第二路必被拒」；已改语义版（恰好一路 200 + 一路 409）并新增 `e2e:nonce`（`backend/tests/e2e_p42e_nonce_race.mjs`，S3 顺序反转＝确定性红灯）。产品侧遗留 P1 配额重复计数 / P3 被拒不烧 nonce / P4 nonce 未绑座位 / P5 normalize 缺数组，另立项；评审见 `p42e_后端设计评审_专家意见_2026-11-16.md`。
+- ⚠️ **p42e/§85~§88 房间内核**：nonce 竞态定案＝断言假定顺序（产品成立），已改语义断言 + 新增 `e2e:nonce`；**P1 配额重复计数已修**（`finishQuota` → `markQuota` 只改内存态 + `applyQuota` 在 bump 之后落计数，`loadAndMutate` 加 `afterCas`）；**P3 被拒不烧 nonce 已修**（先 push nonce + `persistEvenIfFailed`，原来 `loadAndMutate` 只在 `res.ok` 时 bump 才是真根因）。**留白**：P4 nonce 未绑座位（需数据迁移）、P5 `normalizeRoom` 缺数组、P6 注释。
 - 已挡：改档/伪造捕获/白嫖购买/重复领奖/改时间/越权写/CAS 旧覆盖/顶号后续写/抢野怪/伪造榜/伪造剧情 id；未挡加速器改节奏、改本地展示态。
 
 ## 7. 已修坑 / 交接（详 bug_log、HANDOFF）

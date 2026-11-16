@@ -104,6 +104,12 @@ async function main() {
   suite.check('跨回合重放旧 nonce 仍 409 INTENT_REPLAY（去重窗口不随回合清空）',
     afterAdvance.status === 409 && afterAdvance.data?.code === 'INTENT_REPLAY', tag(afterAdvance));
 
+  // §88 P3：上回合被判 TURN_ALREADY_SUBMITTED 的 nonce 也必须记账，
+  // 否则它在新回合重放会被当成合法首提（迟到意图落到错回合）。
+  const lateReplay = await act(host.token, roomId, 'enter:0', 'seq_2');
+  suite.check('被拒（TURN_ALREADY_SUBMITTED）的 nonce 下回合重放仍 409 INTENT_REPLAY',
+    lateReplay.status === 409 && lateReplay.data?.code === 'INTENT_REPLAY', tag(lateReplay));
+
   // ═══ S2. 并发：恰好一路 200、一路 409 ═══
   console.log('\n—— S2. 并发同一 nonce（不假定顺序）——');
   const firstWin = { first: 0, second: 0 };  // 409 落在第 1 路 / 第 2 路 的次数

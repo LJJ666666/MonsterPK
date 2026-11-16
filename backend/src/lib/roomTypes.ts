@@ -113,8 +113,6 @@ export type RoomState = {
   quota: RoomQuota | null;
   /** 全员掉线的起始时刻；有人在线即为 null。 */
   allOfflineSince: number | null;
-  /** 已消费的意图去重键（限长），元素形如 `${seat}:${nonce}`；作用域是房间+座位（§88 P4）。 */
-  seenNonces: string[];
   endReason: string | null;
   /** P4-2d：1v1 战斗态（仅 pvp 模式有值）。挂在房间态上，写经 withRoomLock 串行。 */
   pvp?: PvpState | null;

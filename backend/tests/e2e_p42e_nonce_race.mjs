@@ -192,6 +192,25 @@ async function main() {
     seatA.status === 200 && seatB.status === 200,
     `host=${tag(seatA)} guest=${tag(seatB)}`);
 
+  // ═══ S5. §92 B：nonce 唯一表无淘汰窗口，跨窗口重放永久判重 ═══
+  // 旧实现 seenNonces 限长 64、shift() 淘汰最早 —— 烧 65 个后再重放最早的那个，
+  // 会被当成合法首提直接 200（旧意图落到新回合）。唯一表下必须仍 INTENT_REPLAY。
+  console.log('\n—— S5. 65 个 nonce 后重放最早（B：唯一表无窗口）——');
+  const windowFirst = await act(host.token, roomId, 'enter:0', 'win_000');
+  suite.check('窗口用例首个 nonce 200', windowFirst.status === 200, tag(windowFirst));
+  let burnRejected = 0;
+  for (let i = 1; i < 65; i++) {
+    const burn = await act(host.token, roomId, 'enter:0', `win_${String(i).padStart(3, '0')}`);
+    if (burn.status === 409 && burn.data?.code === 'TURN_ALREADY_SUBMITTED') burnRejected += 1;
+    else throw new Error(`第 ${i + 1} 个 nonce 预期被拒烧号，实际 ${tag(burn)}`);
+  }
+  const fillS5 = await act(guest.token, roomId, 'enter:1', 'win_g0');
+  suite.check('65 个 nonce 已烧（1 提交 + 64 被拒）+ guest 补交推进回合',
+    burnRejected === 64 && fillS5.status === 200, `burnRejected=${burnRejected} fill=${tag(fillS5)}`);
+  const windowReplay = await act(host.token, roomId, 'enter:0', 'win_000');
+  suite.check('跨 65 个 nonce 的窗口重放仍 409 INTENT_REPLAY（旧实现必红）',
+    windowReplay.status === 409 && windowReplay.data?.code === 'INTENT_REPLAY', tag(windowReplay));
+
   for (const c of sockets) await closeWs(c);
   await cleanupAccounts(created);
   suite.done();

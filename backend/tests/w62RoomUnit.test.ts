@@ -44,7 +44,7 @@ function minimalRoom(roomId: string): RoomState {
     roomId, mode: 'kernel', status: 'forming', revision: 1,
     createdAt: 1, updatedAt: 1, seats: [], turn: 1, deadlineAt: 0,
     submitted: [], turnIntents: [], lastAction: null, quota: null,
-    allOfflineSince: null, seenNonces: [], endReason: null,
+    allOfflineSince: null, endReason: null,
     pvp: null, coop: null, pvpSettled: false, coopSettled: false,
     coopBossId: null,
   } as RoomState;

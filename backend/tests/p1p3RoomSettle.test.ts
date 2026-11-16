@@ -62,6 +62,19 @@ class FakeStorage implements RoomStorage {
   }
   async dailyCommitted(): Promise<number> { return 0; }
   async quotaKeys(): Promise<string[]> { return []; }
+  /** §92 B：nonce 唯一表内存版（键 `${seat}:${nonce}`），行为与 InMemoryRoomStorage 一致。 */
+  private readonly nonces = new Map<string, Set<string>>();
+  async registerNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    let set = this.nonces.get(roomId);
+    if (!set) { set = new Set(); this.nonces.set(roomId, set); }
+    const key = `${seat}:${nonce}`;
+    if (set.has(key)) return false;
+    set.add(key);
+    return true;
+  }
+  async hasNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    return this.nonces.get(roomId)?.has(`${seat}:${nonce}`) ?? false;
+  }
 }
 
 test('P1：CAS 冲突重跑不会把 quota 计数加两次（commit 只发生一次）', async () => {
@@ -128,9 +141,9 @@ test('P3：被判 TURN_ALREADY_SUBMITTED 的 nonce 也必须落库（否则下�
   assert.equal(dup.ok, false);
   assert.equal(!dup.ok && dup.code, 'TURN_ALREADY_SUBMITTED');
 
-  const room = await storage.get(roomId);
-  assert.ok(room?.seenNonces.includes('0:n_late'),
-    `被拒的 nonce 必须已落库（键为 座位:nonce），实际 seenNonces=${JSON.stringify(room?.seenNonces)}`);
+  // §92 B：nonce 真值迁 RoomNonceSeen 唯一表（房间+座位作用域），不再住房间 JSON。
+  assert.ok(await storage.hasNonce(roomId, 0, 'n_late'),
+    '被拒的 nonce 必须已落库（房间+座位作用域唯一表）');
 
   // 下回合重放同一个 nonce：必须判重放，而不是当成新回合的合法首提。
   const guestTurn = await reg.submitIntent({

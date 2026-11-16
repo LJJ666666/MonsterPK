@@ -380,15 +380,19 @@ const createSchema = z.object({
 }).strip();
 
 const joinSchema = z.object({}).strip();
+// §92 P6：nonce 字符集与内核 validIntent 对齐（允许冒号）。旧正则不含冒号，与
+// intent 的 pvp 意图（move:tackle 等）漂移 —— 客户端 nonce 若复用意图命名习惯会被
+// 400 拒掉，而同样的串直接发 WS 却合法。统一常量防再漂移。
+const NONCE_REGEX = /^[A-Za-z0-9_:\-]+$/;
 const intentSchema = z.object({
   // P4-2d：pvp 意图带冒号（move:tackle / switch:1 / flee）。
-  intent: z.string().min(1).max(64).regex(/^[A-Za-z0-9_:\-]+$/),
-  nonce: z.string().min(1).max(64).regex(/^[A-Za-z0-9_\-]+$/),
+  intent: z.string().min(1).max(64).regex(NONCE_REGEX),
+  nonce: z.string().min(1).max(64).regex(NONCE_REGEX),
 }).strip();
 const autopilotSchema = z.object({
   targetSeat: z.number().int().min(0).max(7),
   enabled: z.boolean(),
-  nonce: z.string().min(1).max(64).regex(/^[A-Za-z0-9_\-]+$/).optional(),
+  nonce: z.string().min(1).max(64).regex(NONCE_REGEX).optional(),
 }).strip();
 const paramsSchema = z.object({ roomId: z.string().min(1).max(96) });
 

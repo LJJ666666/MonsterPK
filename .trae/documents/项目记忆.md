@@ -11,14 +11,14 @@
 - P5-1 锚点（勿删）：**P5-1 W4 ✅**；W6.1 异步化+CAS；**W6.2 事务边界**；**W6.3 DB 计数**；W6.4~W9 见 §66~§70。
 - 选型 B：PG 唯一真值 + Redis 锁/租约/TTL/pub-sub/临时态，**Redis 不存权益真值**。权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`（**实施设计定稿**，W0 起「不改产品代码」解除）；`P5-1 / F10 共享存储迁移评估` 已被取代。
 - 债务：**F01/F02 已偿还**；**F14 已偿还**、**F16** 六房副本已实现；F04 真值在服务端独立表、**不写 `SaveData`**；**F17 单档化已实现并偿还**。
-- **下一步**：① 玩法重做 W1~W5 已全部完成上线（§90，提交 `97a4144`）；② 演武堂入口已迁回各自地图（§91）；③ P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；④ 房间内核 A/B 评估见 `房间内核AB项_当前适配性评估_2026-11-16.md`：A（normalizeRoom 补数组）低价值可顺手、B（64 窗口→唯一表）是真缺陷值得单开；⑤ 钻石商店（广告/充值买进化道具，本轮明确不做）。
-- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89；玩法重做 §90；演武堂入口迁移+A/B评估 §91。
+- **下一步**：① P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；② 房间内核 A/B 已修完（§92：B 走 `RoomNonceSeen` 唯一表无淘汰窗口、A 补数组兜底+P6 正则统一）；③ 钻石商店（广告/充值买进化道具）；④ 内容扩充。
+- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89；玩法重做 §90；演武堂入口迁移+A/B评估 §91；房间内核 A/B 修复 §92。
 - **演武堂入口口径（§91）**：馆主挑战**不在 `GameHeader`**，而在每张城镇地图详情页的本城馆主卡片（7 城 ↔ 7 馆主一一对应），只发 `startGymBattle(currentLocation.id)`；`GymModal.tsx` 已删。`smoke:f18b` 探针用「地图列表整行 button（含城名+进入）」进入详情，非独立"进入" button。
 
 ## 2. 技术栈 / 测试
 - 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`（剧情 `src/game/story.ts`）；`useGameStore.ts` 无 persist，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=**12**（W2 加 `expShareOn` 升版；后端 `EXPECTED_SAVE_VERSION` 同步），BattleState 不进存档。
 - 后端 Fastify4+Prisma5+PG16+zod+tsx；模型 `Room`/`RoomQuota*`/`Boss*Grant`/`BadgeGrant`/`AchievementGrant`/`StoryBeatSeen`；改 schema 前停 :3001（Windows DLL 锁）→ migrate dev → generate；`Save.data` 存 JSON 文本、`revision` 独立列。
-- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **64 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 161、后端 **534**、E2E **39 套**（新增 `e2e:story_reward`）、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
+- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **64 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 161、后端 **538**、E2E **39 套**（含 `e2e:story_reward` / `e2e:nonce` 含 S5 窗口用例）、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
 
 ## 3. 硬约束
 - 新增**存档**字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `EXPECTED_SAVE_VERSION`；前端已无 migrate。
@@ -50,7 +50,7 @@
 ## 6. 后端架构快照（细节 §60/§64~§70/§80/§88）
 - 存档三层校验 `saveValidator`→`antiCheat`→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前拦整包 PUT 夹带真值。W6 PG 行版本 CAS + `roomUnitOfWork` 事务 + DB 原子 quota + 租约 token（WS 监听器必须在**任何 await 之前**挂载）；W7 `WildStorage` 全 async + 四组 Lua；W8 `kvStore` TTL、`BattleStorage` 物理 TTL=逻辑×2、馆主 CD 原子 `acquire`、会话 `hydrate()` + `sess:rev:*`。
 - F18-d：`StoryBeatSeen` + `GET/POST /api/story/seen`，白名单来自 `CONTENT.storyBeatIds`（`gen-content` 生成，`check:content` 防漂移）。
-- ⚠️ **p42e/§85~§88**：定案＝测试断言假定顺序（产品成立），已改语义断言 + 新增 `e2e:nonce`；**P1 配额重复计数已修**（`finishQuota`→`markQuota` 只改内存态 + `applyQuota` 在 bump 之后落计数，`loadAndMutate` 加 `afterCas`）；**P3 被拒不烧 nonce 已修**（先 push nonce + `persistEvenIfFailed`）；**P4 nonce 绑定座位已修**（§89：键 `${seat}:${nonce}`，两处判定同改，零 schema/迁移，旧裸串一次性失效）。**留白**：P5 `normalizeRoom` 缺数组、P6 注释、64 窗口淘汰。
+- ⚠️ **p42e/§85~§88**：定案＝测试断言假定顺序（产品成立），已改语义断言 + 新增 `e2e:nonce`；**P1 配额重复计数已修**（`finishQuota`→`markQuota` 只改内存态 + `applyQuota` 在 bump 之后落计数，`loadAndMutate` 加 `afterCas`）；**P3 被拒不烧 nonce 已修**（先登记 + `persistEvenIfFailed`）；**P4 nonce 绑定座位已修**（§89）；**§92 A/B 已修**：nonce 真值迁 `RoomNonceSeen(roomId,seat,nonce)` 唯一表（Cascade 随房删、`registerNonce` 走 createMany+skipDuplicates 免 P2002、CAS 回滚同滚），`normalizeRoom` 补 seats/submitted/turnIntents 兜底并剥废弃 `seenNonces`，REST nonce 正则与内核 validIntent 统一 `NONCE_REGEX`。房间内核评审缺陷全清。
 - 已挡：改档/伪造捕获/白嫖购买/重复领奖/改时间/越权写/CAS 旧覆盖/顶号后续写/抢野怪/伪造榜/伪造剧情 id；未挡加速器改节奏、改本地展示态。
 
 ## 7. 已修坑 / 交接（详 bug_log、HANDOFF）

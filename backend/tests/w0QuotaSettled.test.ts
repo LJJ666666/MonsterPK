@@ -68,6 +68,19 @@ class CopyStorage implements RoomStorage {
   async settleQuota(): Promise<boolean> { return true; }
   async dailyCommitted(): Promise<number> { return 0; }
   async quotaKeys(): Promise<string[]> { return []; }
+  /** §92 B：nonce 唯一表内存版（键 `${seat}:${nonce}`）。 */
+  private readonly nonces = new Map<string, Set<string>>();
+  async registerNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    let set = this.nonces.get(roomId);
+    if (!set) { set = new Set(); this.nonces.set(roomId, set); }
+    const key = `${seat}:${nonce}`;
+    if (set.has(key)) return false;
+    set.add(key);
+    return true;
+  }
+  async hasNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    return this.nonces.get(roomId)?.has(`${seat}:${nonce}`) ?? false;
+  }
 }
 
 test('create 显式初始化两个结算标记为 false', async () => {

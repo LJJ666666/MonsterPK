@@ -184,6 +184,28 @@ export class PgRoomStorage {
     });
     return daily.count === 1;
   }
+
+  /**
+   * §92 B：nonce 登记（房间+座位+nonce 唯一）。事务内经 roomDb() 自动拿 tx，
+   * 与房间 CAS 同一事务 —— CAS 冲突回滚时 nonce 登记一并回滚，重跑重新登记。
+   * `createMany + skipDuplicates` 走 ON CONFLICT DO NOTHING，不产生 P2002
+   * （一条语句报错会把整个 PG 事务置为 aborted，见 create 处注释）。
+   */
+  async registerNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    const res = await roomDb().roomNonceSeen.createMany({
+      data: [{ roomId, seat, nonce }],
+      skipDuplicates: true,
+    });
+    return res.count === 1;
+  }
+
+  async hasNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    const row = await roomDb().roomNonceSeen.findUnique({
+      where: { roomId_seat_nonce: { roomId, seat, nonce } },
+      select: { id: true },
+    });
+    return row !== null;
+  }
 }
 
 export { clone as cloneRoom };

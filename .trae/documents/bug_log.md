@@ -2440,4 +2440,23 @@ nonce 允许冒号，但只在第一个冒号切座位号，`1:2:abc` 与 `12:ab
 
 **验收**：`check` / 前端单测 161 / `test_inventory` 34 / `doc_check` 232 全过；`smoke:f18b` **15/15**（新链路），f18a 9 + f18c 18 + f18d 14 + ux 26 + `e2e:f18b` 18 + `e2e:f18a` 8 相关回归全绿；全量 `npm run verify -- --strict` **64/64 / 0 跳过 / 286.7s / `VERIFY_OK`**。
 
+### §92 房间内核 B（64 条 nonce 窗口淘汰 → 唯一表）+ 顺手 A（normalizeRoom 补数组 / P6 正则）（2026-11-16）
 
+**立项**：§91 评估后杰哥拍板「开工 B 顺手修了 A」。按规矩红测先行，`RoomNonceSeen` 迁移前确认 :3001 已停。
+
+**B（真缺陷）**：`seenNonces` 限长 64、`shift()` 淘汰最早 —— 烧 65 个 nonce 后重放最早那个会被当合法首提直接 200（专家评审 §2.1）。修法：真值迁独立表。
+- schema 新增 `RoomNonceSeen(roomId, seat, nonce)`，`@@unique([roomId, seat, nonce])` + `@@index([roomId])`，Room 关系 `onDelete: Cascade`（房间删除级联清 nonce）；迁移 `room_nonce_seen`。
+- `RoomStorage` 接口加 `registerNonce(roomId, seat, nonce)`（true=首提 / false=重放）与只读 `hasNonce`；InMemory 用 `Map<roomId, Set<seat:nonce>>`、delete 同删；PG 用 `createMany + skipDuplicates`（ON CONFLICT DO NOTHING，不产生 P2002 以免把事务置 aborted —— 同 W6.2 create 约束），经 `roomDb()` 自动在 withRoomUnit 事务内，CAS 冲突回滚时登记一并回滚。
+- `submitIntent` / `offerAutopilot` 判重改走 `registerNonce`；**删** `MAX_SEEN_NONCES` / `seenNonceKey` / `RoomState.seenNonces`；P3「被拒也烧」与 P4「绑座位」语义原样保留（登记仍先于 TURN_ALREADY_SUBMITTED 判定）。
+- 幂等语义沿用现行为：重复回 409 `INTENT_REPLAY`，不做「回放首响应」。
+
+**A（低价值补丁，顺手）**：
+- `roomNormalize.ts` 补 `seats`/`submitted`/`turnIntents` 缺数组兜底空数组（原只补 contributions key + 两个布尔），并剥残留的废弃字段 `seenNonces`；
+- P6：REST 层 `room.ts` 的 nonce zod 正则（不含冒号）与内核 `validIntent`（含冒号）漂移 —— 统一为常量 `NONCE_REGEX`。
+
+**红→绿取证**：
+- `nonceWindow.test.ts` B-1（65 个 nonce 后重放最早）：旧实现红（重放 200）→ 新实现绿（INTENT_REPLAY）；
+- `roomNormalizeArrays.test.ts` A-1/A-2 红（不补数组、不剥字段）→ 绿；A-3 齐全字段零回归基线始终绿；
+- `e2e_p42e_nonce_race.mjs` 新增 S5（HTTP 全链路 65 个 nonce 跨窗口重放）旧实现必红，新实现 3/3 绿，全套 **17/17**。
+
+**验收**：后端单测 534→**538**（+4）；`e2e:p42b` 43 + `p42d` 16 + `p42e` 20 + `f16` 14 + `w62` 13 + `w63` 13 + `nonce` 17 + `story_reward` 9 全绿；全量 `npm run verify -- --strict` 见当日日志。旧房间 JSON 的 `seenNonces` 由 normalize 剥离，无需数据迁移。

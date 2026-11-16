@@ -243,8 +243,29 @@ model Room {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  nonces RoomNonceSeen[]
+
   @@index([status])
   @@index([updatedAt])
+}
+
+// §92 B 项：意图 nonce 去重真值迁出房间整包 JSON。
+// 旧方案把 `seenNonces`（限长 64、shift 淘汰）塞在 Room.data 里：老 nonce 被挤掉后
+// 重放直接绕过去重（专家评审 §2.1）。唯一表永久保留、由 DB 唯一约束裁决，
+// 且随房间删除级联清理（房间是 nonce 的 owner key，房间没了去重记录即无意义）。
+// 写入只在 `withRoomUnit` 事务内经 `registerNonce`（createMany + skipDuplicates，
+// 不产生 P2002 以免把 PG 事务置为 aborted —— 与 W6.2 create 注释同一约束）。
+model RoomNonceSeen {
+  id        Int      @id @default(autoincrement())
+  roomId    String
+  seat      Int
+  nonce     String
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [roomId], onDelete: Cascade)
+
+  @@unique([roomId, seat, nonce])
+  @@index([roomId])
 }
 
 // P5-1 W6（#181/#184）：房间 quota 每日已消耗次数真值。

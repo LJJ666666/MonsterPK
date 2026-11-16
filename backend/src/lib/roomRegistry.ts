@@ -55,6 +55,14 @@ export interface RoomStorage {
   settleQuota(key: string, commit: boolean, limit: number): Promise<boolean>;
   /** W6.3（#184）：事务内二次 count，读每日累计账（`RoomQuotaDaily`）。 */
   dailyCommitted(key: string): Promise<number>;
+  /**
+   * §92 B：登记一个意图 nonce（作用域=房间+座位，`RoomNonceSeen` 唯一表）。
+   * 返回 true = 首提（登记成功）；false = 已存在（重放）。**无淘汰窗口**，
+   * 房间存活期内永久判重；房间删除时随 `Room` 级联清理。
+   */
+  registerNonce(roomId: string, seat: number, nonce: string): Promise<boolean>;
+  /** §92 B：只读查询（测试 / 诊断用），判断某 nonce 是否已登记。 */
+  hasNonce(roomId: string, seat: number, nonce: string): Promise<boolean>;
 }
 
 const emptyUsage = (): QuotaUsage => ({ held: 0, committed: 0 });
@@ -69,6 +77,8 @@ export class InMemoryRoomStorage implements RoomStorage {
   private readonly quotas = new Map<string, QuotaUsage>();
   /** W6.3：与 PG 的 `RoomQuotaDaily` 同语义的每日累计账（单测零 IO 用）。 */
   private readonly daily = new Map<string, number>();
+  /** §92 B：nonce 唯一表内存版。键 `${roomId}` → Set(`${seat}:${nonce}`），房间删除同删。 */
+  private readonly nonces = new Map<string, Set<string>>();
 
   async get(roomId: string): Promise<RoomState | undefined> {
     const r = this.rooms.get(roomId);
@@ -87,7 +97,7 @@ export class InMemoryRoomStorage implements RoomStorage {
     this.rooms.set(room.roomId, clone(room));
     return true;
   }
-  async delete(roomId: string): Promise<void> { this.rooms.delete(roomId); }
+  async delete(roomId: string): Promise<void> { this.rooms.delete(roomId); this.nonces.delete(roomId); }
   async all(): Promise<RoomState[]> { return Array.from(this.rooms.values()).map(clone); }
   async getQuota(key: string): Promise<QuotaUsage> {
     return this.quotas.get(key) ? clone(this.quotas.get(key)!) : emptyUsage();
@@ -121,6 +131,17 @@ export class InMemoryRoomStorage implements RoomStorage {
     this.quotas.set(key, u);
     this.daily.set(key, daily + 1);
     return true;
+  }
+  async registerNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    let set = this.nonces.get(roomId);
+    if (!set) { set = new Set(); this.nonces.set(roomId, set); }
+    const key = `${seat}:${nonce}`;
+    if (set.has(key)) return false;
+    set.add(key);
+    return true;
+  }
+  async hasNonce(roomId: string, seat: number, nonce: string): Promise<boolean> {
+    return this.nonces.get(roomId)?.has(`${seat}:${nonce}`) ?? false;
   }
 }
 
@@ -166,17 +187,6 @@ export class RoomQuotaExceededError extends Error {
 
 /** 旧房间态没有 limit 字段时的回退值，与 room.ts::quotaLimit() 默认值一致。 */
 const DEFAULT_QUOTA_LIMIT = 3;
-
-const MAX_SEEN_NONCES = 64;
-
-/**
- * 去重键作用域是「房间 + 座位」（bug_log §88 P4）：不同座位各用自己的 nonce，
- * 不能让先提交的座位把后提交的座位判成重放。nonce 本身允许冒号，故只在第一个
- * 冒号处切出十进制座位号，`1:2:abc` 与 `12:abc` 不会撞。
- */
-function seenNonceKey(seat: number, nonce: string): string {
-  return `${seat}:${nonce}`;
-}
 
 /**
  * 一次待落的 quota 计数变更（bug_log §88 P1）。
@@ -418,7 +428,6 @@ export class RoomRegistry {
       lastAction: null,
       quota: key === undefined ? null : { key, state: 'held', limit: params.quotaLimit ?? DEFAULT_QUOTA_LIMIT },
       allOfflineSince: seat.online ? null : params.now,
-      seenNonces: [],
       endReason: null,
       pvp: params.pvp ?? null,
       coop: null,
@@ -566,11 +575,11 @@ export class RoomRegistry {
       if (target.autopilot === params.enabled) return ok(room);
       if (params.nonce !== undefined) {
         if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
-        // 绑定操作者座位，不是 target.seat：nonce 代表「谁发起这次托管切换」。
-        const key = seenNonceKey(actor.seat, params.nonce);
-        if (room.seenNonces.includes(key)) return fail('INTENT_REPLAY', '该意图已提交');
-        room.seenNonces.push(key);
-        if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
+        // §92 B：登记在「房间+操作者座位」作用域（§88 P4 语义不变），真值在
+        // RoomNonceSeen 唯一表，无淘汰窗口；WS 上行同房间锁串行，登记即裁决。
+        if (!(await this.storage.registerNonce(room.roomId, actor.seat, params.nonce))) {
+          return fail('INTENT_REPLAY', '该意图已提交');
+        }
       }
       target.autopilot = params.enabled;
       return ok(room);
@@ -597,15 +606,15 @@ export class RoomRegistry {
       if (!seat.online) return fail('ROOM_SEAT_OFFLINE', '当前成员已掉线');
       if (!validIntent(params.intent)) return fail('ROOM_BAD_INTENT', '意图不合法');
       if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
-      // §88 P4：键是 `${seat}:${nonce}`，作用域房间+座位；不同座位用同一个短串
-      // 互不干扰，同座位重放仍判 INTENT_REPLAY。
-      const nonceKey = seenNonceKey(seat.seat, params.nonce);
-      if (room.seenNonces.includes(nonceKey)) return fail('INTENT_REPLAY', '该意图已提交');
-      // §88 P3：nonce 是「这次尝试的唯一编号」，**被拒也要烧掉**。原来先判
-      // TURN_ALREADY_SUBMITTED 再 push，导致本回合被判重的那条 nonce 下回合重放
-      // 会被当成合法首提（迟到意图落到错回合）。配合 persistEvenIfFailed 落库。
-      room.seenNonces.push(nonceKey);
-      if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
+      // §88 P4：作用域「房间+座位」，不同座位用同一个短串互不干扰，同座位重放仍判
+      // INTENT_REPLAY。§92 B：真值从房间 JSON 的 64 条窗口数组迁到 RoomNonceSeen
+      // 唯一表 —— 老 nonce 不再被 shift() 挤掉，跨窗口重放永久判重；登记与本房
+      // CAS 同一事务（withRoomUnit），冲突回滚时登记一并回滚。
+      // §88 P3：nonce 是「这次尝试的唯一编号」，**被拒也要烧掉** —— 登记在
+      // TURN_ALREADY_SUBMITTED 判定之前，被拒的那条下回合重放仍判 INTENT_REPLAY。
+      if (!(await this.storage.registerNonce(room.roomId, seat.seat, params.nonce))) {
+        return fail('INTENT_REPLAY', '该意图已提交');
+      }
       if (room.submitted.includes(seat.seat)) {
         return fail('TURN_ALREADY_SUBMITTED', '本回合已提交过意图');
       }

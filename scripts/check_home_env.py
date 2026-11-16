@@ -10,6 +10,8 @@ MonsterPK 新机器环境自检（只读，不修改任何文件）。
 """
 from pathlib import Path
 import hashlib
+import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -61,6 +63,91 @@ if major(npm_v) >= 10:
     say("OK", f"npm {npm_v} (>=10)")
 else:
     say("WARN", f"npm missing or old: {npm_v or 'N/A'} (recommend >= 10)")
+
+# ---- Android toolchain (paths differ per machine; probe, never hard-code) ----
+# Only report, never fail: web-only work does not need any of this.
+def _probe(cands):
+    """First existing candidate. Empty strings are skipped (Path('') is '.')."""
+    for cand in cands:
+        if not cand:
+            continue
+        p = Path(cand)
+        if p.exists():
+            return p
+    return None
+
+
+def _is_jdk21(java_exe):
+    """JAVA_HOME may point at 17; verify the actual version string."""
+    try:
+        out = subprocess.run([str(java_exe), "-version"], capture_output=True,
+                             text=True, errors="replace", timeout=20)
+        blob = (out.stderr or "") + (out.stdout or "")
+        # "openjdk version \"21\"" / "java version \"21.0.10\""
+        return 'version "21' in blob or 'version "1.21' in blob
+    except Exception:
+        return False
+
+
+_java_env = os.environ.get("JAVA_HOME", "")
+_jdk_cands = [
+    str(Path(_java_env) / "bin" / "java.exe") if _java_env else "",
+    "D:/jdk21/jdk-21.0.10+7/bin/java.exe", "E:/Six/jdk/jdk-21/bin/java.exe",
+    "E:/Six/jdk/jdk-21/bin/java",
+]
+# First existing one that really is 21; fall back to any existing java for the WARN text.
+_jdk21 = None
+_jdk = None
+for _c in _jdk_cands:
+    if not _c or not Path(_c).exists():
+        continue
+    if _jdk is None:
+        _jdk = Path(_c)
+    if _is_jdk21(_c):
+        _jdk21 = Path(_c)
+        break
+
+_sdk_env = os.environ.get("ANDROID_HOME", "")
+_sdk = _probe([
+    _sdk_env,
+    "D:/android-sdk", "E:/Six/android-sdk", "D:/Six/android-sdk",
+])
+# local.properties may already pin the SDK even when the env var is unset
+if not _sdk:
+    _lp = ROOT / "android" / "local.properties"
+    if _lp.is_file():
+        for line in _lp.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.strip().startswith("sdk.dir="):
+                _sdk = _probe([line.split("=", 1)[1].strip()])
+                break
+
+_gradle = _probe([
+    "E:/Six/gradle-dist/gradle-8.14.3/bin/gradle.bat",
+    "D:/Six/gradle-dist/gradle-8.14.3/bin/gradle.bat",
+    str(Path.home() / ".gradle/wrapper/dists/gradle-8.14.3-all/99x8n45tzh0zr4vi9rz6hydd7/gradle-8.14.3/bin/gradle.bat"),
+])
+
+if _jdk21:
+    say("OK", f"JDK21 found at {_jdk21.parent.parent}")
+elif _jdk:
+    say("WARN", f"java at {_jdk.parent.parent} is not JDK21 (APK build needs 21) -> apk_build_guide.md section 1")
+elif shutil.which("java"):
+    say("WARN", "java on PATH is not JDK21 (APK build needs 21) -> apk_build_guide.md section 1")
+else:
+    say("WARN", "no JDK21 found (only needed for APK builds)")
+
+if _sdk and (_sdk / "platforms" / "android-36").is_dir():
+    bt = sorted((_sdk / "build-tools").glob("*")) if (_sdk / "build-tools").is_dir() else []
+    say("OK", f"Android SDK {_sdk} (android-36, build-tools {', '.join(b.name for b in bt) or 'none'})")
+elif _sdk:
+    say("WARN", f"Android SDK {_sdk} missing platforms/android-36")
+else:
+    say("WARN", "no Android SDK found (only needed for APK builds)")
+
+if _gradle:
+    say("OK", f"Gradle 8.14.3 unpacked at {_gradle.parent.parent}")
+else:
+    say("WARN", "no unpacked Gradle 8.14.3 found (only needed for APK builds)")
 
 # ---- dependencies ----
 for label, p in (("frontend", ROOT / "node_modules"),

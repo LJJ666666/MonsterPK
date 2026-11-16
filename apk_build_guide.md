@@ -11,23 +11,34 @@
 
 ## 1. 工具链（先核再用，勿猜）
 
-本机 Windows 已装 JDK 21 / Android SDK（android-36）/ Gradle 8.14.3 发行包缓存，具体路径见
-`.workbuddy/memory/MEMORY.md` §5。开工前一条命令确认存在：
+**三条路径因机而异，本文不写死任何一台机器的盘符。** 开工前先跑一遍探明（Git Bash）：
 
 ```bash
-ls -d "$JAVA_HOME" "$ANDROID_HOME" \
-  "$HOME/.gradle/wrapper/dists/gradle-8.14.3-all/99x8n45tzh0zr4vi9rz6hydd7/gradle-8.14.3/bin/gradle"
+# JDK 21：家里在 D:\jdk21\*，公司在 E:\Six\jdk\*，别的机器可能在 Program Files
+ls -d /d/jdk21/*/bin/java.exe /e/Six/jdk/*/bin/java.exe 2>/dev/null
+# Android SDK（含 platforms/android-36）
+ls -d /d/android-sdk /e/Six/android-sdk 2>/dev/null
+# 解压好的 Gradle 8.14.3 发行包（不是 wrapper 的 .gradle/wrapper/dists）
+ls -d /e/Six/gradle-dist/gradle-8.14.3/bin/gradle /d/Six/gradle-dist/gradle-8.14.3/bin/gradle 2>/dev/null
+# build-tools 实际版本（apksigner 在 <build-tools>/<ver>/lib/apksigner.jar）
+ls -1 "${ANDROID_HOME:-/e/Six/android-sdk}/build-tools" 2>/dev/null
 ```
 
-一次性设置（**不要**写 `android/local.properties`，不要改 `gradle-wrapper.properties` 去联网）：
+一次性设置（**不要**写 `android/local.properties`，不要改 `gradle-wrapper.properties` 去联网）。
+下面四个值按上一步的实测结果替换，`<build-tools 版本>` 取 `ls` 出来的那一个：
 
 ```bash
-export JAVA_HOME="<JDK21 绝对路径>"
-export ANDROID_HOME="<Android SDK 绝对路径>"
-export PATH="$HOME/.gradle/wrapper/dists/gradle-8.14.3-all/99x8n45tzh0zr4vi9rz6hydd7/gradle-8.14.3/bin:$JAVA_HOME/bin:$PATH"
+export JAVA_HOME="/e/Six/jdk/jdk-21"                 # 家里：/d/jdk21/jdk-21.0.10+7
+export ANDROID_HOME="/e/Six/android-sdk"             # 家里：/d/android-sdk
+export GRADLE_BIN="/e/Six/gradle-dist/gradle-8.14.3/bin/gradle"
+export GRADLE_USER_HOME="/e/Six/gradle-user-home"    # 有 AGP 依赖缓存，别用默认 ~/.gradle
+export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
-所有 Gradle 命令一律 `gradle -p android <task> --offline --console=plain --no-daemon`。
+> JDK 必须是 21（Capacitor 8 / AGP 8.13 用 `sourceCompatibility 21`）；系统 PATH 上的
+> Temurin 17 会报 `错误: 无效的目标发行版: 21`。核验：`"$JAVA_HOME/bin/java" -version`。
+
+所有 Gradle 命令一律 `"$GRADLE_BIN" -p android <task> --offline --console=plain --no-daemon`。
 
 ## 2. 前端产物与 Capacitor 同步
 
@@ -59,11 +70,11 @@ mpkVersionName=1.0
 发版可用 `-P` 覆盖，不必改文件：
 
 ```bash
-gradle -p android assembleRelease --offline --console=plain --no-daemon \
+"$GRADLE_BIN" -p android assembleRelease --offline --console=plain --no-daemon \
   -PmpkVersionCode=2 -PmpkVersionName=1.0.0
 ```
 
-用 `aapt dump badging <apk> | head -3` 核产物里的 `versionCode` / `versionName`。
+用 `"$ANDROID_HOME/build-tools/<ver>/aapt.exe" dump badging <apk> | head -3` 核产物里的 `versionCode` / `versionName`。
 
 ## 4. Release 签名（fail-closed）
 
@@ -73,17 +84,17 @@ export MPK_KEYSTORE_PASSWORD="<store password>"
 export MPK_KEY_ALIAS="<key alias>"
 export MPK_KEY_PASSWORD="<key password>"
 
-gradle -p android assembleRelease --offline --console=plain --no-daemon -PmpkVersionCode=2 -PmpkVersionName=1.0.0
+"$GRADLE_BIN" -p android assembleRelease --offline --console=plain --no-daemon -PmpkVersionCode=2 -PmpkVersionName=1.0.0
 # 产物：android/app/build/outputs/apk/release/app-release.apk
 ```
 
 `android/app/build.gradle` 在 task 图就绪时校验四要素与 keystore 文件存在性：
 **缺任一项直接 `BUILD FAILED`，绝不产出 unsigned APK**（避免把未签名包误当渠道包）。debug 构建不受影响。
 
-验签：
+验签（`<ver>` 用 `ls "$ANDROID_HOME/build-tools"` 出来的值，家里 / 公司可能不同）：
 
 ```bash
-java -jar "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" verify --print-certs \
+java -jar "$ANDROID_HOME/build-tools/<ver>/lib/apksigner.jar" verify --print-certs \
   android/app/build/outputs/apk/release/app-release.apk
 ```
 

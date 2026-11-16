@@ -11,9 +11,27 @@
  * 前置：APK 已安装、宿主机 3001 后端在跑、雷电模拟器已启动。
  */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 
-const ADB = 'D:/game/leidian/LDPlayer14/adb.exe';
+// adb 路径因机而异（家里 / 公司 / CI 都不同），按「env → 常见路径探测 → PATH 里的 adb」解析。
+// 想固定就设 MPK_ADB，例如 MPK_ADB="D:/game/leidian/LDPlayer14/adb.exe"。
+function resolveAdb() {
+  if (process.env.MPK_ADB) return process.env.MPK_ADB;
+  const candidates = [
+    'D:/game/leidian/LDPlayer14/adb.exe',
+    'E:/game/leidian/LDPlayer14/adb.exe',
+    'D:/android-sdk/platform-tools/adb.exe',
+    'E:/Six/android-sdk/platform-tools/adb.exe',
+    'D:/Six/android-sdk/platform-tools/adb.exe',
+    `${process.env.ANDROID_HOME ?? ''}/platform-tools/adb.exe`,
+    'adb', // 交给 PATH
+  ];
+  for (const c of candidates) {
+    if (c === 'adb' || existsSync(c)) return c;
+  }
+  return 'adb';
+}
+const ADB = resolveAdb();
 const PKG = 'com.monster.game';
 const ACT = `${PKG}/.MainActivity`;
 const arg = (k, d) => {

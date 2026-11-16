@@ -108,6 +108,13 @@ export const api = {
   },
   /** F04：徽章 / 成就 / 人物等级只读投影，客户端无任何写入口。 */
   playerProgress: () => request("/api/player/progress"),
+  /**
+   * F18-d 剧情已读进度（2026-11-16）：真值在服务端独立表，不写 SaveData。
+   * GET 拿已看过的 beat id；POST 幂等标记「看完了」，服务端按内容表白名单校验。
+   */
+  storySeen: () => request("/api/story/seen"),
+  markStorySeen: (beatId: string) =>
+    request("/api/story/seen", { method: "POST", body: JSON.stringify({ beatId }) }),
   me: () => request("/api/auth/me"),
   register: (username: string, password: string) =>
     request("/api/auth/register", {

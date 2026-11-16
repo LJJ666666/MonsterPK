@@ -131,8 +131,11 @@ async function main() {
 
   // ── D 回合超时 ──
   drain(aWs); drain(bWs);
-  await sleep(1_600); // > kernel roundTimeoutMs=1.2s
-  const timeoutMsg = await waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 4_000);
+  // 超时代放靠内核 tick 驱动，tick 本身是周期任务：全量 verify 并行时机器更慢，
+  // 原来 1.6s + 4s 的窗口在慢机上会擦边（单跑绿、全量偶发红）。
+  // 放宽等待时间，断言本身不变——等的是「代放真的发生」，不是把标准降低。
+  await sleep(2_600); // > kernel roundTimeoutMs=1.2s，并留出 tick 周期余量
+  const timeoutMsg = await waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 8_000);
   suite.check('回合超时由服务端随机代放并广播', !!timeoutMsg, JSON.stringify(timeoutMsg?.room?.lastAction));
   suite.check('超时代放后回合正常推进',
     (timeoutMsg?.room?.turn ?? 0) >= 3, `turn=${timeoutMsg?.room?.turn}`);

@@ -105,6 +105,8 @@ const STAGES = [
   { id: 'e2e:f18c', name: 'E2E 地图首领（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c'], need: 'backend', timeout: 300_000 },
   // F18-c 防御性：伪造/越权/顶号/超上限/跨用户/幂等/放弃泄漏回归。
   { id: 'e2e:f18c_security', name: 'E2E 地图首领防御性越权（F18-c）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18c_security'], need: 'backend', timeout: 300_000 },
+  // F18-d：剧情已读进度（服务端独立表，不写 SaveData）+ 未知 id 拒绝 + 跨账号隔离 + 存档 revision 不变。
+  { id: 'e2e:f18d', name: 'E2E 剧情已读进度（F18-d）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f18d'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:core_loop', name: 'E2E 核心循环串联（野怪→演武堂→Boss→地图首领→共斗）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:core_loop'], need: 'backend', timeout: 300_000 },
   // 回归 B/E：内容完整度矩阵 + 边界 + 5 个只读接口伪上报闸门对照（不重复 hardening / f18c_security）。
   { id: 'e2e:content_matrix', name: 'E2E 内容完整度 / 边界 / 只读闸门矩阵（回归 B·E）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:content_matrix'], need: 'backend', timeout: 300_000 },
@@ -126,6 +128,8 @@ const STAGES = [
   { id: 'smoke:f18b', name: '375px 演武堂 UI（F18-b）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18b.mjs'], need: 'both', timeout: 300_000 },
   // F18-c：地图首领弹窗 + 掉落预览 + 点首城首领「挑战」真进战斗（/arena）+ 375px 无横向溢出。
   { id: 'smoke:f18c', name: '375px 地图首领 UI（F18-c）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18c.mjs'], need: 'both', timeout: 300_000 },
+  // F18-d：首次进营地弹到达剧情并点完 3 屏 → 服务端记已读 → 第二次冷启动不再重播。
+  { id: 'smoke:f18d', name: '375px 剧情已读进度 UI（F18-d）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_f18d.mjs'], need: 'both', timeout: 300_000 },
   // 回归 C：Start 页三种状态文案 + 剧情/徽章弹窗 + 全局封号/顶号弹窗的滚动、换行与可关闭。
   { id: 'smoke:ux', name: '375px 全局状态与弹窗 UX（回归 C）', cwd: ROOT, cmd: 'node', args: ['scripts/ui_smoke_ux.mjs'], need: 'both', timeout: 300_000 },
   // Auth 页：登录/注册切换 + 紧凑态 + 三字段报错态，360×616 真机视口一屏约束（§74 回归）。
@@ -138,8 +142,8 @@ const GROUPS = {
   check: ['check:inventory', 'front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
-  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:ux', 'smoke:auth'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:f18d', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
+  smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:f18d', 'smoke:ux', 'smoke:auth'],
   docs: ['docs:doc', 'docs:memory'],
 };
 

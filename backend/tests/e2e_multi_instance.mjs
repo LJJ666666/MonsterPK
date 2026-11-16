@@ -366,6 +366,10 @@ async function main() {
     if (reStart.data?.battle?.battleId) await rest(BASE_A, '/api/battle/abandon', { method: 'POST', token: accF2.token, body: { battleId: reStart.data.battle.battleId } });
     if (battleF2) await rest(BASE_A, '/api/battle/abandon', { method: 'POST', token: accF2.token, body: { battleId: battleF2 } });
     instB = await spawnInstance(PORT_B); // 恢复双实例供 F3
+    // 反代的 live 表由它自己的周期探活维护：进程刚起来（health 200）≠ 反代已把它标回 live。
+    // 全量 verify 并行时机器更慢，这里会差一个探活周期，F3-pre 就读到 liveB=false（假红）。
+    // 显式等「反代认为 B 可用」，而不是等 spawn 完就断言——等可用，不是等存在。
+    for (let i = 0; i < 60 && !proxy.isLive(BASE_B); i += 1) await sleep(200);
 
     // ——— F3：连接闪断 → 经反代重连到幸存实例，回源拉全量 ———
     const accF3 = await mk('w9f3');

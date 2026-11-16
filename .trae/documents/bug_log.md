@@ -2037,3 +2037,84 @@ grep -o 'no-store\|已恢复连接' android/app/src/main/assets/public/assets/in
 - **新增硬约束**（MEMORY §3）：文档 / 脚本 / 配置**禁写死单机绝对路径**，一律「env 覆盖 → 常见位置探测 → 明确报错」三段式。
 - **验收**：`npm run verify -- --only=check,unit,docs --strict` → **8/8、0 失败 0 跳过、38.4s、`VERIFY_OK`**（门禁 32 / 前端 161 / 后端 481 / doc_check 232 / 镜像 `0e2b26c7629f`）；`check_home_env.py` → `ok=19 warn=3 fail=0`。
 - **教训**：换机器的第一件事不是跑服务，是**把「某台机器的记录值」和「全仓通用口径」在文档层面分开**。写死路径的文档在单机上永远是对的，换机器就全错，而且错在「看着像真的」——比缺文档更难发现。
+### §80 F18-d 剧情已读进度上服务端（2026-11-16）
+
+**现象**：每次冷启动进营地，都要连点 3 次「继续」把已经看过的到达 intro 重看一遍（§72 观察点 1 遗留）。
+
+**根因**：`src/lib/story.ts` 的去重载体是模块级 `Set`（`firedSession`），重载页面即清。这是 2026-11-10 的刻意设计（规范 §33.5 原口径「跑完即释放，状态不入档」），代价就是跨会话没有记忆。
+
+**定案：不往 `SaveData` 塞字段。** 那要递增 `SCHEMA_VERSION` 12 + 同步后端 `EXPECTED_SAVE_VERSION`，为一个纯展示用的去重标记动存档契约不划算，而且会把「剧情看过没有」混进玩家存档真值。改走 F04 徽章/成就的范式：**服务端独立表 + 只读投影**。
+
+**改动**：
+- Prisma 新模型 `StoryBeatSeen`（`@@unique([userId, beatId])`，纯新增表，迁移 `20261116023310_story_beat_seen`，不改任何既有模型）。
+- 后端 `src/modules/story.ts`：`GET /api/story/seen`（返回已读集合）、`POST /api/story/seen`（upsert 幂等，不取应用层锁，避免与 `slotLock` 同锁重入）。校验逻辑抽到 `src/game/storyBeats.ts` 纯函数，便于单测。
+- 白名单来源：`gen-content.ts` 的 payload 增 `storyBeatIds`（21 条，从 `src/game/story.ts` 生成）。**没有在服务端手抄一份 id 清单**，`check:content` 继续防漂移。
+- 前端 `src/lib/story.ts`：启动先拉已读集合，**拉到之前不触发到达 intro**（否则冷启动第一帧会把看过的剧情弹出来、GET 回来再收走）；`dismiss` 时上报。关闭即视为看完——`StoryModal` 的关闭路径只有「走完最后一行」，点背景/点叉也走 advance。
+- `api.ts` 增 `storySeen()` / `markStorySeen(beatId)`。
+
+**验收**：
+- 后端单测 `tests/storyBeats.test.ts` **6/6**（含「白名单与 `src/game/story.ts` 逐条对齐」——直接用正则读前端源码做独立证据，不信任生成物自证）。
+- E2E `tests/e2e_f18d_story.mjs` **18/18**：未登录 401、幂等不增行、未知/空/超长/非字符串全 400 且不落库、跨账号隔离，以及 **`POST` 已读前后存档 `revision` 不变、存档里搜不到剧情字段**（证明没污染 `SaveData`）。
+- UI 冒烟 `scripts/ui_smoke_f18d.mjs` **14/14**：第一次进营地弹剧情（`1 / 3`）→ 点完 3 次关闭 → 服务端确有 `arrival_town_starter` → **第二次冷启动不再弹，且营地正常渲染**（用「营地渲染完成」当前置，排除白屏假绿）。
+- `npm run verify -- --strict`：**62 通过 / 0 失败 / 0 跳过 / VERIFY_OK**（原 60 阶段 + F18-d 的 E2E 与冒烟各一）。
+- 规范 §33.5 已按现行改口径（原「不持久化」保留「不动存档契约」的部分，补上独立表与白名单校验）。
+
+### §81 start-mpk-runtime.bat 的 `[PG] FAILED` 是误报（2026-11-16）
+
+**现象**：双击 bat，先打 `[PG] service running, skip`，3 秒后又打 `[PG] FAILED`，但 `netstat` 显示 `127.0.0.1:5432 LISTENING`、后端 health 正常。
+
+**根因**：收尾判定用的是 `pg_ctl.exe status -D <data>`。PG 以 **Windows 服务**（`PostgreSQL16`，账户 `NT AUTHORITY\NetworkService`）运行时，pid 文件属 NetworkService，当前用户读不到 → `pg_ctl status` 返回非 0 → 判 FAILED。**是探活方式选错了，不是服务没起。**
+
+**修法**：收尾判定改端口探测 `netstat -ano | findstr 127.0.0.1:5432 | findstr LISTENING`，失败文案同步改成「5432 not listening」。（本机 PG 摊子里没有 `pg_isready.exe`，只有 `pg_ctl.exe` / `psql.exe`，所以不用 pg_isready。）
+bat 在仓库外、不入库，此处只归档结论，避免下次又按 `pg_ctl status` 排查。
+### §82 观察待查：p42e「重复 nonce 被拒 409」在慢环境下偶发变 200（2026-11-16）
+
+**现象**：F18-d 那轮全量 verify 里，`e2e:p42e` 与 `e2e:game` 各红 1 项，都是同一条
+「重复 nonce 被拒 409 INTENT_REPLAY」拿到 200。同一轮里 p42e 其余 19 项、game 其余 41 项全过。
+
+**现场证据**（失败响应体）：`revision=5`、`coop.turn=2`、`lastAction={seat:1,intent:"enter:1"}`，
+即两路并发提交同一 `nonce=e2` 时，第二路被当成**新回合的合法提交**接受，而不是判重放。
+
+**已排除**：
+- 不是本轮改动引起 —— 本轮只加了 `/api/story/seen` 与 `StoryBeatSeen` 表，房间链路零改动；
+- 不是稳定复现 —— 事后连跑 `node tests/e2e_p42e_coop.mjs` **3/3 全绿**（20/20 每轮）。
+
+**当前定性**：慢环境（那轮 verify 总耗时 634s，平时 256s）把并发窗口拉大后暴露的既有时序问题。
+去重靠 `RoomState.seenNonces`（`roomRegistry.ts:565-570`）在 `loadAndMutate` 内完成，
+而 `loadAndMutate` 的串行前提是「路由层已持 `withRoomLock(roomId)`」——`room.ts` 的 action 路由
+**并没有显式取这把锁**，实际串行靠 `retryCas` 的 CAS 冲突重试兜底。
+若两路在不同 revision 上各自成功（而不是一方冲突重试），`seenNonces` 就会各写各的。
+
+**影响面**：玩家把同一条意图连点两次，理论上可能被当作两次提交（第二次成为新回合的首次提交）。
+有 `submitted.includes(seat)` 与回合推进挡着，不会重复结算，危害有限但非零。
+
+**下一步（单独立项，不塞进 F18-d）**：给 action 路由补显式 `withRoomLock(roomId)`，
+或用 DB 唯一约束把 `(roomId, nonce)` 做成硬去重；再写一个「人为拉宽并发窗口」的回归用例
+（例如在两路之间插入 50ms 延迟）稳定复现，改完能打到红→绿。
+### §83 W9 双实例 E2E 的 F3 段：等 spawn 完就断言，慢机器上假红（2026-11-16）
+
+**现象**：全量 verify 里 `e2e:multi` 39/42，红的 3 项都从 `F3-pre B(:3102) 仍存活可服务` 起（`liveB=false`），
+连带 F3b0 反代重连 503、F3b 拿不到 `session.state`。单跑 `node tests/e2e_multi_instance.mjs` **3/3 全绿（42/42）**。
+
+**根因**：F2 段为了验证「杀非 leader 战斗不丢」会 `SIGKILL` 掉 B，然后 `spawnInstance(PORT_B)` 重启。
+`spawnInstance` 内部等到 `/api/health` 返回 200 就返回 —— 但 `F3-pre` 断言的是**反代的 live 表**
+（`proxy.isLive`），那张表由反代自己的周期探活维护。**进程 HTTP 通了 ≠ 反代已把它标回 live**，
+慢环境（全量 verify 561s，单跑 29s）正好差一个探活周期，于是读到 `liveB=false`。
+F3-pre 是前置检查而非被测行为，读早了就把后续三项一起带红。
+
+**修法**：`spawnInstance(PORT_B)` 之后显式等 `proxy.isLive(BASE_B)`（最多 60×200ms），再进 F3b。
+就是 MEMORY §7 那条通用坑的又一次实例——**等「元素可用」，别等「元素存在」**。
+
+**同轮还有两处同类「等早了 / 状态没清」，一并修掉（断言一条没放宽）**：
+
+1. `e2e_game_smoke.mjs` D1（捕获流程）：`capErr` 一旦被置上就再没清过——只要**任一**轮尝试因
+   「球用光 `ITEM_NOT_ENOUGH`」或「上一场没结束导致 start 400」失败，即使后面某轮完整跑通，D1 仍红。
+   改：每轮开始先 `/api/battle/current` + `abandon` 清理在途战斗；真正跑完一轮就把 `capErr` 清空；
+   失败 detail 带上 `stage`（start / capture）与 `code`，下次红了能直接定位而不是只看到一个 400。
+2. `e2e_p42b_room.mjs` D 段（回合超时由服务端代放）：超时代放靠内核 tick 周期任务驱动，
+   原来 `sleep(1600) + waitRoom(4000)` 在全量并行时擦边。改 `sleep(2600) + waitRoom(8000)`，
+   **等的是「代放真的发生」，不是降低标准**。
+
+**验收**：`e2e:multi` 3/3（42/42）、`e2e:game` 5/5（42/42）、`e2e:p42b` 3/3（43/43）单跑全绿；
+全量 `npm run verify -- --strict` → **62 通过 / 0 失败 / 0 跳过 / 279.7s / `VERIFY_OK`**。
+（§82 那条 nonce 并发去重竞态**没有**在本轮修，仍按 §82 的下一步单独立项。）

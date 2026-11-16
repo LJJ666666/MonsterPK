@@ -20,6 +20,7 @@ import { mapBossRoutes } from './modules/mapBoss';
 import { pvpRoutes } from './modules/pvp';
 import { coopRoutes } from './modules/coop';
 import { playerProgressRoutes, progressStats } from './modules/playerProgress';
+import { storyRoutes } from './modules/story';
 import { contentStats } from './game/content';
 import { getSessionStats, battles, wilds } from './modules/sessionBus';
 import { registerRealtime, getRealtimeStats, heartbeatIntervalMs } from './modules/realtime';
@@ -171,6 +172,7 @@ fastify.register(mapBossRoutes);
 fastify.register(pvpRoutes);
 fastify.register(coopRoutes);
 fastify.register(playerProgressRoutes);
+fastify.register(storyRoutes);
 
 // P2-1：实时通道挂在底层 HTTP server 的 upgrade 上，必须在 listen 之前装配。
 // W4：定时器必须在 Redis 选主装配之后启动，否则前几个心跳会用进程内 leader 跑全局 sweep。

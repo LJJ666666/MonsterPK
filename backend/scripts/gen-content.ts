@@ -17,6 +17,7 @@ import {
   ELEMENT_LABEL, IDLE_CONFIG, INITIAL_INVENTORY, ITEM_SPECS, LOCATIONS, MONSTER_SPECS,
   MOVE_SPECS, START_LOCATION_ID, STARTERS, THEME_TABLE, TYPE_CHART,
 } from '../../src/game/data.js';
+import { STORY_BEATS } from '../../src/game/story.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = join(here, '..', 'src', 'game', 'content.generated.ts');
@@ -34,6 +35,9 @@ const payload = {
   startLocationId: START_LOCATION_ID,
   initialInventory: INITIAL_INVENTORY,
   idleConfig: IDLE_CONFIG,
+  // 剧情 beat id 白名单：`POST /api/story/seen` 只接受这里列出的 id，
+  // 避免客户端往 StoryBeatSeen 表里塞任意字符串。
+  storyBeatIds: STORY_BEATS.map((b) => b.id),
 };
 
 // 生成 .ts 而不是 .json：tsc 会把 .ts 一起编译进 dist，json 不会（避免 build 后运行时缺文件）。

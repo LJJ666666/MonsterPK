@@ -2125,10 +2125,19 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   + 前端入口；`e2e_f18c` **33/33**、`verify` 全绿（`VERIFY_OK`）。
 - **债务**：① drop 数值为暂定（杰哥待补）；② 首领强度仅 HP 倍率抬血、未调攻击，数值待平衡。
 
-### 33.5 F18-d 剧情（2026-11-10 骨架已实现）
+### 33.5 F18-d 剧情（2026-11-10 骨架；2026-11-16 已读进度上服务端）
 
-- 轻量对话 + 触发播片，**不持久化**（不新增存档字段、不动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`）。
-- 触发条件与播片资源由内容表驱动，跑完即释放，状态不入档（同会话模块级 `Set` 去重，重载即清）。
+- 轻量对话 + 触发播片。**仍不新增存档字段、不动 `SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION`**；
+  但「这条剧情看过没有」必须跨会话记住，否则每次冷启动都要把已看过的到达 intro
+  按 3 行台词重播一遍（bug_log §72 观察点 1、§80）。真值放**服务端独立表 `StoryBeatSeen`**，
+  与 F04 徽章/成同范式：`@@unique([userId, beatId])` + upsert 幂等、不取应用层锁、
+  客户端没有直接写存档的入口，只通过 `GET/POST /api/story/seen` 读写。
+- 触发条件仍由内容表驱动；**同会话**用模块级 `Set` 去重（防同一次会话内重复弹），
+  **跨会话**以服务端已读集合为准。**已读集合拉回来之前不触发到达 intro**，
+  避免「先弹出来再被收走」的闪动。
+- 客户端上报的 `beatId` 必须命中内容表白名单 `CONTENT.storyBeatIds`
+  （由 `backend/scripts/gen-content.ts` 从 `src/game/story.ts` 生成、`check:content` 防漂移）；
+  未知 id → 400 `STORY_BEAT_UNKNOWN`，空值/非字符串/超长 → 400 `STORY_BEAT_INVALID`。
 - **实现记录（2026-11-10 骨架，2026-11-10 补全正式文案）**：
   - 内容模块 `src/game/story.ts`：`STORY_BEATS` 内容表 + 纯函数 `getArrivalBeat(locationId)` / `getGymClearBeat(locationId)` / `getMapBossClearBeat(mapBossId)`；
     现状 **21 个 beat**（7 城到达 intro + 7 城演武堂贺词 + 7 座地图首领讨伐胜利），2026-11-10 杰哥拍板补全为正式文案（全部 `placeholder` 置 false，无 `【占位】` 残留）。
@@ -2140,3 +2149,14 @@ F14 / F16 / F15 产出契约、P4-3 冻结均未动。历史 `clearedAreas` **�
   - 单测 `src/game/story.test.ts` **4/4**（断言 id 唯一、无占位、3 类取数纯函数）。
 - **债务已偿（2026-11-10）**：14 原 beat 换成正式文案 + 新增 7 地图首领 beat；仅改内容表，`on_mapboss_clear` 触发分支与 `on_gym_clear` 同范式，触发器/弹窗结构未变。播片资源（`cutscene`）仍留空预留。
 - **杰哥 11-10 政策**：后续剧情向内容一律「先支撑（Schema + 薄触发器 + 占位对话）后补」，不影响其他开发。
+
+- **2026-11-16 追加：已读进度上服务端（修冷启动重播）**
+  - 后端：`backend/src/modules/story.ts`（`GET/POST /api/story/seen`）+ `backend/src/game/storyBeats.ts`
+    （白名单与纯函数校验）+ Prisma 模型 `StoryBeatSeen`（迁移 `20261116023310_story_beat_seen`，纯新增表）。
+  - 内容派生：`gen-content.ts` 的 payload 增 `storyBeatIds`（21 条，来自 `src/game/story.ts`），
+    `npm run check:content` 继续防漂移；新增剧情 beat 只需重新生成，无需手改后端白名单。
+  - 前端：`src/lib/story.ts` 拉已读集合后再判断触发；`dismiss` 时 `POST` 标记（关闭即视为看完——
+    `StoryModal` 的关闭路径只有「走完最后一行」，点背景/叉也走 advance）。
+  - 验收：后端单测 `tests/storyBeats.test.ts` 6/6（含「白名单与 `src/game/story.ts` 逐条对齐」防漂移）、
+    E2E `tests/e2e_f18d_story.mjs` 18/18（含「写已读不改存档 revision」）、
+    UI 冒烟 `scripts/ui_smoke_f18d.mjs` 14/14（首次弹、二次冷启动不弹）。

@@ -178,14 +178,26 @@ async function main() {
     let capErr = null;
     for (let attempt = 0; attempt < 8 && !captured; attempt++) {
       await api('/api/game/heal', { method: 'POST', token: acc.token }); // 满血开打
+      // 上一轮可能留下未结束的战斗（捕获失败但战斗还在打）：先放弃，
+      // 否则下一次 start 会因「已有在途战斗」400，把 D1 带成假红。
+      const cur = await api('/api/battle/current', { token: acc.token });
+      const curId = cur.data?.battle?.battleId;
+      if (curId) {
+        await api('/api/battle/abandon', { method: 'POST', token: acc.token, body: { battleId: curId } });
+      }
       const cb = await startWildBattle(acc.token, 'wild_starter', 'grass', 2, 2);
-      if (!cb.ok) { capErr = cb.r; continue; }
+      if (!cb.ok) { capErr = { stage: 'start', ...cb.r }; continue; }
       const cap = await captureBattle(acc.token, cb.battleId, cb.moveIds?.[1] ?? cb.moveId);
-      if (cap.err) { capErr = cap.err; continue; }
+      if (cap.err) { capErr = { stage: 'capture', ...cap.err }; continue; }
       capBattle = cap.battle;
       captured = cap.captured;
+      // 只要某一轮真的跑完了，D1 就应算通过：前面因「球用光 / 在途战斗」失败的尝试
+      // 是 RNG 与资源消耗的中间态，不该让最终断言红（原来 capErr 一旦置上就不清）。
+      capErr = null;
     }
-    S.check('D1 捕获战斗执行无错且结束', !capErr && !!capBattle?.finished, capErr ? `err=${capErr.status}` : `result=${capBattle?.result}`);
+    S.check('D1 捕获战斗执行无错且结束', !capErr && !!capBattle?.finished,
+      capErr ? `stage=${capErr.stage} status=${capErr.status} code=${capErr.data?.code ?? ''}`
+        : `result=${capBattle?.result}`);
     S.check('D2 捕获成功一次', captured, `result=${capBattle?.result}`);
     if (captured) {
       const capAfter = await getSave(acc.token);

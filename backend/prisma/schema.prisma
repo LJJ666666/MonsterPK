@@ -211,6 +211,21 @@ model AchievementGrant {
   @@index([userId, grantedAt])
 }
 
+// F18-d 剧情已读进度（2026-11-16）。
+// 与 F04 徽章/成就同范式：**不写 SaveData、不动 SCHEMA_VERSION**，真值放服务端独立表。
+// 早期故事触发器用模块级 Set 去重（重载即清），导致每次冷启动都把已看过的
+// 到达 intro 重播一遍；这里按 (userId, beatId) 记「已看完」，冷启动不再重播。
+// 只记「看过」这一事实，不含任何权益/数值，故不需要 source 列。
+model StoryBeatSeen {
+  id     String   @id @default(cuid())
+  userId String
+  beatId String
+  seenAt DateTime @default(now())
+
+  @@unique([userId, beatId])
+  @@index([userId, seenAt])
+}
+
 // P5-1 W6（#181）：房间共享存储真值（owner key = roomId）。
 // 整房态序列化进 `data`（RoomState JSON 文本），`revision` 提列为 CAS 基线，
 // 与 W2 的 Save.revision 同范式；pvp / coop 嵌套态随房态一起落库，反序列化副本经显式

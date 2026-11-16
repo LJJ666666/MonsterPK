@@ -58,13 +58,12 @@ var completed = {};
 window.onerror = function (msg) { out.errors.push('error:' + msg); finish(); };
 function finish() {
   var t = txt();
-  out.modalStillOpen = t.indexOf('兽域演武堂') >= 0;
   out.arenaActionVisible = t.indexOf('选择行动') >= 0;
   out.fightError = t.indexOf('无法开始挑战') >= 0 || t.indexOf('无法开始') >= 0;
   out.hash = (function () { try { return f.contentWindow.location.hash; } catch (e) { return ''; } })();
   out.path = (function () { try { return f.contentWindow.location.pathname; } catch (e) { return ''; } })();
   out.tail = t.slice(-400);
-  // 抓取 GymModal 完整文本（含可能的 fightError）与首城开战按钮实时文案
+  // 抓取本城馆主卡片文本（含可能的 fightError）与开战按钮实时文案
   var d = doc();
   out.gymBtn = null;
   if (d) {
@@ -76,13 +75,6 @@ function finish() {
         p = p.parentElement;
       }
       if (out.gymBtn) break;
-    }
-    var all = [].slice.call(d.querySelectorAll('*'));
-    for (var j = 0; j < all.length; j++) {
-      if (all[j].textContent && all[j].textContent.indexOf('兽域演武堂') >= 0 && all[j].children.length > 0) {
-        out.modalFull = all[j].textContent.slice(0, 700);
-        break;
-      }
     }
   }
   out.finalTxt = t.slice(0, 6000);
@@ -102,6 +94,17 @@ function findButton(label) {
   var btns = [].slice.call(d.querySelectorAll('button'));
   for (var i = 0; i < btns.length; i++) {
     if (btns[i].textContent.trim() === label) return btns[i];
+  }
+  return null;
+}
+/** 找「某城镇行」按钮：列表项整体是一个 button，文本形如「初心镇 (当前)…进入」，非 disabled。 */
+function enterTownButton(name) {
+  var d = doc(); if (!d) return null;
+  var btns = [].slice.call(d.querySelectorAll('button'));
+  for (var i = 0; i < btns.length; i++) {
+    var t = btns[i].textContent || '';
+    if (btns[i].disabled || t.indexOf(name) < 0 || t.indexOf('进入') < 0 || t.indexOf('未解锁') >= 0) continue;
+    return btns[i];
   }
   return null;
 }
@@ -154,51 +157,47 @@ f.addEventListener('load', function () {
   out.loaded = true;
   out.initialTxt = txt().slice(0, 260);
   finish();
-  // 1) 等营地渲染出「演武堂」入口
+  // 1) 等营地加载。馆主入口已迁回各自地图：头部 chip「演武堂」必须不存在。
   waitFor('camp', function () {
-    return txt().indexOf('兽域手记') >= 0 && !!findButton('演武堂');
+    return txt().indexOf('兽域手记') >= 0 && !!enterTownButton('初心镇');
   }, once('camp', function () {
     out.campLoaded = true;
-    var e = findButton('演武堂');
-    if (!e) { out.errors.push('no-entry'); return finish(); }
-    e.click();
-    // 2) 等弹窗渲染完（不是 loading）
-    waitFor('modal', function () {
+    out.noHeaderChip = !findButton('演武堂');
+    // 剧情弹窗（intro beat）会盖住地图，先点掉再进详情
+    dismissStory(function () {
+    out.storyDismissed = true;
+    // 2) 进初心镇地图详情
+    var entry = enterTownButton('初心镇');
+    if (!entry) { out.errors.push('no-enter'); return finish(); }
+    entry.click();
+    waitFor('detail', function () {
       var t = txt();
-      return t.indexOf('兽域演武堂') >= 0 && t.indexOf('挑战馆主') >= 0
-        && t.indexOf('正在读取演武堂') < 0;
-    }, once('modal', function () {
+      return t.indexOf('初心镇') >= 0 && t.indexOf('演武堂 · 木之导师 青岚') >= 0
+        && t.indexOf('挑战馆主') >= 0;
+    }, once('detail', function () {
       var t = txt();
-      out.step = 'modal';
-      out.title = t.indexOf('兽域演武堂') >= 0;
-      out.disclaimer = t.indexOf('击败馆主可获得对应城镇徽章') >= 0;
+      out.step = 'detail';
       out.hasTownGym = t.indexOf('木之导师 青岚') >= 0;
+      out.inMapCard = t.indexOf('演武堂 · 木之导师 青岚') >= 0;
       out.scrollWidth = overflow();
-      // 先点掉可能盖在最上层的剧情弹窗（intro beat），再点开战按钮
-      dismissStory(function () {
-        out.storyDismissed = true;
-        // 与 p42c 同款精确匹配：按按钮文案过滤，首城（town_starter）在列表最前 → 取第一个
-        var allBtns = buttons().filter(function (b) { return b.textContent.trim() === '挑战馆主'; });
-        var fight = allBtns[0];
-        if (!fight) { out.errors.push('no-fight-btn'); return finish(); }
-        fight.click();
-        // 3) 开局成功：跳到 /arena，且战斗页渲染「演武堂馆主 + 固定行动区」。
-        // UI 改造后「回程」只在未开战空态 / 结算态出现，战斗进行中不渲染（Arena.tsx），
-        // 故与 f18c 对齐改用路径 + 战斗特征判定，避免把 UI 契约变更误判成链路断开。
-        waitFor('arena', function () {
-          return path() === '/arena' && txt().indexOf('演武堂馆主') >= 0
-            && txt().indexOf('选择行动') >= 0;
-        }, once('arena', function () {
-          var t2 = txt();
-          out.step = 'done';
-          out.fightStarted = true;
-          out.arenaPath = path();
-          out.arenaAction = t2.indexOf('演武堂馆主') >= 0 && t2.indexOf('选择行动') >= 0;
-          out.scrollWidth2 = overflow();
-          finish();
-        }));
-      });
+      var fight = findButton('挑战馆主');
+      if (!fight) { out.errors.push('no-fight-btn'); return finish(); }
+      fight.click();
+      // 3) 开局成功：跳到 /arena，且战斗页渲染「演武堂馆主 + 固定行动区」。
+      waitFor('arena', function () {
+        return path() === '/arena' && txt().indexOf('演武堂馆主') >= 0
+          && txt().indexOf('选择行动') >= 0;
+      }, once('arena', function () {
+        var t2 = txt();
+        out.step = 'done';
+        out.fightStarted = true;
+        out.arenaPath = path();
+        out.arenaAction = t2.indexOf('演武堂馆主') >= 0 && t2.indexOf('选择行动') >= 0;
+        out.scrollWidth2 = overflow();
+        finish();
+      }));
     }));
+    }); // dismissStory(camp)
   }));
 });
 </script></body></html>`;
@@ -251,14 +250,14 @@ async function main() {
   const p = parseProbe(dom);
   console.log('PROBE_DUMP', JSON.stringify(p));
   const brief = (x) => JSON.stringify({ step: x?.step, errors: x?.errors, finalTxt: x?.finalTxt?.slice(0, 300) });
-  check('探针回传（营地 → 演武堂弹窗 → 战斗全部走完）', !!p && p.step === 'done', brief(p) ?? dom.slice(0, 200));
+  check('探针回传（营地 → 地图详情本城馆主 → 战斗全部走完）', !!p && p.step === 'done', brief(p) ?? dom.slice(0, 200));
   if (!p) return report();
 
-  check('营地页存在「演武堂」入口', p.campLoaded === true, JSON.stringify(p.errors));
-  check('弹窗标题为「兽域演武堂」', p.title === true, brief(p));
-  check('免责文案含「击败馆主可获得对应城镇徽章」', p.disclaimer === true, brief(p));
+  check('营地加载成功', p.campLoaded === true, JSON.stringify(p.errors));
+  check('头部菜单不再有「演武堂」chip（入口已迁回地图）', p.noHeaderChip === true, brief(p));
+  check('地图详情页显示本城馆主卡片「演武堂 · 木之导师 青岚」', p.inMapCard === true, brief(p));
   check('首城馆主「木之导师 青岚」渲染', p.hasTownGym === true, brief(p));
-  check('弹窗打开时 375px 无横向溢出',
+  check('地图详情页 375px 无横向溢出',
     Number.isFinite(p.scrollWidth) && p.scrollWidth <= 375, `scrollWidth=${p.scrollWidth}`);
   check('点「挑战馆主」进入战斗并跳转到 /arena',
     p.fightStarted === true && p.arenaPath === '/arena', brief(p));

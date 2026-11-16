@@ -17,7 +17,6 @@ import BossBoardModal from "@/components/BossBoardModal";
 import PvpModal from "@/components/PvpModal";
 import CoopModal from "@/components/CoopModal";
 import StoryModal from "@/components/StoryModal";
-import GymModal from "@/components/GymModal";
 import MapBossModal from "@/components/MapBossModal";
 import { useStoryTriggers } from "@/lib/story";
 import ModalShell from "@/components/ModalShell";
@@ -135,6 +134,7 @@ function TestMenuModal({ onClose }: { onClose: () => void }) {
 
 import { Info } from "lucide-react";
 import { fetchPlayerProgress, type BadgeCatalogItem } from "@/lib/playerProgress";
+import { fetchGymOverview, type GymEntry } from "@/lib/gym";
 
 export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMechanics?: () => void, onShowMoveChart?: () => void }) {
   const navigate = useNavigate();
@@ -160,7 +160,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [showBoss, setShowBoss] = useState(false);
   const [showPvp, setShowPvp] = useState(false);
   const [showCoop, setShowCoop] = useState(false);
-  const [showGym, setShowGym] = useState(false);
+  const [gymFightError, setGymFightError] = useState<string | null>(null);
   const [showMapBoss, setShowMapBoss] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
 
@@ -182,6 +182,23 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       .catch(() => { if (!cancelled) setUnlockedLocations(null); });
     return () => { cancelled = true; };
   }, []);
+
+  /** 演武堂概览（只读权威：含每城馆主 / 徽章归属 / 休息 CD），供地图详情页显示本城馆主。 */
+  const [gymEntries, setGymEntries] = useState<GymEntry[]>([]);
+  const [gymNow, setGymNow] = useState(() => Date.now());
+  useEffect(() => {
+    let cancelled = false;
+    void fetchGymOverview()
+      .then((rows) => { if (!cancelled) setGymEntries(rows); })
+      .catch(() => { if (!cancelled) setGymEntries([]); });
+    return () => { cancelled = true; };
+  }, []);
+  // 本城馆主休息倒计时：地图详情页打开且本城有馆主时每秒刷新。
+  useEffect(() => {
+    if (tab !== "map" || mapView !== "detail") return;
+    const t = setInterval(() => setGymNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [tab, mapView]);
 
   /**
    * 统一处理服务端写操作的结果：成功就清提示，失败把服务端中文原因显示在顶部。
@@ -713,6 +730,51 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         <div className="text-sm text-[color:var(--muted)] mb-6">{currentLocation.desc}</div>
         
         <div className="grid gap-3">
+          {/* 演武堂放回各自地图：只显示本城馆主，挑战只发本城 locationId。 */}
+          {(() => {
+            const g = gymEntries.find((x) => x.locationId === currentLocation.id);
+            if (!g) return null;
+            const aceName = MONSTER_SPECS[g.aceSpeciesId]?.name ?? g.aceSpeciesId;
+            const cdLeft = g.cooldownUntil - gymNow;
+            const cooling = g.onCooldown && cdLeft > 0;
+            const mm = Math.max(0, Math.ceil(cdLeft / 1000));
+            const cdText = `${Math.floor(mm / 60)}:${(mm % 60).toString().padStart(2, "0")}`;
+            return (
+              <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 text-sm font-semibold text-[color:var(--text)] truncate">
+                    演武堂 · {g.leaderName}
+                  </div>
+                  {g.badgeOwned && <span className="flex-none text-[10px] text-[color:var(--accent)]">徽章 ✓</span>}
+                </div>
+                <div className="mt-1 text-[10px] text-[color:var(--muted)]">
+                  王牌 {aceName} · Lv.{g.aceLevel}
+                  {cooling && <span className="ml-2 text-[color:var(--danger)]">馆主休息中 {cdText}</span>}
+                </div>
+                <div className="mt-3">
+                  <PixelButton
+                    tone="primary"
+                    disabled={cooling}
+                    onClick={() => {
+                      setGymFightError(null);
+                      void (async () => {
+                        const res = await startGymBattle(currentLocation.id);
+                        if (res.ok) {
+                          navigate("/arena");
+                        } else {
+                          setGymFightError((res as { ok: false; reason: string }).reason ?? "无法开始挑战");
+                        }
+                      })();
+                    }}
+                  >
+                    {cooling ? "馆主休息中" : "挑战馆主"}
+                  </PixelButton>
+                  {gymFightError && <div className="mt-2 text-[10px] text-[color:var(--danger)]">{gymFightError}</div>}
+                </div>
+              </div>
+            );
+          })()}
+
           {currentLocation.hasCenter && (
             <PixelButton tone="primary" onClick={async () => {
               // P3-2：是否在恢复中心、回多少血都由服务端判定，本地不再自己回满。
@@ -1118,7 +1180,6 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
           { label: "讨伐", onClick: () => setShowBoss(true) },
           { label: "对战", onClick: () => setShowPvp(true) },
           { label: "共斗", onClick: () => setShowCoop(true) },
-          { label: "演武堂", onClick: () => setShowGym(true) },
           { label: "地图首领", onClick: () => setShowMapBoss(true) },
           { label: "榜单", onClick: () => setShowRank(true) },
           { label: "徽章", onClick: () => setShowBadge(true) },
@@ -1147,21 +1208,6 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             const res = await startBossBattle(bossId);
             if (res.ok) {
               setShowBoss(false);
-              navigate("/arena");
-            }
-            return res;
-          }}
-        />
-      )}
-
-      {showGym && (
-        <GymModal
-          onClose={() => setShowGym(false)}
-          onFight={async (locationId) => {
-            // 开局成功才关弹窗并跳到战斗界面；失败（馆主休息中 / 队伍全灭）留在原地看原因。
-            const res = await startGymBattle(locationId);
-            if (res.ok) {
-              setShowGym(false);
               navigate("/arena");
             }
             return res;

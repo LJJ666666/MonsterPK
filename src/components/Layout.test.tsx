@@ -47,7 +47,7 @@ describe("GameHeader", () => {
         subtitle: createElement("span", null, "旅行者 · ¥0"),
         links: [
           { label: "讨伐", onClick: () => {} },
-          { label: "演武堂", onClick: () => {} },
+          { label: "徽章", onClick: () => {} },
         ],
         menu: [{ label: "属性相克表", onClick: () => {} }],
       }),
@@ -55,7 +55,7 @@ describe("GameHeader", () => {
     expect(html).toContain("兽域手记");
     expect(html).toContain("旅行者");
     expect(html).toContain("讨伐");
-    expect(html).toContain("演武堂");
+    expect(html).toContain("徽章");
     expect(html).toContain("min-h-[40px]");
     expect(html).toContain('aria-label="玩法入口"');
   });

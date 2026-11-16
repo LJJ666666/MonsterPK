@@ -2422,4 +2422,22 @@ nonce 允许冒号，但只在第一个冒号切座位号，`1:2:abc` 与 `12:ab
 
 **验收**：后端单测 515→**534**（+19）；verify 阶段 63→**64**（新增 `e2e:story_reward`，STAGES + GROUPS 双写）；`doc_check` 232/232、`check:content` 一致、前端 `tsc` 通过。全量 `npm run verify -- --strict` 首轮 63/1（唯一红 `e2e:hardening` 的写死版本夹具，与本单发奖无关），修复后复跑 **64/64 / 0 失败 / 0 跳过 / 284.0s / `VERIFY_OK`**。
 
+### §91 演武堂入口迁回各自地图 + 房间内核 A/B 现状评估（2026-11-16）
+
+**需求**：杰哥「挑战的馆主不再放到头部菜单，放回去各自的地图内」，并问之前列的 A（`normalizeRoom` 补数组 + P6 注释）/ B（64 窗口淘汰→唯一表）现在是否适合做。
+
+**入口迁移（已实施）**：
+- 原实现：`Camp.tsx` 把「演武堂」做成 `GameHeader` 的全局 chip（第 1121 行），点开 `GymModal` 列全部 7 座。
+- 新实现：移除头部 chip；**7 座城镇与 7 位馆主一一对应**（`gyms.ts:35-41`），在每张城镇的地图详情页内联渲染**本城馆主卡片**（馆主名 / 王牌 / 徽章 / 休息 CD / 「挑战馆主」按钮），按钮只发 `startGymBattle(currentLocation.id)`，失败原因就地显示。
+- 数据：`fetchGymOverview()` 在 Camp 挂载时拉一次（只读、失败静默不显示卡片），服务端 `/api/gym/overview` 仍权威返回 7 座，前端只按 `locationId` 过滤展示，安全边界零改动。
+- 删除废弃的 `GymModal.tsx`（全仓唯一引用在 Camp，已无引用）——不留死链路。**注意**：学习装置的剧情发放仍挂在 `gym_town_leafy` beat（§90 W4），与入口位置无关，未动。
+
+**测试同步**：`ui_smoke_f18b.mjs` 探针从「点头部演武堂 chip → 弹窗」改为「先点掉 intro 剧情 → 点地图列表本城行进入详情 → 等本城馆主卡片 → 点挑战馆主」；新增断言「头部不再有演武堂 chip」「地图详情显示本城馆主卡片」。踩坑：地图列表项**整体是一个 button**（文本形如"初心镇 (当前)…进入"），不是独立"进入" button——helper 按文本精确匹配"进入"会永远找不到，超时 `timeout:camp`；已改为按「含城镇名 + 含『进入』+ 不含『未解锁』」匹配整行。
+
+**A/B 评估（只评估、未改代码）**：产出 `.trae/documents/房间内核AB项_当前适配性评估_2026-11-16.md`。
+- **A = 低价值补丁**：`normalizeRoom.ts` 只补 contributions key + 两个布尔，未补 `submitted`/`seenNonces` 等数组；但房间全字段由 `create` 初始化、无老用户，缺数组场景撞不到。可顺手做，不必单开。
+- **B = 真缺陷，值得单开**：`MAX_SEEN_NONCES=64` + `shift()` 淘汰后，重放老 nonce 会绕过 `seenNonces` 和已清空的 `submitted` 直接 200（专家评审 §2.1/§3.1，6 人 coop 约 10 回合触发）。修法唯一表 `(roomId, seat, nonce)` + `ON DELETE CASCADE`，要改 schema / 停 :3001 迁移 / 定幂等语义，别和别的混单。
+
+**验收**：`check` / 前端单测 161 / `test_inventory` 34 / `doc_check` 232 全过；`smoke:f18b` **15/15**（新链路），f18a 9 + f18c 18 + f18d 14 + ux 26 + `e2e:f18b` 18 + `e2e:f18a` 8 相关回归全绿；全量 `npm run verify -- --strict` **64/64 / 0 跳过 / 286.7s / `VERIFY_OK`**。
+
 

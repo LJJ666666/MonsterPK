@@ -2118,3 +2118,47 @@ F3-pre 是前置检查而非被测行为，读早了就把后续三项一起带�
 **验收**：`e2e:multi` 3/3（42/42）、`e2e:game` 5/5（42/42）、`e2e:p42b` 3/3（43/43）单跑全绿；
 全量 `npm run verify -- --strict` → **62 通过 / 0 失败 / 0 跳过 / 279.7s / `VERIFY_OK`**。
 （§82 那条 nonce 并发去重竞态**没有**在本轮修，仍按 §82 的下一步单独立项。）
+
+### §84 bat 探活加固：绑定地址无关 + 15 次重试（2026-11-16）
+
+**背景**：§81 把 `pg_ctl status` 换成 `netstat` 探端口后误报消失，但那条命令写的是
+`findstr /C:"127.0.0.1:5432"`，仍有两个复发口子：
+
+1. **绑定地址写死** —— 只要 PG 改成只听 `0.0.0.0` 或 `[::1]`，进程活着却匹配不上，又会误报 FAILED；
+2. **固定 `timeout /t 3` 后只探一次** —— 服务冷启动慢于 3 秒就误报（慢机器上偶发）。
+
+**修法**（`start-mpk-runtime.bat`，仓库外不入库）：
+
+- 探端口改成两段管道 `netstat -ano | findstr /C:"LISTENING" | findstr /C:":5432 "`，
+  **只匹配「监听 + 端口号」两条事实，不假设绑定 IP**；先过滤 LISTENING 就不会把
+  `127.0.0.1:5432 ... ESTABLISHED` 的客户端连接行算进来。
+- 固定等待换成**最多 15 次 × 1 秒**的重试循环，等的是「端口真的在听」而不是「时间到了」。
+- Redis 同理：`redis-cli ping` 从单次判定改成同一套 15 次重试。
+
+**取证（本机真实 netstat 输出）**：
+
+- `netstat -ano | findstr LISTENING` → 91 行；
+- 再筛 `":5432 "` → **2 行**（`127.0.0.1:5432` 与 `[::1]:5432` 各一条，同一进程 8444）；
+- 筛不存在的 `":5433 "` → **0 行、ERRORLEVEL=1**，说明 `if not errorlevel 1` 判据方向正确
+  （有匹配才跳 OK）。
+- bat 转换后取证：5511 字节 / **148 CRLF、0 裸 LF** / 括号 22:22 配平 / 8 个标签全在列首 /
+  块内 echo 无裸括号。
+
+**限制**：沙箱内 `cmd.exe` 被安全策略拦截（Bash 与 PS 两个工具都拦），本轮无法端到端跑 bat 本身；
+因此用「同一段 findstr 命令 + 真实 netstat 输出」取证匹配语义，再靠静态检查锁 CRLF 与括号。
+真机双击仍需杰哥复验一次。
+
+### §82 订正：action 路由**确实**持有房间锁，原假设作废（2026-11-16）
+
+复核源码推翻 §82 的根因假设：`backend/src/modules/room.ts` 的 `applyRoomIntent`
+整段包在 `withRoomUnit(params.roomId, ...)` 里（`room.ts:290`），而
+`withRoomUnit` = `withRoomLock(roomId)` + `runInRoomUnit()`（`roomUnitOfWork.ts:92`），
+即**房间锁串行 + 同一 PostgreSQL 事务**；`submitIntent` 的写回还走
+`pgRoomStorage.set()` 的 `updateMany({where:{roomId, revision: base}})` 行版本 CAS（`pgRoomStorage.ts:68`）。
+「路由没取锁、只靠 CAS 重试兜底」这一条**不成立**。
+
+因此 §82 的「下一步：给 action 路由补 `withRoomLock`」**撤销**。真实根因未定，
+候选见 `.trae/documents/p42e_nonce去重竞态_设计与复现方案_2026-11-16.md`：
+优先怀疑「第一路提交本身失败/回滚后第二路成为合法首提」，而不是「锁缺失」。
+按杰哥 11-16 口径：**先复现、再定因、再动手**，本轮零代码改动。
+

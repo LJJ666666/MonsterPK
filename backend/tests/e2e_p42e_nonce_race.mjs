@@ -184,6 +184,14 @@ async function main() {
     oldAssertionWouldFail === REVERSED,
     `旧断言在 ${REVERSED} 轮里失败 ${oldAssertionWouldFail} 次（期望全部失败，即必然红）`);
 
+  // ═══ S4. §88 P4：去重键绑定座位，不同座位可用同一个 nonce ═══
+  console.log('\n—— S4. 跨座位相同 nonce（P4）——');
+  const seatA = await act(host.token, roomId, 'enter:0', 'seat_shared');
+  const seatB = await act(guest.token, roomId, 'enter:1', 'seat_shared');
+  suite.check('不同座位用同一个 nonce 同回合提交，两路都 200（旧实现必红）',
+    seatA.status === 200 && seatB.status === 200,
+    `host=${tag(seatA)} guest=${tag(seatB)}`);
+
   for (const c of sockets) await closeWs(c);
   await cleanupAccounts(created);
   suite.done();

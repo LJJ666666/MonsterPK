@@ -170,6 +170,15 @@ const DEFAULT_QUOTA_LIMIT = 3;
 const MAX_SEEN_NONCES = 64;
 
 /**
+ * 去重键作用域是「房间 + 座位」（bug_log §88 P4）：不同座位各用自己的 nonce，
+ * 不能让先提交的座位把后提交的座位判成重放。nonce 本身允许冒号，故只在第一个
+ * 冒号处切出十进制座位号，`1:2:abc` 与 `12:abc` 不会撞。
+ */
+function seenNonceKey(seat: number, nonce: string): string {
+  return `${seat}:${nonce}`;
+}
+
+/**
  * 一次待落的 quota 计数变更（bug_log §88 P1）。
  * 只由 `markQuota()` 产生、必须由 `applyQuota()` 在 **CAS bump 成功之后** 消费：
  * 放在 bump 之前会在 `retryCas` 重跑时被重复扣（CAS 冲突 → 整段重来 → 计数加两次）。
@@ -557,8 +566,10 @@ export class RoomRegistry {
       if (target.autopilot === params.enabled) return ok(room);
       if (params.nonce !== undefined) {
         if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
-        if (room.seenNonces.includes(params.nonce)) return fail('INTENT_REPLAY', '该意图已提交');
-        room.seenNonces.push(params.nonce);
+        // 绑定操作者座位，不是 target.seat：nonce 代表「谁发起这次托管切换」。
+        const key = seenNonceKey(actor.seat, params.nonce);
+        if (room.seenNonces.includes(key)) return fail('INTENT_REPLAY', '该意图已提交');
+        room.seenNonces.push(key);
         if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
       }
       target.autopilot = params.enabled;
@@ -586,11 +597,14 @@ export class RoomRegistry {
       if (!seat.online) return fail('ROOM_SEAT_OFFLINE', '当前成员已掉线');
       if (!validIntent(params.intent)) return fail('ROOM_BAD_INTENT', '意图不合法');
       if (!validIntent(params.nonce)) return fail('ROOM_BAD_NONCE', '意图编号不合法');
-      if (room.seenNonces.includes(params.nonce)) return fail('INTENT_REPLAY', '该意图已提交');
+      // §88 P4：键是 `${seat}:${nonce}`，作用域房间+座位；不同座位用同一个短串
+      // 互不干扰，同座位重放仍判 INTENT_REPLAY。
+      const nonceKey = seenNonceKey(seat.seat, params.nonce);
+      if (room.seenNonces.includes(nonceKey)) return fail('INTENT_REPLAY', '该意图已提交');
       // §88 P3：nonce 是「这次尝试的唯一编号」，**被拒也要烧掉**。原来先判
       // TURN_ALREADY_SUBMITTED 再 push，导致本回合被判重的那条 nonce 下回合重放
       // 会被当成合法首提（迟到意图落到错回合）。配合 persistEvenIfFailed 落库。
-      room.seenNonces.push(params.nonce);
+      room.seenNonces.push(nonceKey);
       if (room.seenNonces.length > MAX_SEEN_NONCES) room.seenNonces.shift();
       if (room.submitted.includes(seat.seat)) {
         return fail('TURN_ALREADY_SUBMITTED', '本回合已提交过意图');

@@ -2358,3 +2358,44 @@ detail 只有 `turn=undefined`。同一套件单跑 3/3 全绿。
 **验收**：`e2e:p42b` **43/43 × 3 轮**（8.1s / 8.2s / 8.4s）；断言一条没放宽
 （仍然要求 `lastAction.kind==='timeout'` 且 `turn>=3`）。
 
+### §89 P4：nonce 去重键绑定到座位（2026-11-16）
+
+**立项依据**：§88 留白 P4；后端设计评审 §2.4/§3.2（专家表编号 P5，项目台账编号 P4）。
+设计稿 `p4_nonce绑座位_设计与红测方案_2026-11-16.md` 先落盘，再落红测，最后改产品代码。
+
+**问题**：`seenNonces` 是**全房间共用**的一维数组，座位 A 用过的 nonce 会让座位 B
+被判 `INTENT_REPLAY`；A 的提交照常成功。短 nonce（`pvp.ts` 的 `Date.now+seq+Math.random`、
+E2E 的 `enter:0`/`rev_g1`）使这不是理论风险。§88 P3 修好后「被拒也烧 nonce」，
+P4 症状更容易撞到。
+
+**方案选择**：不采用「强制客户端 UUID」（把正确性押在客户端自律，且挡不住恶意复用），
+也不在本单做唯一约束表（需停 :3001 改 schema + 清理策略）。采用**方案 B**：
+服务端落库键改为 `${seat}:${nonce}`，零 schema、零迁移、零跨端改动。
+nonce 允许冒号，但只在第一个冒号切座位号，`1:2:abc` 与 `12:abc` 不撞。
+
+**改动**：
+- `roomRegistry.ts`：新增 `seenNonceKey(seat, nonce)`；`submitIntent` 用
+  `seenNonceKey(seat.seat, params.nonce)` 做 `includes`/`push`；`offerAutopilot` 用
+  `seenNonceKey(actor.seat, params.nonce)`（绑定发起者而非 target）。
+  「先判重放 → 再 push → 再判 `TURN_ALREADY_SUBMITTED`」顺序不变，§88 P3 语义不回退。
+- `roomTypes.ts`：`seenNonces` 注释明确元素形如 `${seat}:${nonce}`、作用域房间+座位。
+- `p1p3RoomSettle.test.ts`：被拒 nonce 的落库断言从 `n_late` 改为 `0:n_late`（不放宽）。
+- `e2e_p42e_nonce_race.mjs`：加 S4「不同座位同 nonce 同回合两路都 200」，13 → 14 条。
+
+**红→绿取证（不改产品代码先跑红）**：
+- 新增 `backend/tests/p4SeatNonce.test.ts` 3 条：旧实现 **1 红 2 绿**，失败现场
+  `{"ok":false,"code":"INTENT_REPLAY","reason":"该意图已提交"}`（座位 1 被座位 0 的 nonce 挡住）；
+  改后 **3/3 绿**。
+- `p1p3RoomSettle` 3/3 绿；后端单测 **512 → 515**。
+- `e2e:nonce` **14/14**，S4 明确通过。
+
+**兼容口径（写死）**：PG 里部署前残留的裸串 nonce 在新判定下不再命中，等于一次性丢弃
+去重历史；本项目无老用户、房间为测试态，接受。64 条窗口淘汰、REST/内核 nonce 规则漂移、
+`normalizeRoom` 补数组、注释口径均**不在本单**，继续留白。
+
+**验收**：全量 `npm run verify -- --strict` **63/63 / 0 跳过 / 281.6s / `VERIFY_OK`**
+（门禁 34 / 前端 161 / 后端 515 / E2E 38 套 / 冒烟 16 套 / doc_check 232 / 镜像一致）。
+首次全量出现 `smoke:p42d` 4 项红（`timeout:waiting`，创建房间未进入等待态），
+单跑 `--only=smoke:p42d --strict` **15/15** 绿、全量复跑 63/63 —— 判为并行负载下的偶发，
+非本单改动引入（本单没碰建房/WS 路径）；若复现请带 `.verify-logs/` 原始日志再查。
+

@@ -129,8 +129,8 @@ test('P3：被判 TURN_ALREADY_SUBMITTED 的 nonce 也必须落库（否则下�
   assert.equal(!dup.ok && dup.code, 'TURN_ALREADY_SUBMITTED');
 
   const room = await storage.get(roomId);
-  assert.ok(room?.seenNonces.includes('n_late'),
-    `被拒的 nonce 必须已落库，实际 seenNonces=${JSON.stringify(room?.seenNonces)}`);
+  assert.ok(room?.seenNonces.includes('0:n_late'),
+    `被拒的 nonce 必须已落库（键为 座位:nonce），实际 seenNonces=${JSON.stringify(room?.seenNonces)}`);
 
   // 下回合重放同一个 nonce：必须判重放，而不是当成新回合的合法首提。
   const guestTurn = await reg.submitIntent({

@@ -90,6 +90,7 @@ const STAGES = [
   // P4-2d：1v1 玩家对战 E2E（双方意图服务端裁决、结算写双方档各一次）。
   { id: 'e2e:p42d', name: 'E2E 1v1 玩家对战（P4-2d）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42d'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:p42e', name: 'E2E 共斗 Boss / 副本（P4-2e）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:p42e'], need: 'backend', timeout: 300_000 },
+  { id: 'e2e:nonce', name: 'E2E nonce 去重确定性复现（p42e §85）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:nonce'], need: 'backend', timeout: 300_000 },
   // F01/F02：周期结算幂等 + 服务端发奖 + 历史榜只读（远古周期键，重复运行安全）。
   { id: 'e2e:f01f02', name: 'E2E 周期结算与榜单奖励（F01/F02）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f01f02'], need: 'backend', timeout: 300_000 },
   { id: 'e2e:f14', name: 'E2E Boss 双档奖励（F14）', cwd: BACKEND, cmd: NPM, args: ['run', 'e2e:f14'], need: 'backend', timeout: 300_000 },
@@ -142,7 +143,7 @@ const GROUPS = {
   check: ['check:inventory', 'front:check', 'back:check', 'back:content'],
   unit: ['front:test', 'back:test'],
   build: ['front:build'],
-  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:f18d', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
+  e2e: ['e2e:save', 'e2e:p12', 'e2e:p21', 'e2e:p22', 'e2e:p31', 'e2e:p32', 'e2e:p4', 'e2e:w2', 'e2e:w3', 'e2e:w4', 'e2e:w5', 'e2e:w62', 'e2e:w63', 'e2e:w7', 'e2e:w7wild', 'e2e:w8shared', 'e2e:multi', 'e2e:game', 'e2e:p41', 'e2e:p42a', 'e2e:p42b', 'e2e:p42c', 'e2e:p42d', 'e2e:p42e', 'e2e:nonce', 'e2e:f01f02', 'e2e:f14', 'e2e:f16', 'e2e:f04', 'e2e:f17', 'e2e:f18a', 'e2e:f18b', 'e2e:f18c', 'e2e:f18c_security', 'e2e:f18d', 'e2e:core_loop', 'e2e:content_matrix', 'e2e:hardening'],
   smoke: ['smoke:ui', 'smoke:p31c', 'smoke:p41', 'smoke:p42a', 'smoke:p42c', 'smoke:p42d', 'smoke:p42e', 'smoke:f01f02', 'smoke:f16', 'smoke:f04', 'smoke:f18a', 'smoke:f18b', 'smoke:f18c', 'smoke:f18d', 'smoke:ux', 'smoke:auth'],
   docs: ['docs:doc', 'docs:memory'],
 };

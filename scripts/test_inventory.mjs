@@ -195,6 +195,20 @@ check('Vite 提供 public/_*.html 原样返回中间件且 dev/preview 都挂载
 check('public/_*.html 仍被 watch 忽略（HMR 不得打断冒烟采样）',
   /ignored: \['\*\*\/public\/_\*\.html'\]/.test(viteCfg));
 
+// ─────────────────────── 5. 冒烟宿主：无头浏览器不得写死单机绝对路径 ───────────────────────
+// 2026-11-16：16 套冒烟原来都写 `EDGE_PATH || C:\Program Files (x86)\...\msedge.exe`。
+// 受限沙箱里 msedge 会被安全策略干掉，同一仓库换个会话就 16 个阶段一起假红，
+// 报错还只是「seed 注入登录态 FAIL」。改走 scripts/lib/browser.mjs 的探测式解析。
+const smokeHardcoded = smokeFiles.filter((f) => {
+  const t = read(join('scripts', f));
+  return /msedge\.exe/.test(t) || /process\.env\.EDGE_PATH\s*\|\|/.test(t);
+});
+check('UI 冒烟不写死 msedge 绝对路径（统一走 resolveBrowser 探测）',
+  smokeHardcoded.length === 0, smokeHardcoded.join(', '));
+const smokeNoResolver = smokeFiles.filter((f) => !/resolveBrowser\s*\(/.test(read(join('scripts', f))));
+check('每套 UI 冒烟都通过 resolveBrowser 解析无头浏览器',
+  smokeNoResolver.length === 0, smokeNoResolver.join(', '));
+
 // ─────────────────────── 汇总 ───────────────────────
 const pass = results.filter((r) => r.ok).length;
 const fail = results.length - pass;

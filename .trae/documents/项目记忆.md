@@ -18,7 +18,7 @@
 - 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`（剧情 `src/game/story.ts`）；`useGameStore.ts` **无 persist**，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=11，**BattleState 不进存档**。
 - 后端 Fastify4+Prisma5+PG16+zod+tsx；关键模型 `Room`/`RoomQuota*`/`Boss*Grant`/`BadgeGrant`/`AchievementGrant`/`StoryBeatSeen`；**改 schema 前停 :3001**（Windows DLL 锁）→ `migrate dev` → `generate`；`Save.data` 存 JSON 文本、`revision` 独立列。
 - 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。
-- 资产：`verify.mjs` **62 阶段 / 6 分组**（`check:inventory` 门禁排最前，**32 条**）；前端 **161**、后端 **509**、E2E **37** 套、冒烟 **16** 套、doc_check **232**。**新增阶段必须同改 `STAGES` + `GROUPS`**。
+- 资产：`verify.mjs` **63 阶段 / 6 分组**（`check:inventory` 门禁排最前，**34 条**）；前端 **161**、后端 **509**、E2E **38** 套、冒烟 **16** 套、doc_check **232**。**新增阶段必须同改 `STAGES` + `GROUPS`**。
 
 ## 3. 硬约束
 - 新增**存档**字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `saveValidator.ts` 的 `EXPECTED_SAVE_VERSION`；**前端已无 migrate**。
@@ -37,7 +37,7 @@
 - **verify 口径**：全量 `npm run verify -- --strict`（前后端在线、**62 阶段含 16 套冒烟**）；服务缺失默认 FAIL，只有 `--allow-missing-services` 退 SKIP；`--skip=smoke` 只用于离线排查，**不得当默认**（门禁锁死）；离线跑 `--only=check,unit,docs --strict`。改 `vite.config.ts` 后必须真跑 `--only=smoke`。
 - Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾写验收数字）→push→核对 `HEAD==origin/master`、工作树干净、tag 在远端。推送失败：只读探活 + 最多 5 次原样重试（不换代理/不改 config），持续 502 交本机 `push-mpk.bat`。**Git 汇报只给一句话**。
 - **配置分层硬约束（§57，勿回退）**：沙箱层（`HTTPS_PROXY`/`CODEBUDDY_*`）≠ 系统层（注册表 `ProxyServer=8693`、本机 PG/Redis/JDK 路径）≠ 项目层（`MPK_FRONT_PORT`→`devConfig.mjs`；`DATABASE_URL`/`REDIS_URL`/`CORS_ORIGIN`→`backend/.env`）。沙箱值禁写仓库，覆盖 env 只用一次性前缀，**项目层是唯一可提交真值**。
-- **PowerShell + GBK（§61）**：npm script 不许裸 glob；Python stdout 必须 `reconfigure(errors="replace")`；保留 `server.watch.ignored: ['**/public/_*.html']`；不测选主的双实例 E2E 子进程必须 `MPK_DISABLE_SWEEP=1`；沙箱冒烟用 `chrome-headless-shell`（`EDGE_PATH`），`waitFor` 每 4 轮挂真实 `fetch`。
+- **PowerShell + GBK（§61）**：npm script 不许裸 glob；Python stdout 必须 `reconfigure(errors="replace")`；保留 `server.watch.ignored: ['**/public/_*.html']`；不测选主的双实例 E2E 子进程必须 `MPK_DISABLE_SWEEP=1`；冒烟无头浏览器**统一走 `scripts/lib/browser.mjs` 的 `resolveBrowser()`**（禁写死 msedge，门禁 34 条锁死；沙箱内自动命中 puppeteer 的 `chrome-headless-shell`），`waitFor` 每 4 轮挂真实 `fetch`。
 
 ## 5. 本机环境
 - **PG = Windows 服务 `PostgreSQL16`**（127.0.0.1:5432），`Start-Service PostgreSQL16`（⚠️ PowerShell 里 `sc` 是 `Set-Content`，沙箱拦 `sc.exe`）。Redis `X:\Six\redis-runtime\redis-server.exe --port 6379`（X=D 家 / E 公司）。
@@ -50,12 +50,12 @@
 ## 6. 后端架构快照（细节 §60/§64~§70/§80）
 - 存档三层校验 `saveValidator`→`antiCheat`→`serverClock`；`FORBIDDEN_PROGRESS_SAVE_FIELDS` 在 CAS 前拦整包 PUT 夹带真值。W6 PG 行版本 CAS + `roomUnitOfWork` 事务 + DB 原子 quota + 租约 token（WS 监听器必须在**任何 await 之前**挂载）；W7 `WildStorage` 全 async + 四组 Lua（`useRedisStorage` 须在心跳启动前装配，内容生成不能进 Lua）；W8 `kvStore` TTL（空前缀 `clear()` 拒绝执行）、`BattleStorage` 物理 TTL=逻辑×2、馆主 CD 原子 `acquire`、会话 `hydrate()` + `sess:rev:*`。
 - F18-d：`StoryBeatSeen` + `GET/POST /api/story/seen`，白名单来自 `CONTENT.storyBeatIds`（`gen-content` 从 `src/game/story.ts` 生成，`check:content` 防漂移），校验纯函数 `game/storyBeats.ts`。
-- ⚠️ **p42e nonce 去重竞态（§82 现象 / §82 订正）**：action 路由**已**持 `withRoomUnit`（房间锁+事务）且有 revision CAS，「缺锁」假设作废；`seenNonces` 存在房间态 JSON 里，疑「旧副本覆盖 / 首路回滚后重提」。**先复现再动手**，设计稿 `p42e_nonce去重竞态_设计与复现方案_2026-11-16.md`。
+- ⚠️ **p42e nonce 已定案（§85）**：产品去重成立（23 次构造全绿），红的是 `e2e:p42e` 断言假定「第二路必被拒」；已改语义版（恰好一路 200 + 一路 409）并新增 `e2e:nonce`（`backend/tests/e2e_p42e_nonce_race.mjs`，S3 顺序反转＝确定性红灯）。产品侧遗留 P1 配额重复计数 / P3 被拒不烧 nonce / P4 nonce 未绑座位 / P5 normalize 缺数组，另立项；评审见 `p42e_后端设计评审_专家意见_2026-11-16.md`。
 - 已挡：改档/伪造捕获/白嫖购买/重复领奖/改时间/越权写/CAS 旧覆盖/顶号后续写/抢野怪/伪造榜/伪造剧情 id；未挡加速器改节奏、改本地展示态。
 
 ## 7. 已修坑 / 交接（详 bug_log、HANDOFF）
 - 后台任务 `exit 4`/`0xC0000142` = 宿主回收；`.env` 路径曾算错 → 用实测 `process.env.XXX`；盘符大小写让 `vite-tsconfig-paths` 静默失配 → 别名走 Vite 原生 `resolve.alias`；带 RNG 的 E2E 必须重试到 `finished`/`abandon`。
-- 通用：等「元素可用」非「存在」、verify 漏 `GROUPS`、同文件同轮多 Edit 互相覆盖（改落盘脚本批量替换）。**E2E 一律 `127.0.0.1`**；`harness.BASE` 默认 127，**`ORIGIN` 必须留 `localhost`**（WS 握手）。进程内监听必须在任何 `await` 之前挂载（`attachWsHandlers`、`BootGate` 的 `startSessionSync` 先于 `startRealtime`）。
+- 通用：等「元素可用」非「存在」；**由周期任务/外部进程推进的状态禁 `sleep`+短窗口，改「先挂监听再等条件」**（§83/§87 同一坑三次）；verify 漏 `GROUPS`；同文件同轮多 Edit 互相覆盖（改落盘脚本批量替换）。**E2E 一律 `127.0.0.1`**；`harness.BASE` 默认 127，**`ORIGIN` 必须留 `localhost`**（WS 握手）。进程内监听必须在任何 `await` 之前挂载（`attachWsHandlers`、`BootGate` 的 `startSessionSync` 先于 `startRealtime`）。
 - **APK WebView**：`androidScheme:"http"` → origin `http://localhost`（无端口），dev APK 需 `usesCleartextTraffic="true"`；正式包 `https://localhost` 必须进 CORS；`isOriginAllowed` **精确匹配 fail-closed**；设备 `localhost:3001` 靠 `adb reverse`。
 - **健康探测禁缓存**：`api.health()` 必须 `cache:"no-store"` + 超时，否则断网后 Chromium 返回缓存 200 假在线（`apiHealth.test.ts` 锁死）。
 - **冒烟宿主（§76）**：Vite 6 把任意 `*.html` 当 SPA 入口，`public/_*.html` 的 seed/probe 页必须由 `devProbePlugin` 原样返回；`Arena.tsx` 的「回程」只在空态/结算态渲染，别拿它判「进入战斗」。

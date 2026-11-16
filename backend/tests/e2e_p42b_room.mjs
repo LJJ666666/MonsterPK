@@ -131,14 +131,16 @@ async function main() {
 
   // ── D 回合超时 ──
   drain(aWs); drain(bWs);
-  // 超时代放靠内核 tick 驱动，tick 本身是周期任务：全量 verify 并行时机器更慢，
-  // 原来 1.6s + 4s 的窗口在慢机上会擦边（单跑绿、全量偶发红）。
-  // 放宽等待时间，断言本身不变——等的是「代放真的发生」，不是把标准降低。
-  await sleep(2_600); // > kernel roundTimeoutMs=1.2s，并留出 tick 周期余量
-  const timeoutMsg = await waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 8_000);
+  // 超时代放靠内核 tick 驱动（周期任务），**不能等固定时间窗**：
+  // 原来 `sleep(1.6s)+waitRoom(4s)`、后放宽到 `2.6s+8s`，全量 verify 并行时仍会擦边
+  // （单跑绿、全量偶发红，bug_log §87）。改成「先挂监听、再等条件」：
+  // waitRoom 只认之后到达的消息，所以要在代放发生**之前**就挂上，窗口给足 25s。
+  const timeoutMsg = await waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 25_000);
   suite.check('回合超时由服务端随机代放并广播', !!timeoutMsg, JSON.stringify(timeoutMsg?.room?.lastAction));
   suite.check('超时代放后回合正常推进',
-    (timeoutMsg?.room?.turn ?? 0) >= 3, `turn=${timeoutMsg?.room?.turn}`);
+    (timeoutMsg?.room?.turn ?? 0) >= 3,
+    `turn=${timeoutMsg?.room?.turn}`
+    + (timeoutMsg ? '' : `（失败诊断：${JSON.stringify((await api(`/api/room/${roomId}`, { token: B.token })).data?.room ?? {}).slice(0, 240)}）`));
 
   // ── E 掉线 / 重连 / 顶号 / 托管 ──
   drain(bWs);

@@ -7,6 +7,7 @@
  * 双人真实共斗 / 并发意图 / Boss HP 只减一次 / 结算幂等由 `e2e:p42e` 覆盖，这里只管可视层与接线。
  */
 import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { resolveBrowser } from './lib/browser.mjs';
 import { createRetriedExec } from './lib/edgeDom.mjs';
 
 // headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
@@ -16,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const EDGE = process.env.EDGE_PATH || String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`;
+const EDGE = resolveBrowser();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
 import { FRONT_BASE as BASE } from './lib/devConfig.mjs';

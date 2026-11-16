@@ -8,6 +8,7 @@
  * 真实房间推进 / 发奖 / 幂等由 `e2e:f16` 覆盖。
  */
 import { execFileSync as rawExecFileSync } from 'node:child_process';
+import { resolveBrowser } from './lib/browser.mjs';
 import { createRetriedExec } from './lib/edgeDom.mjs';
 
 // headless Edge --dump-dom 偶发返回 Chromium 错误页时有限重试（断言不变，见 lib/edgeDom.mjs）。
@@ -17,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const EDGE = process.env.EDGE_PATH || String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`;
+const EDGE = resolveBrowser();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
 import { FRONT_BASE as BASE } from './lib/devConfig.mjs';

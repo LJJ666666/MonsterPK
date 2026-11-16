@@ -2162,3 +2162,129 @@ F3-pre 是前置检查而非被测行为，读早了就把后续三项一起带�
 优先怀疑「第一路提交本身失败/回滚后第二路成为合法首提」，而不是「锁缺失」。
 按杰哥 11-16 口径：**先复现、再定因、再动手**，本轮零代码改动。
 
+### §85 p42e「重复 nonce 偶发 200」定案：根因是测试断言假定顺序，产品去重成立（2026-11-16）
+
+**定案一句话**：产品侧「同一 nonce 只被接受一次」是**成立**的；红的是断言 —— 它把
+「并发两路里**第二路**必须被拒」写死了，而并发只保证「恰好一路赢」。
+
+**怎么把偶发变成必现**（新用例 `backend/tests/e2e_p42e_nonce_race.mjs`，`npm run e2e:nonce`）：
+
+- **S1 串行重放**：同 nonce 连发 3 次，每次都必须 409 `INTENT_REPLAY`；跨回合重放旧 nonce
+  仍 409（证明 `seenNonces` 不随 `advanceTurn` 清空）；本回合已提交 + 新 nonce → 409
+  `TURN_ALREADY_SUBMITTED`。
+- **S2 并发 20 轮**：每轮 `Promise.all` 两路同 nonce，要求「恰好一路 200 + 一路 409」且
+  turn 只推进一格。本机 20/20 全绿，且 409 **20 次全落在第二路**（本机快、单实例，到达顺序稳定）。
+- **S3 顺序反转（关键）**：把「名义第一路」延迟 30ms 再发，让「名义第二路」稳定先到。
+  结果 3/3 都是 `ra=409 INTENT_REPLAY / rb=200` —— **旧断言 3/3 必然红，新语义断言 3/3 绿**。
+  这就是全量 verify 并行、机器慢时的真实构造：谁先到服务端由连接建立顺序决定，不是数组顺序。
+
+**修法**（断言更严，不是放宽）：
+
+```js
+const okCount = [ra, rb].filter((x) => x.status === 200).length;
+const replayCount = [ra, rb].filter((x) => x.status === 409 && x.data?.code === 'INTENT_REPLAY').length;
+suite.check('重复 nonce 被拒 409 INTENT_REPLAY（恰好一路成功、一路判重放）',
+  okCount === 1 && replayCount === 1, ...);
+```
+
+旧断言只要求「rb 是 409」，两路都 200 时也可能蒙对一半；新断言额外要求「恰好一路 200」，
+反而更严。同仓库 `e2e_multi_instance.mjs:283-286` 早就是这个写法，p42e 是唯一的例外。
+
+**我上一轮写错的地方（一并记录，避免再犯）**：§82 断言「action 路由没取锁」是错的
+（`applyRoomIntent` 已在 `withRoomUnit` 内）；设计稿 §3 列的 C1~C4 四个候选根因**全部没命中**，
+漏掉了最可能的 C0「断言假定顺序」。教训：**先看断言本身是否可证伪，再怀疑产品**。
+
+**验收**：`e2e:p42e` 20/20 × 3 轮、`e2e:nonce` 12/12 × 3 轮；`verify --strict` 新增
+`e2e:nonce` 阶段（`STAGES` + `GROUPS` + `backend/package.json` 三处同改）。
+
+**产品侧遗留缺陷（专家评审发现，未在本单修，另立项）**：见
+`.trae/documents/p42e_后端设计评审_专家意见_2026-11-16.md`，其中已确证的：
+
+1. **P1 配额 CAS 冲突会重复计数**：`retryCas` 重试 `tickOnce` 时若 `finishQuota` 已提交，
+   重跑会再 commit 一次；
+2. **P3 被拒路径不烧 nonce**：`submitIntent` 先判 `TURN_ALREADY_SUBMITTED` 再 push nonce
+   （`roomRegistry.ts:566-570`），该 nonce 下一次重放会被当合法首提；
+3. **P4 nonce 未绑定座位**：`seenNonces` 是全房间共用的一维数组，A 用过的 nonce 会让 B 被判重放；
+4. **P5 `normalizeRoom` 只补对象不补数组**：旧房间数据缺 `seenNonces` 等数组时会 500；
+5. **P6 注释与实现不一致**：`roomRegistry.ts:799` 注释仍写「路由层已持 withRoomLock」以外的旧口径。
+
+这些与本次红灯无关，按「先复现→再定因→再动手」的节奏单独立项。
+
+### §86 16 套 UI 冒烟写死 msedge 绝对路径：换个会话就 16 个阶段一起假红（2026-11-16）
+
+**现象**：`npm run verify -- --strict` 前后端都 `200`（前端 5173、后端 3001 探活正常），
+但 16 套 375px 冒烟全部红，每套耗时只有 1.1 秒左右，报错是
+`[FAIL] seed 注入登录态` 或 `探针 1 回传 ... {}` —— **看起来像产品坏了，实际是浏览器没起来**。
+
+**根因**：16 套脚本都是同一行
+`const EDGE = process.env.EDGE_PATH || String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`;`
+默认值在真实桌面能用，但在受限沙箱里 msedge 会被安全策略干掉，`execFileSync` 拿不到 DOM，
+于是一路 FAIL。上一轮之所以全绿，是因为**会话里手工 export 了 `EDGE_PATH`**；换会话没带这个变量，
+16 个阶段就整体假红。**是"环境变量隐性依赖"，不是回归。**
+
+**修法**：新增 `scripts/lib/browser.mjs` 的 `resolveBrowser()`，按
+「`EDGE_PATH`（指向不存在则直接报错，不静默回退）→ puppeteer 缓存的 `chrome-headless-shell`
+→ 系统 Edge/Chrome 常见路径 → 带修复指引的显式报错」四段解析；16 套冒烟的 `const EDGE`
+统一改为 `resolveBrowser()`，不再各自写死。
+
+**为什么把 chrome-headless-shell 排在 msedge 前面**：沙箱里 msedge 会被杀，而
+puppeteer 缓存里的 headless-shell 能跑。桌面环境没有这个缓存时会自动落到系统 Edge，行为不变。
+
+**加静态门禁（防复发）**：`scripts/test_inventory.mjs` 新增 2 条（32 → **34 条**）：
+① 冒烟脚本不得出现 `msedge.exe` 字面量或 `process.env.EDGE_PATH ||` 写法；
+② 每套冒烟必须通过 `resolveBrowser(` 解析。这样以后谁再写死路径，`verify` 第一阶段就拦。
+
+**验收**：
+- 不设 `EDGE_PATH` 直接跑 `node scripts/ui_smoke_f18d.mjs` → **14/14 全绿**（自动命中 headless-shell）；
+- `node scripts/test_inventory.mjs` → **34/34**；
+- `npm run verify -- --strict` → **63 通过 / 0 失败 / 0 跳过 / 261.3s / VERIFY_OK**
+  （阶段 62 → 63，新增 `e2e:nonce`；冒烟 16 套全绿）。
+
+**教训（与本轮 §85 同源）**：红灯先分三类 ——「产品错 / 测试断言错 / 环境没起来」。
+这次两轮各命中一类：§85 是断言错，§86 是环境隐性依赖。**能靠环境变量才绿的用例，等于没绿。**
+
+### §87 p42b 回合超时代放：又是「等时间窗」，改成先挂监听再等条件（2026-11-16）
+
+**现象**：终态全量 `verify --strict` 62/1，唯一红的是 `e2e:p42b` 的
+「回合超时由服务端随机代放并广播」+「超时代放后回合正常推进」，detail 只有 `turn=undefined`；
+同一套件单跑 3/3 全绿。
+
+**根因**：D 段原来是 `drain()` → `sleep(2.6s)` → `waitRoom(..., 8s)`。超时代放由内核
+**tick 周期任务**驱动，全量并行时机器更慢、tick 与被测回合的时间关系会漂；而 `waitRoom`
+**只认调用之后到达的消息**，固定 sleep 之后的窗口一旦错位，消息就落在窗口外了 ——
+表现成「代放没发生」，其实是「我们没在听」。
+
+这已经是同一个坑第三次（§83 的 `spawnInstance` 等反代 live、`e2e_game_smoke` 的 `capErr`
+不清空、这次的时间窗）。**规律：凡由周期任务/外部进程推进的状态，都不能用 `sleep` + 短窗口断言。**
+
+**修法**：删掉 `sleep`，改成「先挂监听，再等条件」：
+`waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 25_000)`。`waitRoom` 是订阅式的，
+挂上之后消息不会漏；25s 只是**上限**，正常 1~2s 就返回（套件总耗时从 17.7s 降到 8.1s）。
+失败时额外打印 REST 快照（turn / lastAction / status），下次红了能直接看到房间当时的状态。
+
+**验收**：`e2e:p42b` **43/43 × 3 轮**（8.1s / 8.2s / 8.4s）；断言一条没放宽
+（仍要求 `lastAction.kind==='timeout'` 且 `turn>=3`）。
+
+### §87 p42b 回合超时代放：又是「等时间窗」，改成先挂监听再等条件（2026-11-16）
+
+**现象**：终态全量 `verify --strict` 62/1，唯一红的是
+`e2e:p42b` 的「回合超时由服务端随机代放并广播」+「超时代放后回合正常推进」，
+detail 只有 `turn=undefined`。同一套件单跑 3/3 全绿。
+
+**根因**：D 段原来是 `drain()` → `sleep(2.6s)` → `waitRoom(..., 8s)`。
+超时代放由内核 **tick 周期任务**驱动，全量并行时机器更慢、tick 与被测回合的时间关系会漂；
+而 `waitRoom` **只认调用之后到达的消息**，固定 sleep 之后的窗口一旦错位，
+消息就落在窗口外了 —— 表现成「代放没发生」，其实是「我们没在听」。
+
+这已经是同一个坑的第三次（§83 的 `spawnInstance` 等反代 live、`e2e_game_smoke` 的 `capErr`、
+这次的时间窗）。**规律：凡是由周期任务/外部进程推进的状态，都不能用 `sleep` + 短窗口断言。**
+
+**修法**：删掉 `sleep`，改成「先挂监听，再等条件」：
+`waitRoom(bWs, (r) => r.lastAction?.kind === 'timeout', 25_000)`。
+`waitRoom` 内部是订阅式的，挂上之后消息不会漏；25s 只是**上限**，正常 1~2s 就返回
+（实测套件总耗时从 17.7s 降到 8.1s）。失败时额外打印 REST 快照（turn / lastAction / status），
+下次红了能直接看到当时房间处于什么状态，而不是只有一个 `turn=undefined`。
+
+**验收**：`e2e:p42b` **43/43 × 3 轮**（8.1s / 8.2s / 8.4s）；断言一条没放宽
+（仍然要求 `lastAction.kind==='timeout'` 且 `turn>=3`）。
+

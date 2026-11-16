@@ -142,8 +142,14 @@ async function main() {
   const coopAfter = after.data?.room?.coop;
   suite.check('并发提交只推进一回合 turn=2（不是 3）',
     coopAfter?.turn === 2, `turn=${coopAfter?.turn} ra=${ra.status} rb=${rb.status}`);
-  suite.check('重复 nonce 被拒 409 INTENT_REPLAY',
-    rb.status === 409 && rb.data?.code === 'INTENT_REPLAY', `${rb.status} ${JSON.stringify(rb.data)}`);
+  // 并发下「谁先拿到房间锁」由到达顺序决定，不保证第二路是后到者：
+  // 旧断言写死 `rb` 必须 409，全量并行时会偶发红（bug_log §85 已复现为确定性红灯）。
+  // 语义正确的判据是「恰好一路成功 + 另一路判重放」，比旧断言更严（还排除了两路都 200）。
+  const okCount = [ra, rb].filter((x) => x.status === 200).length;
+  const replayCount = [ra, rb].filter((x) => x.status === 409 && x.data?.code === 'INTENT_REPLAY').length;
+  suite.check('重复 nonce 被拒 409 INTENT_REPLAY（恰好一路成功、一路判重放）',
+    okCount === 1 && replayCount === 1,
+    `ra=${ra.status}${ra.data?.code ? '/' + ra.data.code : ''} rb=${rb.status}${rb.data?.code ? '/' + rb.data.code : ''}`);
   // F16 后 coopViewFor().rooms 只下发 state / occupantSeat / enemyPreviews 等视图字段，
   // 房间内部 turn 不下发（原断言读 r.turn 恒为 undefined）。结算态由 e2e:f16 覆盖，
   // 本套件按收敛口径只验「接口边界 + 建房视图 + 意图路由」。

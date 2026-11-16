@@ -8,6 +8,7 @@ ROOT 由脚本位置动态推导，clone 到任意路径都能跑（不要写死
 """
 from pathlib import Path
 import hashlib
+import re
 import sys
 
 # Windows 本机 stdout 默认 GBK（cp936），断言名里的 ✅ 等符号会抛
@@ -522,10 +523,12 @@ checks = [
     ("规范含 §32 F17 单档化工程契约",
      "## 32." in spec_text and "SAVE_SLOT_FORBIDDEN" in spec_text
      and "第 11 条迁移" in spec_text and "106" in spec_text),
-    ("F17 闸门：400 / 版本三处 11 / 第 11 条迁移存在",
+    ("F17 闸门：400 / 前后端版本一致 / 第 11 条迁移存在",
      "SAVE_SLOT_FORBIDDEN" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
-     and "SCHEMA_VERSION = 11" in text(ROOT / "src" / "stores" / "saveVersion.ts")
-     and "EXPECTED_SAVE_VERSION = 11" in text(ROOT / "backend" / "src" / "lib" / "saveValidator.ts")
+     and re.search(r"SCHEMA_VERSION = (\d+)", text(ROOT / "src" / "stores" / "saveVersion.ts"))
+     and re.search(r"EXPECTED_SAVE_VERSION = (\d+)", text(ROOT / "backend" / "src" / "lib" / "saveValidator.ts"))
+     and re.search(r"SCHEMA_VERSION = (\d+)", text(ROOT / "src" / "stores" / "saveVersion.ts")).group(1)
+     == re.search(r"EXPECTED_SAVE_VERSION = (\d+)", text(ROOT / "backend" / "src" / "lib" / "saveValidator.ts")).group(1)
      and (ROOT / "backend" / "prisma" / "migrations_sqlite_archive" / "20261110113000_f17_single_save" / "migration.sql").exists()),
     ("F17 E2E 接入 verify 两处且清理前缀含 f17_",
      verify_text.count("e2e:f17") >= 2 and '"e2e:f17"' in pkg_text

@@ -121,19 +121,19 @@ test('捕获率：与前端同公式（含异常状态与等级差）', () => {
   }
 });
 
-test('奖励公式：与 P1-2 的 battle_reward 口径一致（该意图已下线，公式仍是同一个）', () => {
+test('奖励公式：exp=10+lv*6 / money=50+lv*10，道具不再影响（W3 删护符 + 装置个体化）', () => {
   const levels = [1, 5, 12, 30];
   for (const lv of levels) {
     const plain = computeRewards(lv, {});
     assert.equal(plain.expGain, 10 + lv * 6);
     assert.equal(plain.moneyGain, 50 + lv * 10);
-    // 旧 battle_reward 意图用的是同一组常量：exp=10+lv*6，money=(50+lv*10)*(护符?2:1)。
-    // 意图已在 2026-11-07 删除，这里保留常量对照，防止有人在 applySettlement 里另起一套公式。
-    const withAmulet = computeRewards(lv, { amulet_coin: 1 });
-    assert.equal(withAmulet.moneyGain, (50 + lv * 10) * 2);
-    assert.equal(withAmulet.hasAmuletCoin, true);
-    const withShare = computeRewards(lv, { exp_share: 1 });
-    assert.equal(withShare.hasExpShare, true);
+    // 2026-11-16 W3：护符金币已删除、学习装置改为个体开关（party[i].expShareOn），
+    // 因此任何背包道具都不再改变基础奖励；分配逻辑见 expShare.test.ts。
+    for (const inv of [{ amulet_coin: 1 }, { exp_share: 1 }, { amulet_coin: 1, exp_share: 1 }]) {
+      const r = computeRewards(lv, inv) as any;
+      assert.equal(r.moneyGain, 50 + lv * 10);
+      assert.ok(!('hasAmuletCoin' in r) && !('hasExpShare' in r));
+    }
   }
 });
 

@@ -42,6 +42,8 @@ export type ServerMonster = {
   pendingMoves?: string[];
   pendingEvolution?: { targetId: string; condition: Record<string, unknown> };
   isShiny?: boolean;
+  /** 学习装置个体开关（W2）：仅 party 内生效；旧档 undefined 视为 false。 */
+  expShareOn?: boolean;
 };
 
 export type ServerMove = {

@@ -40,6 +40,10 @@ export type ItemId =
   | "heal_antidote" | "heal_paralyze" | "heal_awake" | "heal_burn" | "heal_ice"
   | "berry_oran" | "berry_sitrus" | "berry_lum"
   | "stone_fire" | "stone_water" | "stone_leaf" | "stone_thunder"
+  | "stone_rock" | "stone_steel" | "stone_ghost" | "stone_ice" | "stone_bug"
+  | "stone_normal" | "stone_ground" | "stone_poison" | "stone_dark"
+  | "stone_psychic" | "stone_fairy" | "stone_dragon" | "stone_fighting" | "stone_flying"
+  | "essence_flame" | "essence_tide" | "essence_forest" | "essence_dragon"
   | "amulet_coin" | "exp_share";
 
 export type EncounterTheme = "grass" | "cave" | "coast" | "forest" | "lake" | "volcano" | "mansion" | "snowfield";
@@ -81,9 +85,9 @@ export type StatBlock = {
   spd: number;
 };
 
-export type EvolutionCondition = 
-  | { type: "level"; level: number }
-  | { type: "item"; itemId: ItemId };
+export type EvolutionCondition =
+  /** 等级 + 道具双门槛：达到 minLevel 且使用对应道具才能进化；不进化不妨碍继续升级。 */
+  | { type: "item"; itemId: ItemId; minLevel: number };
 
 /**
  * 幻兽物种的静态配置表（图鉴基础数据）。
@@ -207,6 +211,8 @@ export type MonsterInstance = {
   pendingEvolution?: { targetId: string; condition: EvolutionCondition };
   /** 是否为闪光（异色）稀有形态 */
   isShiny?: boolean;
+  /** 学习装置个体开关（2026-11-16 W2）：仅 party 内生效，box 不参与；旧档 undefined 视为 false。 */
+  expShareOn?: boolean;
 };
 
 export type CollectionEntry = {

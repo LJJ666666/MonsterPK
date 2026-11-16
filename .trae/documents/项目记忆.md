@@ -11,13 +11,13 @@
 - P5-1 锚点（勿删）：**P5-1 W4 ✅**；W6.1 异步化+CAS；**W6.2 事务边界**；**W6.3 DB 计数**；W6.4~W9 见 §66~§70。
 - 选型 B：PG 唯一真值 + Redis 锁/租约/TTL/pub-sub/临时态，**Redis 不存权益真值**。权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`（**实施设计定稿**，W0 起「不改产品代码」解除）；`P5-1 / F10 共享存储迁移评估` 已被取代。
 - 债务：**F01/F02 已偿还**；**F14 已偿还**、**F16** 六房副本已实现；F04 真值在服务端独立表、**不写 `SaveData`**；**F17 单档化已实现并偿还**。
-- **下一步**：① P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；② 玩法缺口 P1~P5 待拍板；③ 房间内核 P4 nonce 绑座位已修（§89），剩 P5（normalizeRoom 补数组）/P6（注释）；④ 内容扩充。
-- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89。
+- **下一步**：① 玩法重做 W1~W4 已落地（§90），待全量验收通过后提交；② P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；③ 房间内核剩 P5（normalizeRoom 补数组）/P6（注释）/64 条 nonce 窗口淘汰；④ 钻石商店（广告/充值买进化道具，本轮明确不做）。
+- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89；玩法重做 §90（进化道具化 / 装置开关 / 经验重分配）。
 
 ## 2. 技术栈 / 测试
-- 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`（剧情 `src/game/story.ts`）；`useGameStore.ts` 无 persist，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=11，BattleState 不进存档。
+- 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`（剧情 `src/game/story.ts`）；`useGameStore.ts` 无 persist，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=**12**（W2 加 `expShareOn` 升版；后端 `EXPECTED_SAVE_VERSION` 同步），BattleState 不进存档。
 - 后端 Fastify4+Prisma5+PG16+zod+tsx；模型 `Room`/`RoomQuota*`/`Boss*Grant`/`BadgeGrant`/`AchievementGrant`/`StoryBeatSeen`；改 schema 前停 :3001（Windows DLL 锁）→ migrate dev → generate；`Save.data` 存 JSON 文本、`revision` 独立列。
-- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **63 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 161、后端 515、E2E 38 套、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
+- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **64 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 161、后端 **534**、E2E **39 套**（新增 `e2e:story_reward`）、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
 
 ## 3. 硬约束
 - 新增**存档**字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `EXPECTED_SAVE_VERSION`；前端已无 migrate。

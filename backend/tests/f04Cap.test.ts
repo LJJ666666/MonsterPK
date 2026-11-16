@@ -81,10 +81,13 @@ test('F04 超帽宠不降级、只冻结升级；未超帽宠照常获得经验'
   assert.ok(done.log.some((l) => l.includes('等级帽')), '日志明确告知冻结');
 });
 
-test('F04 不注入帽时两只都获经验（Boss / 历史调用点零回归）', () => {
+test('F04 不注入帽时按个体开关分配（W3 新公式，非开关宠不获经验）', () => {
+  // 2026-11-16 W3：win() 注入 inventory.exp_share 已不再触发全队分享；
+  // 开关改为 party[i].expShareOn。此夹具两队都没开 → 只有出战击杀者拿经验。
   const done = win(battle(null));
   assert.equal(done.finished, true);
-  assert.ok(done.party.every((m) => m.exp > 0), '无帽 = 旧版行为，全员获得经验');
+  assert.ok(done.party[0].exp > 0, '出战击杀者获得经验');
+  assert.equal(done.party[1].exp, 0, '未开开关的队友不获得经验');
   assert.ok(!done.log.some((l) => l.includes('等级帽')));
 });
 

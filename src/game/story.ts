@@ -120,6 +120,9 @@ export const STORY_BEATS: StoryBeat[] = [
     trigger: { type: "on_gym_clear", locationId: "town_leafy" },
     lines: [
       { speaker: "馆主", text: "绿叶镇崇尚顺势而为，你刚才的从容，正是我们推崇的。收下徽章。" },
+      // 2026-11-16 W4：第三关馆主额外赠送学习装置（看完这段对话后由服务端幂等发放）。
+      { speaker: "馆主", text: "这枚「学习装置」也一并拿去——把它装在携带的伙伴身上，战斗中就能一起分享经验。" },
+      { speaker: "旁白", text: "你获得了学习装置。在营地的伙伴详情里，可以给携带的伙伴打开装置开关。" },
     ],
   },
   {

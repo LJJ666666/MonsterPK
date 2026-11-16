@@ -120,10 +120,56 @@ function resetMods(): StatModifiers {
 export function computeRewards(enemyLevel: number, inventory: Record<string, number>) {
   const level = clamp(Math.floor(enemyLevel), 1, 30);
   const expGain = 10 + level * 6;
-  const hasAmuletCoin = (inventory.amulet_coin ?? 0) > 0;
-  const hasExpShare = (inventory.exp_share ?? 0) > 0;
-  const moneyGain = (50 + level * 10) * (hasAmuletCoin ? 2 : 1);
-  return { expGain, moneyGain, hasAmuletCoin, hasExpShare };
+  // 2026-11-16 W3：护符金币已删除，金钱不再翻倍；学习装置改为个体开关（party[i].expShareOn），
+  // 因此这里不再读 inventory.exp_share。开关的持有校验在 mutation 层完成。
+  const moneyGain = 50 + level * 10;
+  return { expGain, moneyGain };
+}
+
+/**
+ * 2026-11-16 W3：按「出战击杀者 + 个体学习装置开关」分配战斗经验（服务端权威）。
+ *
+ * 规则（杰哥 2026-11-16 拍板）：
+ *  - S = 开了开关、存活、未触等级帽的携带宠（含出战者自己，若它也开了）；
+ *  - |S| == 0 → 击杀者独得全额 E（无人分摊，不衰减）；
+ *  - |S| >  0 → 击杀者先拿 floor(E/2)，余下半数 floor((E-floor(E/2))/2) 由 S 均摊；
+ *    击杀者若也在 S 中，则两者叠加（E=100、5 只全开 → 击杀者 55、其余各 5）。
+ *  - 等级帽只冻结升级（exp 不动），且超帽者不计入 S（不浪费分摊份额）。
+ */
+function distributeExp(
+  party: ServerMonster[],
+  activeIndex: number,
+  expGain: number,
+  levelCap: number | null,
+): { party: ServerMonster[]; frozen: number } {
+  const capped = levelCap != null;
+  const grantable = (m: ServerMonster) => !capped || expGrantAllowed(m.level, levelCap!);
+  const out = party.map((m) => ({ ...m }));
+  const active = out[activeIndex];
+  const sharers = out.filter(
+    (m) => (m as any).expShareOn === true && alive(m) && grantable(m),
+  );
+
+  // 每只宠最终获得量（按 id 汇总，保证击杀者的 half + per 一次 gainExp，避免分次调用误触发升级）。
+  const award = new Map<string, number>();
+  if (sharers.length === 0) {
+    if (active) award.set(active.id, expGain);
+  } else {
+    const half = Math.floor(expGain / 2);
+    const pool = Math.floor((expGain - half) / 2);
+    const per = Math.floor(pool / sharers.length);
+    if (active) award.set(active.id, half);
+    for (const m of sharers) award.set(m.id, (award.get(m.id) ?? 0) + per);
+  }
+
+  for (let i = 0; i < out.length; i += 1) {
+    const amount = award.get(out[i].id) ?? 0;
+    if (amount <= 0) continue;
+    if (!grantable(out[i])) continue; // 等级帽：冻结，exp 原样不动
+    out[i] = gainExp(out[i], amount).monster;
+  }
+  const frozen = out.filter((m) => !grantable(m)).length;
+  return { party: out, frozen };
 }
 
 /** 遭遇生成：等级随机区间 + 稀有/精英判定 + 主题表选种，全部在服务端掷。 */
@@ -332,24 +378,10 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
       const base = computeRewards(s.enemy.level, inventory);
       const expGain = base.expGain * 3;
       const moneyGain = base.moneyGain * 5;
-      const party = s.party.map((m) => ({ ...m }));
-      // F04 §31：达到 / 超过等级帽的宠物只冻结升级（不再获得经验）。
-      const capped = s.levelCap != null;
-      let frozen = 0;
-      const grant = (m: ServerMonster) => {
-        if (capped && !expGrantAllowed(m.level, s.levelCap!)) { frozen += 1; return m; }
-        return gainExp(m, expGain).monster;
-      };
-      if (base.hasExpShare) {
-        for (let i = 0; i < party.length; i++) {
-          if (!alive(party[i])) continue;
-          party[i] = grant(party[i]);
-        }
-      } else {
-        const idx = s.playerActiveIndex;
-        if (party[idx]) party[idx] = grant(party[idx]);
-      }
-      s.party = party;
+      // 2026-11-16 W3：个体开关按新公式分配（等级帽在 distributeExp 内一并处理）。
+      const granted = distributeExp(s.party, s.playerActiveIndex, expGain, s.levelCap ?? null);
+      s.party = granted.party;
+      const frozen = granted.frozen;
       s.rewards = { expGain, moneyGain };
       pushLog(s, [
         `${bossName} 倒下了。`,
@@ -358,26 +390,11 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
       ]);
       return s;
     }
-    const { expGain, moneyGain, hasExpShare } = computeRewards(s.enemy.level, inventory);
-    const party = s.party.map((m) => ({ ...m }));
-    // F04 §31：达到 / 超过等级帽的宠物**不降级、只冻结升级**（不再获得经验）。
-    // 捕获到的高等级怪原样入队，之后同样因超帽而拿不到经验；帽由服务端注入。
-    const capped = s.levelCap != null;
-    let frozen = 0;
-    const grant = (m: ServerMonster) => {
-      if (capped && !expGrantAllowed(m.level, s.levelCap!)) { frozen += 1; return m; }
-      return gainExp(m, expGain).monster;
-    };
-    if (hasExpShare) {
-      for (let i = 0; i < party.length; i++) {
-        if (!alive(party[i])) continue;
-        party[i] = grant(party[i]);
-      }
-    } else {
-      const idx = s.playerActiveIndex;
-      if (party[idx]) party[idx] = grant(party[idx]);
-    }
-    s.party = party;
+    const { expGain, moneyGain } = computeRewards(s.enemy.level, inventory);
+    // 2026-11-16 W3：个体开关按新公式分配（等级帽在 distributeExp 内一并处理）。
+    const granted = distributeExp(s.party, s.playerActiveIndex, expGain, s.levelCap ?? null);
+    s.party = granted.party;
+    const frozen = granted.frozen;
     s.rewards = { expGain, moneyGain };
     pushLog(s, [
       `${MONSTER_SPECS[s.enemy.specId]?.name ?? s.enemy.specId} 倒下了。`,

@@ -229,7 +229,13 @@ async function main() {
     suite.check(`结构非法「${label}」→ 400 拒绝`, r.status === 400, `status=${r.status} code=${r.data?.code ?? ''}`);
   }
 
-  const tooNew = await save.put(authAcc.token, validSave({ version: '12' }));
+  // 版本高于服务端 → 400。版本从服务端源码动态读，避免升级 SCHEMA_VERSION 后夹具写死失效。
+  const { readFileSync } = await import('node:fs');
+  const backendRoot = new URL('..', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+  const validatorSrc = readFileSync(`${backendRoot}/src/lib/saveValidator.ts`, 'utf8');
+  const expectedVersion = Number(/EXPECTED_SAVE_VERSION = (\d+)/.exec(validatorSrc)?.[1]);
+  if (!Number.isFinite(expectedVersion)) throw new Error('无法从 saveValidator.ts 读 EXPECTED_SAVE_VERSION');
+  const tooNew = await save.put(authAcc.token, validSave({ version: String(expectedVersion + 1) }));
   suite.check('存档版本高于服务端 → 400 VERSION_TOO_NEW',
     tooNew.status === 400 && tooNew.data?.code === 'VERSION_TOO_NEW',
     `status=${tooNew.status} code=${tooNew.data?.code}`);

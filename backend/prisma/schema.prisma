@@ -221,6 +221,9 @@ model StoryBeatSeen {
   userId String
   beatId String
   seenAt DateTime @default(now())
+  // W4（2026-11-16）：剧情附带的权益是否已发放（第三关馆主看完发学习装置）。
+  // 默认 false 兼容既有已读行；发放成功才置 true，作为幂等闸门。
+  rewardGranted Boolean @default(false)
 
   @@unique([userId, beatId])
   @@index([userId, seenAt])

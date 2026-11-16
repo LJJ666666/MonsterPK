@@ -395,18 +395,38 @@ export const ITEM_SPECS: Record<ItemId, ItemSpec> = {
   berry_sitrus: { id: "berry_sitrus", name: "文柚果", kind: "heal", heal: 25, healPct: true, price: 800, desc: "回复幻兽25%最大HP的珍贵果实。" },
   berry_lum: { id: "berry_lum", name: "木子果", kind: "status_heal", cures: ["poison", "paralyze", "sleep", "burn", "freeze"], price: 600, desc: "治愈所有异常状态的果实。" },
   
-  stone_fire: { id: "stone_fire", name: "火之石", kind: "evolution", element: "fire", price: 2100, desc: "能让特定火属性幻兽进化的奇特石头。" },
-  stone_water: { id: "stone_water", name: "水之石", kind: "evolution", element: "water", price: 2100, desc: "能让特定水属性幻兽进化的澄澈石头。" },
-  stone_leaf: { id: "stone_leaf", name: "叶之石", kind: "evolution", element: "grass", price: 2100, desc: "能让特定草属性幻兽进化的叶片状石头。" },
-  stone_thunder: { id: "stone_thunder", name: "雷之石", kind: "evolution", element: "electric", price: 2100, desc: "能让特定电属性幻兽进化的闪电纹路石头。" },
-  
+  // 进化道具（2026-11-16 玩法重做，W1）：等级 + 道具双门槛；普通商店不售，仅掉落/未来钻石商店。
+  stone_fire: { id: "stone_fire", name: "火之石", kind: "evolution", element: "fire", price: 2100, desc: "让达到等级的火属性幻兽进化的奇特石头。" },
+  stone_water: { id: "stone_water", name: "水之石", kind: "evolution", element: "water", price: 2100, desc: "让达到等级的水属性幻兽进化的澄澈石头。" },
+  stone_leaf: { id: "stone_leaf", name: "叶之石", kind: "evolution", element: "grass", price: 2100, desc: "让达到等级的草属性幻兽进化的叶片状石头。" },
+  stone_thunder: { id: "stone_thunder", name: "雷之石", kind: "evolution", element: "electric", price: 2100, desc: "让达到等级的电属性幻兽进化的闪电纹路石头。" },
+  stone_rock: { id: "stone_rock", name: "磐岩之石", kind: "evolution", element: "rock", price: 2100, desc: "让达到等级的岩石属性幻兽进化的厚重石头。" },
+  stone_steel: { id: "stone_steel", name: "精钢之石", kind: "evolution", element: "steel", price: 2100, desc: "让达到等级的钢属性幻兽进化的坚硬石头。" },
+  stone_ghost: { id: "stone_ghost", name: "幽冥之石", kind: "evolution", element: "ghost", price: 2100, desc: "让达到等级的幽灵属性幻兽进化的阴森石头。" },
+  stone_ice: { id: "stone_ice", name: "寒冰之石", kind: "evolution", element: "ice", price: 2100, desc: "让达到等级的冰属性幻兽进化的刺骨石头。" },
+  stone_bug: { id: "stone_bug", name: "虫之石", kind: "evolution", element: "bug", price: 2100, desc: "让达到等级的虫属性幻兽进化的斑纹石头。" },
+  stone_normal: { id: "stone_normal", name: "辉之石", kind: "evolution", element: "normal", price: 2100, desc: "让达到等级的一般属性幻兽进化的温润石头。" },
+  stone_ground: { id: "stone_ground", name: "岩土之石", kind: "evolution", element: "ground", price: 2100, desc: "让达到等级的地面属性幻兽进化的沃土石头。" },
+  stone_poison: { id: "stone_poison", name: "蚀毒之石", kind: "evolution", element: "poison", price: 2100, desc: "让达到等级的毒属性幻兽进化的幽绿石头。" },
+  stone_dark: { id: "stone_dark", name: "暗影之石", kind: "evolution", element: "dark", price: 2100, desc: "让达到等级的恶属性幻兽进化的暗沉石头。" },
+  stone_psychic: { id: "stone_psychic", name: "灵念之石", kind: "evolution", element: "psychic", price: 2100, desc: "让达到等级的超能力属性幻兽进化的通透石头。" },
+  stone_fairy: { id: "stone_fairy", name: "妖华之石", kind: "evolution", element: "fairy", price: 2100, desc: "让达到等级的妖精属性幻兽进化的绚丽石头。" },
+  stone_dragon: { id: "stone_dragon", name: "苍龙之石", kind: "evolution", element: "dragon", price: 2100, desc: "让达到等级的龙属性幻兽进化的龙纹石头。" },
+  stone_fighting: { id: "stone_fighting", name: "武斗之石", kind: "evolution", element: "fighting", price: 2100, desc: "让达到等级的格斗属性幻兽进化的刚烈石头。" },
+  stone_flying: { id: "stone_flying", name: "疾风之石", kind: "evolution", element: "flying", price: 2100, desc: "让达到等级的飞行属性幻兽进化的轻盈石头。" },
+  // 高阶精华：仅火/水/草/龙有第二次进化；价格标记为未来钻石商店用（普通商店不售）。
+  essence_flame: { id: "essence_flame", name: "地炎精华", kind: "evolution", element: "fire", price: 8000, desc: "蕴藏地心烈焰的精华，让达到高阶的火属性幻兽再度进化。" },
+  essence_tide: { id: "essence_tide", name: "沧海精华", kind: "evolution", element: "water", price: 8000, desc: "凝聚沧海之力的精华，让达到高阶的水属性幻兽再度进化。" },
+  essence_forest: { id: "essence_forest", name: "森罗精华", kind: "evolution", element: "grass", price: 8000, desc: "汇聚森罗生机的精华，让达到高阶的草属性幻兽再度进化。" },
+  essence_dragon: { id: "essence_dragon", name: "苍穹龙髓", kind: "evolution", element: "dragon", price: 8000, desc: "传说中的苍穹龙髓，让达到高阶的龙属性幻兽突破极限。" },
+
   amulet_coin: { id: "amulet_coin", name: "护符金币", kind: "key_item", price: 10000, desc: "携带后战斗获胜得到的金钱会翻倍。" },
   exp_share: { id: "exp_share", name: "学习装置", kind: "key_item", price: 50000, desc: "开启后，队伍中所有幻兽都能分享经验值。" },
 };
 
 export const MONSTER_SPECS: Record<string, MonsterSpec> = {
   ember_marmot: {
-    id: "ember_marmot", dexNum: 1, evolutions: [{ targetId: "ember_badger", condition: { type: "level", level: 16 } }],
+    id: "ember_marmot", dexNum: 1, evolutions: [{ targetId: "ember_badger", condition: { type: "item", itemId: "stone_fire", minLevel: 16 } }],
     name: "焰尾狸",
     element: "fire",
     baseHp: 39,
@@ -429,7 +449,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     ],
   },
   tide_newt: {
-    id: "tide_newt", dexNum: 4, evolutions: [{ targetId: "tide_siren", condition: { type: "level", level: 16 } }],
+    id: "tide_newt", dexNum: 4, evolutions: [{ targetId: "tide_siren", condition: { type: "item", itemId: "stone_water", minLevel: 16 } }],
     name: "潮纹螈",
     element: "water",
     baseHp: 44,
@@ -451,7 +471,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     ],
   },
   sprout_owl: {
-    id: "sprout_owl", dexNum: 7, evolutions: [{ targetId: "forest_owl", condition: { type: "level", level: 16 } }],
+    id: "sprout_owl", dexNum: 7, evolutions: [{ targetId: "forest_owl", condition: { type: "item", itemId: "stone_leaf", minLevel: 16 } }],
     name: "苔羽鸮",
     element: "grass",
     baseHp: 45,
@@ -474,7 +494,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     ],
   },
   rock_golem: {
-    id: "rock_golem", dexNum: 10, evolutions: [{ targetId: "titan_golem", condition: { type: "level", level: 25 } }],
+    id: "rock_golem", dexNum: 10, evolutions: [{ targetId: "titan_golem", condition: { type: "item", itemId: "stone_rock", minLevel: 25 } }],
     name: "岩刺灵",
     element: "rock",
     baseHp: 40,
@@ -496,7 +516,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     ],
   },
   iron_bird: {
-    id: "iron_bird", dexNum: 12, evolutions: [{ targetId: "steel_eagle", condition: { type: "level", level: 20 } }],
+    id: "iron_bird", dexNum: 12, evolutions: [{ targetId: "steel_eagle", condition: { type: "item", itemId: "stone_steel", minLevel: 20 } }],
     name: "铁翎雀",
     element: "steel",
     baseHp: 40,
@@ -518,7 +538,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     ],
   },
   shadow_spirit: {
-    id: "shadow_spirit", dexNum: 14, evolutions: [{ targetId: "phantom_lord", condition: { type: "level", level: 30 } }],
+    id: "shadow_spirit", dexNum: 14, evolutions: [{ targetId: "phantom_lord", condition: { type: "item", itemId: "stone_ghost", minLevel: 30 } }],
     name: "幽影灵",
     element: "ghost",
     baseHp: 30, baseAtk: 30, baseDef: 30, baseSpAtk: 85, baseSpDef: 85, baseSpd: 80, captureRate: 0.4,
@@ -527,7 +547,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "growl" }, { level: 8, moveId: "shadow_ball" }]
   },
   frost_cub: {
-    id: "frost_cub", dexNum: 16, evolutions: [{ targetId: "glacier_bear", condition: { type: "level", level: 28 } }],
+    id: "frost_cub", dexNum: 16, evolutions: [{ targetId: "glacier_bear", condition: { type: "item", itemId: "stone_ice", minLevel: 28 } }],
     name: "冰霜幼崽",
     element: "ice",
     baseHp: 50, baseAtk: 50, baseDef: 50, baseSpAtk: 50, baseSpDef: 50, baseSpd: 50, captureRate: 0.45,
@@ -536,7 +556,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "tackle" }, { level: 10, moveId: "ice_beam" }]
   },
   spark_mouse: {
-    id: "spark_mouse", dexNum: 18, evolutions: [{ targetId: "thunder_rat", condition: { type: "item", itemId: "stone_thunder" } }],
+    id: "spark_mouse", dexNum: 18, evolutions: [{ targetId: "thunder_rat", condition: { type: "item", itemId: "stone_thunder", minLevel: 5 } }],
     name: "闪电鼠",
     element: "electric",
     baseHp: 35, baseAtk: 55, baseDef: 40, baseSpAtk: 50, baseSpDef: 50, baseSpd: 90, captureRate: 0.5,
@@ -545,7 +565,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "scratch" }, { level: 5, moveId: "thunder_shock" }]
   },
   leaf_bug: {
-    id: "leaf_bug", dexNum: 20, evolutions: [{ targetId: "thorn_mantis", condition: { type: "level", level: 15 } }],
+    id: "leaf_bug", dexNum: 20, evolutions: [{ targetId: "thorn_mantis", condition: { type: "item", itemId: "stone_bug", minLevel: 15 } }],
     name: "叶片虫",
     element: "bug",
     baseHp: 45, baseAtk: 30, baseDef: 35, baseSpAtk: 20, baseSpDef: 20, baseSpd: 45, captureRate: 0.6,
@@ -554,7 +574,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "tackle" }, { level: 4, moveId: "bug_bite" }]
   },
   fluff_dog: {
-    id: "fluff_dog", dexNum: 22, evolutions: [{ targetId: "loyal_hound", condition: { type: "level", level: 20 } }],
+    id: "fluff_dog", dexNum: 22, evolutions: [{ targetId: "loyal_hound", condition: { type: "item", itemId: "stone_normal", minLevel: 20 } }],
     name: "绒毛犬",
     element: "normal",
     baseHp: 45, baseAtk: 55, baseDef: 45, baseSpAtk: 45, baseSpDef: 45, baseSpd: 55, captureRate: 0.6,
@@ -563,7 +583,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "tackle" }, { level: 5, moveId: "bite" }, { level: 10, moveId: "quick_attack" }]
   },
   mud_pig: {
-    id: "mud_pig", dexNum: 24, evolutions: [{ targetId: "earth_boar", condition: { type: "level", level: 24 } }],
+    id: "mud_pig", dexNum: 24, evolutions: [{ targetId: "earth_boar", condition: { type: "item", itemId: "stone_ground", minLevel: 24 } }],
     name: "泥泥猪",
     element: "ground",
     baseHp: 60, baseAtk: 50, baseDef: 50, baseSpAtk: 40, baseSpDef: 40, baseSpd: 40, captureRate: 0.5,
@@ -572,7 +592,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "tackle" }, { level: 6, moveId: "mud_slap" }, { level: 12, moveId: "bulldoze" }]
   },
   venom_snake: {
-    id: "venom_snake", dexNum: 26, evolutions: [{ targetId: "toxic_cobra", condition: { type: "level", level: 22 } }],
+    id: "venom_snake", dexNum: 26, evolutions: [{ targetId: "toxic_cobra", condition: { type: "item", itemId: "stone_poison", minLevel: 22 } }],
     name: "剧毒蛇",
     element: "poison",
     baseHp: 40, baseAtk: 60, baseDef: 40, baseSpAtk: 40, baseSpDef: 40, baseSpd: 65, captureRate: 0.5,
@@ -581,7 +601,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "poison_sting" }, { level: 7, moveId: "bite" }, { level: 13, moveId: "poison_fang" }]
   },
   shadow_fox: {
-    id: "shadow_fox", dexNum: 28, evolutions: [{ targetId: "midnight_wolf", condition: { type: "level", level: 26 } }],
+    id: "shadow_fox", dexNum: 28, evolutions: [{ targetId: "midnight_wolf", condition: { type: "item", itemId: "stone_dark", minLevel: 26 } }],
     name: "暗影狐",
     element: "dark",
     baseHp: 45, baseAtk: 65, baseDef: 45, baseSpAtk: 55, baseSpDef: 45, baseSpd: 70, captureRate: 0.45,
@@ -590,7 +610,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "scratch" }, { level: 6, moveId: "pursuit" }, { level: 14, moveId: "night_slash" }]
   },
   mind_tapir: {
-    id: "mind_tapir", dexNum: 30, evolutions: [{ targetId: "dream_eater_tapir", condition: { type: "level", level: 28 } }],
+    id: "mind_tapir", dexNum: 30, evolutions: [{ targetId: "dream_eater_tapir", condition: { type: "item", itemId: "stone_psychic", minLevel: 28 } }],
     name: "念力貘",
     element: "psychic",
     baseHp: 60, baseAtk: 40, baseDef: 45, baseSpAtk: 65, baseSpDef: 65, baseSpd: 40, captureRate: 0.45,
@@ -599,7 +619,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "confusion" }, { level: 8, moveId: "hypnosis" }, { level: 15, moveId: "psybeam" }]
   },
   fairy_sprite: {
-    id: "fairy_sprite", dexNum: 32, evolutions: [{ targetId: "moon_nymph", condition: { type: "level", level: 25 } }],
+    id: "fairy_sprite", dexNum: 32, evolutions: [{ targetId: "moon_nymph", condition: { type: "item", itemId: "stone_fairy", minLevel: 25 } }],
     name: "妖精之灵",
     element: "fairy",
     baseHp: 40, baseAtk: 35, baseDef: 45, baseSpAtk: 60, baseSpDef: 65, baseSpd: 55, captureRate: 0.5,
@@ -608,7 +628,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "fairy_wind" }, { level: 7, moveId: "disarming_voice" }, { level: 12, moveId: "draining_kiss" }]
   },
   scale_drake: {
-    id: "scale_drake", dexNum: 34, evolutions: [{ targetId: "armored_dragon", condition: { type: "level", level: 30 } }],
+    id: "scale_drake", dexNum: 34, evolutions: [{ targetId: "armored_dragon", condition: { type: "item", itemId: "stone_dragon", minLevel: 30 } }],
     name: "鳞甲龙",
     element: "dragon",
     baseHp: 55, baseAtk: 65, baseDef: 50, baseSpAtk: 45, baseSpDef: 50, baseSpd: 55, captureRate: 0.3,
@@ -617,7 +637,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "scratch" }, { level: 8, moveId: "dragon_breath" }, { level: 16, moveId: "dragon_claw" }]
   },
   brawl_pup: {
-    id: "brawl_pup", dexNum: 37, evolutions: [{ targetId: "martial_hound", condition: { type: "level", level: 25 } }],
+    id: "brawl_pup", dexNum: 37, evolutions: [{ targetId: "martial_hound", condition: { type: "item", itemId: "stone_fighting", minLevel: 25 } }],
     name: "格斗幼犬",
     element: "fighting",
     baseHp: 45, baseAtk: 70, baseDef: 40, baseSpAtk: 35, baseSpDef: 40, baseSpd: 60, captureRate: 0.5,
@@ -626,7 +646,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     learnset: [{ level: 1, moveId: "scratch" }, { level: 6, moveId: "double_kick" }, { level: 12, moveId: "mach_punch" }]
   },
   gale_hawk: {
-    id: "gale_hawk", dexNum: 39, evolutions: [{ targetId: "storm_falcon", condition: { type: "level", level: 22 } }],
+    id: "gale_hawk", dexNum: 39, evolutions: [{ targetId: "storm_falcon", condition: { type: "item", itemId: "stone_flying", minLevel: 22 } }],
     name: "狂风鹰",
     element: "flying",
     baseHp: 40, baseAtk: 55, baseDef: 40, baseSpAtk: 40, baseSpDef: 40, baseSpd: 75, captureRate: 0.5,
@@ -640,7 +660,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     initStatsMax: { hp: 60, atk: 65, def: 60, spAtk: 80, spDef: 65, spd: 80 },
     growthPerLevel: { min: { hp: 2, atk: 2, def: 2, spAtk: 2, spDef: 2, spd: 2 }, max: { hp: 4, atk: 3, def: 3, spAtk: 4, spDef: 3, spd: 4 } },
     learnset: [{ level: 1, moveId: "scratch" }, { level: 4, moveId: "ember" }, { level: 7, moveId: "fire_punch" }, { level: 12, moveId: "flamethrower" }, { level: 16, moveId: "flame_charge" }, { level: 22, moveId: "fire_spin" }],
-    evolutions: [{ targetId: "ember_behemoth", condition: { type: "level", level: 36 } }]
+    evolutions: [{ targetId: "ember_behemoth", condition: { type: "item", itemId: "essence_flame", minLevel: 36 } }]
   },
   ember_behemoth: {
     id: "ember_behemoth", dexNum: 3, name: "烈焰巨兽", element: "fire",
@@ -655,7 +675,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     initStatsMax: { hp: 60, atk: 65, def: 80, spAtk: 65, spDef: 80, spd: 60 },
     growthPerLevel: { min: { hp: 2, atk: 2, def: 2, spAtk: 2, spDef: 2, spd: 2 }, max: { hp: 4, atk: 3, def: 4, spAtk: 3, spDef: 4, spd: 3 } },
     learnset: [{ level: 1, moveId: "tackle" }, { level: 4, moveId: "water_gun" }, { level: 7, moveId: "aqua_jet" }, { level: 12, moveId: "hydro_pump" }, { level: 16, moveId: "bubble_beam" }, { level: 22, moveId: "waterfall" }],
-    evolutions: [{ targetId: "tide_leviathan", condition: { type: "level", level: 36 } }]
+    evolutions: [{ targetId: "tide_leviathan", condition: { type: "item", itemId: "essence_tide", minLevel: 36 } }]
   },
   tide_leviathan: {
     id: "tide_leviathan", dexNum: 6, name: "深海巨兽", element: "water",
@@ -670,7 +690,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     initStatsMax: { hp: 65, atk: 65, def: 65, spAtk: 80, spDef: 80, spd: 60 },
     growthPerLevel: { min: { hp: 2, atk: 2, def: 2, spAtk: 2, spDef: 2, spd: 2 }, max: { hp: 4, atk: 3, def: 3, spAtk: 4, spDef: 4, spd: 3 } },
     learnset: [{ level: 1, moveId: "tackle" }, { level: 4, moveId: "wood_strike" }, { level: 7, moveId: "vine_whip" }, { level: 12, moveId: "leaf_storm" }, { level: 16, moveId: "razor_leaf" }, { level: 22, moveId: "seed_bomb" }],
-    evolutions: [{ targetId: "mystic_owl", condition: { type: "level", level: 36 } }]
+    evolutions: [{ targetId: "mystic_owl", condition: { type: "item", itemId: "essence_forest", minLevel: 36 } }]
   },
   mystic_owl: {
     id: "mystic_owl", dexNum: 9, name: "幻林神鸮", element: "grass",
@@ -769,7 +789,7 @@ export const MONSTER_SPECS: Record<string, MonsterSpec> = {
     initStatsMax: { hp: 80, atk: 90, def: 75, spAtk: 65, spDef: 70, spd: 75 },
     growthPerLevel: { min: { hp: 2, atk: 2, def: 2, spAtk: 1, spDef: 1, spd: 2 }, max: { hp: 4, atk: 4, def: 3, spAtk: 2, spDef: 3, spd: 3 } },
     learnset: [{ level: 1, moveId: "dragon_claw" }, { level: 30, moveId: "dragon_pulse" }, { level: 42, moveId: "dragon_rush" }],
-    evolutions: [{ targetId: "apex_dragon", condition: { type: "level", level: 50 } }]
+    evolutions: [{ targetId: "apex_dragon", condition: { type: "item", itemId: "essence_dragon", minLevel: 50 } }]
   },
   apex_dragon: {
     id: "apex_dragon", dexNum: 36, name: "霸主苍龙", element: "dragon",
@@ -863,7 +883,7 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
     desc: "依山而建的繁华都市，这里有商店和充足的补给。",
     hasCenter: true,
     hasShop: true,
-    shop: ["capsule_basic", "capsule_prism", "potion_small", "potion_medium", "heal_antidote", "heal_paralyze", "stone_fire"],
+    shop: ["capsule_basic", "capsule_prism", "potion_small", "potion_medium", "heal_antidote", "heal_paralyze"],
     npcs: [
       { id: "miner", name: "矿工", dialog: ["城外的回音洞窟里有很多坚硬的家伙。", "如果没有带够伤药，可别轻易进去。"] },
       { id: "hiker", name: "登山家", dialog: ["碎石山道虽然难走，但那里的火系幻兽可是非常有活力的！", "听说有人在山道深处见过发光的石头。"] },
@@ -880,7 +900,7 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
     desc: "被茂密树冠覆盖的静谧村落。",
     hasCenter: true,
     hasShop: true,
-    shop: ["capsule_prism", "potion_medium", "heal_paralyze", "heal_awake", "berry_sitrus", "stone_leaf"],
+    shop: ["capsule_prism", "potion_medium", "heal_paralyze", "heal_awake", "berry_sitrus"],
     npcs: [
       { id: "herbalist", name: "采药人", dialog: ["树林深处能采到很多珍贵的药草。", "传说那里住着能治愈一切的幻兽。"] },
       { id: "ranger", name: "护林员", dialog: ["幽暗林穴里容易让人迷路，请务必小心。", "带点解眠药吧，那里的孢子会让人昏睡。"] }
@@ -896,7 +916,7 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
     desc: "以水系生态闻名的美丽水都。",
     hasCenter: true,
     hasShop: true,
-    shop: ["capsule_prism", "capsule_ultra", "potion_medium", "potion_large", "heal_burn", "berry_lum", "stone_water"],
+    shop: ["capsule_prism", "capsule_ultra", "potion_medium", "potion_large", "heal_burn", "berry_lum"],
     npcs: [
       { id: "sailor", name: "水手", dialog: ["出海之前，必须做好充足的准备。", "海里的家伙们可不好惹。"] },
       { id: "fisher", name: "渔夫", dialog: ["海风沙滩可是钓鱼的好地方！", "有时候甚至能钓到奇怪的道具呢。"] },
@@ -913,7 +933,7 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
     desc: "终年高温，居民们充满热情。",
     hasCenter: true,
     hasShop: true,
-    shop: ["capsule_ultra", "potion_large", "heal_burn", "stone_fire", "stone_thunder", "amulet_coin"],
+    shop: ["capsule_ultra", "potion_large", "heal_burn"],
     npcs: [
       { id: "tourist", name: "游客", dialog: ["这里的阳光太刺眼了，我快融化了。", "不过据说火系幻兽非常喜欢这里。"] },
       { id: "firebreather", name: "喷火者", dialog: ["炽热火山的岩浆温度极高，一定要带足烧伤药！", "雷之石也是这附近的特产。"] }

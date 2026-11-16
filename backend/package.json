@@ -52,6 +52,7 @@
     "e2e:f18c": "node tests/e2e_f18c.mjs",
     "e2e:f18c_security": "node tests/e2e_f18c_security.mjs",
     "e2e:f18d": "node tests/e2e_f18d_story.mjs",
+    "e2e:story_reward": "node tests/e2e_story_reward.mjs",
     "e2e:core_loop": "node tests/e2e_core_loop.mjs",
     "e2e:content_matrix": "node tests/e2e_content_matrix.mjs",
     "e2e:f04": "node tests/e2e_f04.mjs"

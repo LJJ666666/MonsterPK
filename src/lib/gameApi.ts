@@ -22,7 +22,8 @@ export type MutationOp =
   | "move_to_box"
   | "move_to_party"
   | "release"
-  | "travel";
+  | "travel"
+  | "toggle_exp_share";
 
 export type OpFailure = { ok: false; reason: string; code?: string; transient: boolean };
 export type OpSuccess = {
@@ -41,6 +42,9 @@ export const OP_MESSAGES: Record<string, string> = {
   STATUS_NOT_MATCH: "这只幻兽没有该道具能解除的状态",
   MONSTER_FAINTED: "倒下的幻兽不能使用回复道具",
   EVOLUTION_NOT_APPLICABLE: "这只幻兽无法使用该进化石",
+  EVOLUTION_LEVEL_NOT_MET: "等级还不够，达到要求等级后才能进化",
+  EXP_SHARE_NOT_OWNED: "还没有学习装置",
+  BAD_TOGGLE: "开关参数不合法",
   EVOLUTION_TARGET_INVALID: "进化目标与图鉴配置不符",
   NO_PENDING_EVOLUTION: "这只幻兽没有等待中的进化",
   MOVE_NOT_PENDING: "这个技能不在待学列表里",

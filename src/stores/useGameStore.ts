@@ -151,6 +151,8 @@ type GameState = {
   cancelIdle: () => Promise<void>;
 
   movePartyToBox: (partyIndex: number) => Promise<{ ok: boolean; reason?: string }>;
+  /** 学习装置个体开关（W2）：只对携带中的幻兽生效。 */
+  toggleExpShare: (monsterId: string, on: boolean) => Promise<{ ok: boolean; reason?: string }>;
   moveBoxToParty: (boxIndex: number) => Promise<{ ok: boolean; reason?: string }>;
   releaseMonster: (id: string) => Promise<{ ok: boolean; reason?: string }>;
   resolvePendingMove: (
@@ -532,6 +534,7 @@ export const useGameStore = create<GameState>()((set, get) => ({
       },
 
       movePartyToBox: async (partyIndex) => serverOp(get, "move_to_box", { partyIndex }),
+      toggleExpShare: async (monsterId, on) => serverOp(get, "toggle_exp_share", { monsterId, on }),
 
       moveBoxToParty: async (boxIndex) => serverOp(get, "move_to_party", { boxIndex }),
 

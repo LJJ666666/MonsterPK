@@ -317,6 +317,21 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               </div>
             </div>
 
+            {/* W4：学习装置个体开关（仅携带的伙伴、持有装置后显示） */}
+            {(save.inventory.exp_share ?? 0) > 0 && (
+              <div className="mt-3">
+                <PixelButton
+                  tone={m.expShareOn ? "primary" : "muted"}
+                  onClick={async () => {
+                    await runOp(() => useGameStore.getState().toggleExpShare(m.id, !m.expShareOn));
+                  }}
+                >
+                  学习装置：{m.expShareOn ? "已开启" : "已关闭"}（点击切换）
+                </PixelButton>
+                <p className="mt-1 text-xs opacity-70">开启后，这只伙伴在战斗中可分享经验。</p>
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap gap-2">
               <PixelButton
                 tone="muted"
@@ -393,13 +408,15 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
         const cures = ((spec as any).cures ?? []) as string[];
         return entries.filter(({ m }) => m.status !== "none" && cures.includes(m.status));
       }
-      if (spec.kind === "evolution") {
-        return entries.filter(({ m }) =>
-          MONSTER_SPECS[m.specId]?.evolutions?.some(
-            (e) => e.condition.type === "item" && e.condition.itemId === itemId,
-          ),
-        );
-      }
+    if (spec.kind === "evolution") {
+      // 2026-11-16 W1：等级 + 道具双门槛，等级不足不显示"对 X 使用"（服务端仍兜底校验）。
+      return entries.filter(({ m }) =>
+        MONSTER_SPECS[m.specId]?.evolutions?.some(
+          (e) => e.condition.type === "item" && e.condition.itemId === itemId
+            && m.level >= (e.condition.minLevel ?? 0),
+        ),
+      );
+    }
       return [];
     };
     const filteredInv = invEntries.filter((x) => {

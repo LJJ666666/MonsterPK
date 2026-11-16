@@ -2399,3 +2399,27 @@ nonce 允许冒号，但只在第一个冒号切座位号，`1:2:abc` 与 `12:ab
 单跑 `--only=smoke:p42d --strict` **15/15** 绿、全量复跑 63/63 —— 判为并行负载下的偶发，
 非本单改动引入（本单没碰建房/WS 路径）；若复现请带 `.verify-logs/` 原始日志再查。
 
+### §90 玩法重做：进化道具化 / 学习装置开关 / 经验重分配（2026-11-16）
+
+**背景**：杰哥选「玩法缺口 P1~P5」并明确「先把玩法做好，才能驱动后端完善」。两轮拍板把原本的最小补丁升级成核心玩法重做，设计定稿见 `.trae/documents/玩法重做_设计与工单_2026-11-16.md`。
+
+**四条最终规则**：
+- **W1 进化全面道具化**：22 条进化从 `level` 触发改为 `{ type:'item', itemId, minLevel }` 双门槛（**等级 + 道具**都要满足；不进化不妨碍升级）。18 属性之石 + 4 种精华（地炎/沧海/森罗/苍穹龙髓），只定义被进化条件引用的道具。普通商店全部下架进化道具，改由 7 座地图首领掉落覆盖全部 22 种。雷之石门槛设 5（原进化本无等级要求，取现有回归夹具等级，属工程取舍）。
+- **W2 存档升版**：`SCHEMA_VERSION` / `EXPECTED_SAVE_VERSION` 11→12；`MonsterInstance.expShareOn?: boolean`（旧档 undefined 视为 false）；新 op `toggle_exp_share`（两端白名单，只改 party 内一只、开需持有装置、关不需、伪造 payload 无效）。
+- **W3 经验重定**：出战击杀者先拿 `floor(E/2)`，剩余半数 `floor((E-half)/2)` 由开了开关且存活未超帽的 party 成员均摊；击杀者也开则两者叠加（E=100 五只全开 → 55 + 5×4）；**无人开则击杀者全额、无衰减**。等级帽只冻结升级、超帽者不计入分摊份额。删除 `amulet_coin`（道具 + 商店 + `computeRewards` 的 ×2 全部移除）。
+- **W4 学习装置剧情发放**：第三关馆主 `town_leafy` 贺词 beat 加台词，**看完对话（dismiss → POST /api/story/seen）后**服务端幂等发 `exp_share`。给 `StoryBeatSeen` 加 `rewardGranted` 列做原子闸门（条件更新 false→true 抢占发放权，失败回滚），迁移 `20261116122714_story_reward_granted`；发奖走 slotLock → readSave → applyPlayReward → 同步 authority.expected → commitState，与 F02/F18-c 同范式。UI 在 `Camp.tsx` 伙伴详情显示开关（仅 party、持有装置后）。
+
+**红→绿取证**（先测后改，全部门禁未放宽）：
+- W1 `evolutionSystem.test.ts`：改前 **5/5 红** → 改后 **6/6 绿**；`mutations.test.ts` 41/41；`e2e:p32` 52/52。
+- W2 `deviceToggle.test.ts`：**5/5 红 → 5/5 绿**。
+- W3 `expShare.test.ts`：**4/5 红 → 5/5 绿**；`battleEngine` / `f04Cap` 旧断言按新语义更新（不是放宽）；`e2e:p32` 52/52、`e2e:f18c` 34/34、`e2e:core_loop` 49/49。
+- W4 `storyReward.test.ts`：**3/3 红（模块不存在）→ 3/3 绿**；新增 `e2e_story_reward.mjs` **9/9**（看完发 1、重复不重发、其它 beat 不误发、revision +1 正确）。
+
+**踩坑**：
+- `doc_check.py` 的 F17 闸门把 `SCHEMA_VERSION = 11` 写死，升版后误报。改为「前后端两处版本号正则相等」——保持强度、不再写死具体值。⚠️ 同类硬编码在 `e2e_hardening.mjs` 的 `version:'12'`（原用于测 VERSION_TOO_NEW），升版后夹具失效 → 改为从 `saveValidator.ts` 动态读 EXPECTED_SAVE_VERSION + 1。
+- 新 E2E 用 `new_game` 建真档时参数是 `playerName` + `starterSpecId`（不是 `starter`）；`cleanupAccounts()` 收用户名字符串数组（不是 account 对象）；Suite 收尾是 `suite.done()`（不是 report）。
+- 改 Prisma schema 必须先停 :3001 再 `migrate dev`，否则 Windows DLL 锁。
+
+**验收**：后端单测 515→**534**（+19）；verify 阶段 63→**64**（新增 `e2e:story_reward`，STAGES + GROUPS 双写）；`doc_check` 232/232、`check:content` 一致、前端 `tsc` 通过。全量 `npm run verify -- --strict` 首轮 63/1（唯一红 `e2e:hardening` 的写死版本夹具，与本单发奖无关），修复后复跑 **64/64 / 0 失败 / 0 跳过 / 284.0s / `VERIFY_OK`**。
+
+

@@ -16,6 +16,54 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../lib/prisma';
 import { STORY_BEAT_UNKNOWN_CODE, validateStoryBeatId } from '../game/storyBeats';
+import { decideStoryReward } from '../game/storyRewards';
+import { withSlotLock, slotLockKey } from '../lib/slotLock';
+import { digestOf, type AuthorityState } from '../lib/authority';
+import { readSave } from './saveRead';
+import { commitState } from './session';
+import { applyPlayReward, type PlayReward } from '../game/playReward';
+
+/**
+ * W4（2026-11-16）：看完带权益的剧情后，服务端幂等发放道具。
+ *
+ * 幂等闸门 = `StoryBeatSeen.rewardGranted`：用条件更新（where rewardGranted=false）
+ * 抢占发放权，只有抢到的那一次才写档；失败则回滚闸门，下次可重试。
+ * 与 F02/F18-c 同范式：slotLock 串行 → readSave → applyPlayReward → 同步 authority
+ * → commitState，全程客户端不可伪造（只认服务端白名单 beatId）。
+ */
+async function grantStoryReward(userId: string, beatId: string, nowIso: string): Promise<void> {
+  const itemId = decideStoryReward(beatId);
+  if (!itemId) return; // 该 beat 不带权益
+  await withSlotLock(slotLockKey(userId), async () => {
+    // 抢占发放权：rewardGranted 由 false→true 只有一次成功。
+    const claimed = await prisma.storyBeatSeen.updateMany({
+      where: { userId, beatId, rewardGranted: false },
+      data: { rewardGranted: true },
+    });
+    if (claimed.count !== 1) return; // 已发过 / 无该已读行
+    try {
+      const row = await readSave(userId);
+      if (!row) throw new Error('存档不存在，跳过剧情发奖');
+      const reward: PlayReward = { money: 0, items: { [itemId]: 1 } };
+      const raw = applyPlayReward(row.raw, reward, nowIso);
+      const authority: AuthorityState = { ...row.authority, expected: digestOf(raw), pending: null };
+      await commitState(userId, {
+        data: raw,
+        schemaVersion: row.schemaVersion,
+        clientId: row.clientId,
+        authority,
+        source: 'action',
+      });
+    } catch (e) {
+      // 发放失败：回滚闸门，允许下次看完/重试时再发（不重复、不丢失）。
+      await prisma.storyBeatSeen.updateMany({
+        where: { userId, beatId, rewardGranted: true },
+        data: { rewardGranted: false },
+      }).catch(() => undefined);
+      throw e;
+    }
+  });
+}
 
 export async function storyRoutes(fastify: FastifyInstance): Promise<void> {
   /** 已读集合：客户端启动时拉一次，用于「已看过的不再重播」。 */
@@ -50,6 +98,13 @@ export async function storyRoutes(fastify: FastifyInstance): Promise<void> {
       create: { userId, beatId: checked.beatId },
       update: {},
     });
+    // W4：看完带权益的剧情（第三关馆主）后，服务端幂等发放学习装置。
+    // 发奖失败不阻断剧情已读回应（与 F18-c 掉落发放同口径：已读事实先落）。
+    try {
+      await grantStoryReward(userId, checked.beatId, new Date().toISOString());
+    } catch (e) {
+      req.log.warn({ userId, beatId: checked.beatId, err: String(e) }, '剧情奖励发放失败（不阻断已读）');
+    }
     return { ok: true, beatId: checked.beatId };
   });
 }

@@ -299,9 +299,10 @@ export function levelUp(monster: MonsterInstance) {
     }
   }
 
-  const evo = spec.evolutions?.find((e) => e.condition.type === "level" && e.condition.level === level);
-  const pendingEvolution = evo ? { targetId: evo.targetId, condition: evo.condition } : undefined;
-  
+  // 2026-11-16 玩法重做（W1）：进化改为「等级 + 道具」双门槛，升级本身不再触发待进化。
+  // 达到 minLevel 只是解锁用石头的资格，不自动进化；不进化也照常升级。
+  const pendingEvolution = undefined;
+
   return {
     ...monster,
     level,

@@ -54,7 +54,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'forest',
     dailyLimit: 3,
     description: '盘踞新手镇外围的稀有头领，掉落草木精华与文柚果。',
-    drop: { money: 50, items: { stone_leaf: 1, berry_sitrus: 1 } },
+    drop: { money: 50, items: { stone_leaf: 1, stone_normal: 1, stone_fairy: 1, berry_sitrus: 1 } },
   },
   mb_pebble_warden: {
     mapBossId: 'mb_pebble_warden',
@@ -66,7 +66,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'cave',
     dailyLimit: 3,
     description: '镇守矿洞深处的巨岩，掉落火之石与高级捕获器。',
-    drop: { money: 60, items: { stone_fire: 1, capsule_prism: 1 } },
+    drop: { money: 60, items: { stone_rock: 1, stone_ground: 1, stone_fire: 1, capsule_prism: 1 } },
   },
   mb_leafy_tide: {
     mapBossId: 'mb_leafy_tide',
@@ -78,7 +78,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'lake',
     dailyLimit: 2,
     description: '林间湖泊的主宰，掉落水之石与文柚果。',
-    drop: { money: 70, items: { stone_water: 1, berry_sitrus: 1 } },
+    drop: { money: 70, items: { stone_water: 1, stone_ice: 1, stone_bug: 1, berry_sitrus: 1 } },
   },
   mb_spring_ironwing: {
     mapBossId: 'mb_spring_ironwing',
@@ -90,7 +90,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'cave',
     dailyLimit: 2,
     description: '掠过春城的钢翼猛禽，掉落雷之石与特级捕获器。',
-    drop: { money: 80, items: { stone_thunder: 1, capsule_ultra: 1 } },
+    drop: { money: 80, items: { stone_steel: 1, stone_flying: 1, stone_thunder: 1, capsule_ultra: 1 } },
   },
   mb_sun_emberlord: {
     mapBossId: 'mb_sun_emberlord',
@@ -102,7 +102,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'volcano',
     dailyLimit: 2,
     description: '盘踞炎阳山口的火兽，掉落火之石与叶之石。',
-    drop: { money: 90, items: { stone_fire: 1, stone_leaf: 1 } },
+    drop: { money: 90, items: { stone_fire: 1, stone_leaf: 1, stone_fighting: 1, stone_dragon: 1 } },
   },
   mb_shadow_phantom: {
     mapBossId: 'mb_shadow_phantom',
@@ -114,7 +114,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'mansion',
     dailyLimit: 1,
     description: '宅邸深处的暗影领主，掉落特级捕获器与木子果。',
-    drop: { money: 100, items: { capsule_ultra: 1, berry_lum: 1 } },
+    drop: { money: 100, items: { stone_ghost: 1, stone_dark: 1, stone_poison: 1, stone_psychic: 1, capsule_ultra: 1, berry_lum: 1 } },
   },
   mb_winter_frostbite: {
     mapBossId: 'mb_winter_frostbite',
@@ -126,7 +126,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     theme: 'cave',
     dailyLimit: 1,
     description: '冰原尽头的远古霸主，掉落水之石、雷之石与大师捕获器。',
-    drop: { money: 120, items: { stone_water: 1, stone_thunder: 1, capsule_master: 1 } },
+    drop: { money: 120, items: { essence_flame: 1, essence_tide: 1, essence_forest: 1, essence_dragon: 1, capsule_master: 1 } },
   },
 };
 

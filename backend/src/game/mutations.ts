@@ -31,6 +31,7 @@ export const MUTATION_OPS = [
   'move_to_party',
   'release',
   'travel',
+  'toggle_exp_share',
 ] as const;export type MutationOp = (typeof MUTATION_OPS)[number];
 
 /** 业务拒绝（400，不封号）。code 供前端做文案映射。 */
@@ -54,6 +55,8 @@ export type MutationBody = {
   /** 放弃学习：只把这招从待学列表里去掉，不改技能栏。 */
   discard?: boolean;
   locationId?: string;
+  /** 学习装置个体开关（W2）。 */
+  on?: boolean;
 };
 
 export type MutationEffect = Record<string, unknown>;
@@ -166,6 +169,11 @@ export function applyMutation(op: MutationOp, rawSave: Save, body: MutationBody)
         (e) => e.condition?.type === 'item' && e.condition?.itemId === itemId,
       );
       if (!evo) throw new MutationError('EVOLUTION_NOT_APPLICABLE', '这只幻兽无法使用该进化石');
+      // 2026-11-16 W1：等级 + 道具双门槛。等级不足不扣石（在 consume 之前拦）。
+      const minLevel = Number((evo.condition as any)?.minLevel ?? 0);
+      if (num(target.monster.level) < minLevel) {
+        throw new MutationError('EVOLUTION_LEVEL_NOT_MET', `这只幻兽需要达到 Lv.${minLevel} 才能进化`);
+      }
       const evolved = evolveMonsterInstance(target.monster, evo.targetId);
       consume(inventory, itemId, save);
       replaceMonster(save, target.list, target.index, evolved);
@@ -301,6 +309,21 @@ export function applyMutation(op: MutationOp, rawSave: Save, body: MutationBody)
     save.locationId = locationId;
     save.visitedLocationIds = visited;
     return { save, effect: { locationId } };
+  }
+
+  // —— 学习装置个体开关（W2）：只对携带(party)生效，仓库(box)不可开 ——
+  if (op === 'toggle_exp_share') {
+    if (typeof body.on !== 'boolean') throw new MutationError('BAD_TOGGLE', '开关参数不合法');
+    const target = locate(save, body);
+    if (target.list !== 'party') throw new MutationError('MONSTER_NOT_FOUND', '只能给携带中的幻兽装装置');
+    // 开需要持有装置；关不需要（避免装置丢失后无法卸下）。
+    if (body.on && num((save.inventory as any)?.exp_share) <= 0) {
+      throw new MutationError('EXP_SHARE_NOT_OWNED', '还没有学习装置');
+    }
+    const party = partyOf(save).map((m) => ({ ...m }));
+    party[target.index] = { ...party[target.index], expShareOn: body.on };
+    save.party = party;
+    return { save, effect: { monsterId: target.monster.id, on: body.on } };
   }
 
   throw new MutationError('OP_UNKNOWN', '未知的操作');

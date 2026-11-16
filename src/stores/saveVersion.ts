@@ -8,7 +8,7 @@
 // P5 起前端不再持有存档副本，早年的 `migrateSaveState`（v1→v11 的逐级补字段）
 // 只为 localStorage 里的老档服务，随本地存档一起删除。迁移职责现在只在服务端一侧：
 // 结构不合法的存档根本进不了库，能进库的一定是当前版本。
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /** 写入 SaveData 内部的版本字段（字符串，便于 importSaveJson 做 typeof 校验）。 */
 export const SAVE_VERSION = String(SCHEMA_VERSION);

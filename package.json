@@ -17,7 +17,9 @@
     "verify:hardening": "node scripts/verify.mjs --only=e2e:hardening",
     "verify:smoke": "node scripts/verify.mjs --only=smoke",
     "demo:apk": "node demo-app/build-apk.mjs",
-    "demo:apk:install": "node demo-app/build-apk.mjs --install"
+    "demo:apk:install": "node demo-app/build-apk.mjs --install",
+    "demo:test": "vitest run --config demo-app/vitest.config.ts",
+    "demo:check": "tsc --noEmit -p demo-app/tsconfig.json"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

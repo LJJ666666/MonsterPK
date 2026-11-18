@@ -22,10 +22,14 @@
 ```
 demo-app/
 ├── vite.config.ts        # 独立构建配置：复用主工程入口，resolve 阶段重定向 api/ws
+├── vitest.config.ts      # 独立单测配置：只扫本目录，不进主工程 162 项口径
+├── tsconfig.json         # 独立类型检查（主工程 tsconfig 只 include src/api）
 ├── build-apk.mjs         # 一键出包：构建 → 拷 assets → gradle → 恢复默认 assets
 ├── README.md             # 本文件
 ├── src/
-│   ├── api.mock.ts       # api 替身：读返回 fixtures，写返回 ok，假登录 JWT
+│   ├── api.mock.ts       # api 替身：读 fixtures + L2 战斗真推进 + 假登录 JWT
+│   ├── battle.engine.ts  # L2 简化战斗状态机（只用主工程前端纯函数）
+│   ├── battle.engine.test.ts # L2 引擎单测（8 项）
 │   ├── ws.mock.ts        # ws 替身：不建连、恒 online（避免断线横幅）
 │   └── fixtures/*.json   # 从真后端抓的真实结构快照（存档/榜单/Boss/演武堂等）
 ├── dist/                 # [gitignored] mock 前端产物
@@ -53,13 +57,21 @@ MPK_ADB=/d/game/leidian/LDPlayer14/adb.exe npm run demo:apk:install
 adb shell am start -n com.monster.game/.MainActivity
 ```
 
-## 演示包行为契约（L1）
+独立校验（不碰主工程 verify）：
+
+```bash
+npm run demo:check   # demo-app 类型检查
+npm run demo:test    # L2 战斗引擎单测（8 项）
+```
+
+## 演示包行为契约（L1 + L2）
 
 | 能 | 不能 |
 |---|---|
-| 假登录：任意用户名密码点登录即进 | 战斗回合不真推进（点技能有反应但不结算） |
-| 固定存档：3 只兽 + 仓库 + 12860 金币 + 丰富道具 | 写操作不落地，退出重进回到固定存档 |
-| 看所有界面：地图/队伍/图鉴/Boss/演武堂/商店等 | 不连后端，多人/实时功能空壳 |
+| 假登录：任意用户名密码点登录即进 | 不连后端，多人 / 实时功能空壳 |
+| 固定存档：3 只兽 + 仓库 + 12860 金币 + 丰富道具 | 退出进程回到固定存档（结算只进内存副本，不落盘） |
+| 看所有界面：地图 / 队伍 / 图鉴 / Boss / 演武堂 / 商店等 | 不发徽章 / CD / 次数 / 掉落 / 榜单等服务端权威真值 |
+| **L2 真打一场**：技能 / PP / 命中 / 伤害 / 异常 / 换人 / 捕获 / 逃跑 / 敌方回合 / 经验金钱奖励 | 不做服务端完整引擎（见 L3 冻结说明） |
 | 无网络请求、无断线横幅 | — |
 
 fixture 存档来自真后端真实结构快照，按 `data.ts` 的合法 spec 增强，界面渲染数据结构真实。
@@ -81,7 +93,7 @@ fixture 存档来自真后端真实结构快照，按 `data.ts` 的合法 spec �
 | 深度 | 做什么 | 能测什么 | 成本 | 状态 |
 |---|---|---|---|---|
 | **L1 快照** | mock 登录 + 存档 + 各页面 GET 返回固定数据 | 看界面、点 tab、查布局；进战斗界面能看到怪和按钮 | 几小时 | 已完成（雷电真机已验） |
-| **L2 简化战斗** | mock 层用前端 `src/game/rules.ts` 推进回合 | 能真点技能打一场，测战斗 UI 交互流程 | 1–3 天 | 下一步 |
+| **L2 简化战斗** | mock 层用前端 `src/game/rules.ts` 推进回合 | 能真点技能打一场，测战斗 UI 交互流程 | 1–3 天 | 已完成（单测 8/8，待真机复核） |
 | **L3 完整引擎** | 把服务端发奖 / 进化 / 去重 / CD 全搬前端 | 真玩法测试 | 几天~两周（= 方案 C） | 冻结，不建议 |
 
 ### L1 快照（已交付）
@@ -89,19 +101,26 @@ fixture 存档来自真后端真实结构快照，按 `data.ts` 的合法 spec �
 行为契约见上文「演示包行为契约」。要点：读操作全走 fixtures，写操作返回 ok 但不推进状态；
 战斗能进、按钮能点，回合不真变化。退出重进回到固定存档。
 
-### L2 简化战斗（下一步，未实现）
+### L2 简化战斗（已实现，待真机复核）
 
-- **落点**：只在本目录新增 `src/battle.engine.ts` + 改 `src/api.mock.ts` 的
-  `battleStart` / `battleAction` / `battleCurrent` / `battleAbandon` 四个入口。
-- **复用**：主工程纯函数 `@/game/rules`（`computeDamage` / `attemptCapture` / `gainExp` /
-  `getSpeed` / `canMove` / `applyDamage` / `getMoveMaxPP` 等）与
-  `@/game/data`（`MONSTER_SPECS` / `MOVE_SPECS` / `ITEM_SPECS`）。
+- **落点**：本目录 `src/battle.engine.ts`（新增）+ `src/api.mock.ts` 的
+  `battleStart` / `battleAction` / `battleCurrent` / `battleAbandon`
+  + `bossStart` / `gymStart` / `mapBossStart`（L1 只回 battleId 会让主工程 store 报缺 battle，
+  L2 一并返回真实视图）。
+- **复用**：主工程纯函数 `@/game/rules`（`computeDamage` / `gainExp` / `getSpeed` /
+  `canMove` / `applyDamage` / `getMoveMaxPP` / `createInstance` 等）与
+  `@/game/data`（`MONSTER_SPECS` / `MOVE_SPECS` / `ITEM_SPECS` / `THEME_TABLE`）。
   **不 import 服务端任何模块**——这是 L2 与 L3 的分界线。
-- **内存战斗态**：`battleStart` 按入参建敌方实例与队伍副本、初始化 PP；
+- **内存战斗态**：`battleStart` 按主题表生成敌人、拷贝队伍、初始化 PP；
   `battleAction` 推进「玩家意图 → 敌方选招 → 命中/伤害/异常/PP → 回合末 → 胜负与奖励日志」，
   返回与 `ServerBattleView` 同形状的视图；`battleCurrent` 取回在场战斗；`battleAbandon` 清空。
-- **边界**：只在本次 APK 进程内有效；退出重进仍回到固定存档（与 L1 一致）。
-  不写 localStorage、不发网络请求；战斗结算不落持久层。
+  敌方 HP 差累计 `damageDealt`。
+- **边界**：只在本次 APK 进程内有效；战斗结算把 HP / 经验 / 金币 / 捕获 / 道具消耗写进
+  **内存存档副本**，`getSave()` 能立即读到（主工程结算后 `refreshSaveFromServer()` 会拉它），
+  但退出进程回到 fixture 固定存档。不写 localStorage、不发网络请求。
+- **单测**：`npm run demo:test` → 8 项（开局视图 / 技能真推进 / PP / OHKO 结算 /
+  捕获 / 换人 / 逃跑 / 特殊战禁捕），`npm run demo:check` 独立类型检查。
+  主工程 `npm test` 只扫 `src/**`，不受影响（仍 162 项）。
 - **验收口径**：雷电真机点技能，敌方 HP / 己方 HP / PP / 回合数 / 战斗日志每次动作都真实变化，
   能打到「敌方倒下 → 获得经验与金钱」或「己方全灭」；战斗 UI 无卡死、logcat 无 JS 错误；
   主工程零改动，默认 `verify --strict` 仍 64/64。

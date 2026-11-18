@@ -1,0 +1,389 @@
+{
+  "ok": true,
+  "readonly": true,
+  "granularity": "day",
+  "currentPeriodKey": "2026-11-17",
+  "previousPeriodKey": "2026-11-16",
+  "rewardMaxRank": 10,
+  "boards": [
+    {
+      "boardKey": "rank:monster_power",
+      "label": "单宠战力",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 200,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 150,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 80,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "rank:team_power",
+      "label": "全队战力",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 200,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 150,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 80,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "rank:summoner_level",
+      "label": "召唤师等级",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 200,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 150,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 80,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "rank:progress",
+      "label": "推图",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 200,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 150,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 80,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "boss:boss_ember_behemoth",
+      "label": "烈焰巨兽 · 讨伐 · 伤害榜",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 600,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 400,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 160,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "boss:boss_phantom_lord",
+      "label": "幽冥领主 · 讨伐 · 伤害榜",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 600,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 400,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 160,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "boardKey": "boss:boss_apex_dragon",
+      "label": "霸主苍龙 · 讨伐 · 伤害榜",
+      "rewardTiers": [
+        {
+          "rank": 1,
+          "reward": {
+            "money": 600,
+            "items": [
+              {
+                "itemId": "capsule_prism",
+                "count": 1
+              }
+            ]
+          }
+        },
+        {
+          "rank": 2,
+          "reward": {
+            "money": 400,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 3,
+          "reward": {
+            "money": 300,
+            "items": [
+              {
+                "itemId": "potion_small",
+                "count": 2
+              }
+            ]
+          }
+        },
+        {
+          "rank": 4,
+          "reward": {
+            "money": 160,
+            "items": [
+              {
+                "itemId": "capsule_basic",
+                "count": 2
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "periods": []
+}

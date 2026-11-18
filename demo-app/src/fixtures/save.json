@@ -1,0 +1,245 @@
+{
+  "version": "12",
+  "playerName": "旅行者·演示",
+  "money": 12860,
+  "steps": 247,
+  "locationId": "town_leafy",
+  "lastHealLocationId": "town_leafy",
+  "visitedLocationIds": [
+    "town_starter",
+    "town_leafy",
+    "route_1",
+    "forest_1"
+  ],
+  "party": [
+    {
+      "id": "wild_2s4i0isz_mwkoe8vw",
+      "specId": "sprout_owl",
+      "level": 5,
+      "exp": 0,
+      "element": "grass",
+      "maxHp": 55,
+      "hp": 55,
+      "atk": 59,
+      "def": 59,
+      "spAtk": 79,
+      "spDef": 72,
+      "spd": 57,
+      "status": "none",
+      "moveIds": [
+        "tackle",
+        "wood_strike"
+      ],
+      "initStats": {
+        "hp": 47,
+        "atk": 51,
+        "def": 51,
+        "spAtk": 67,
+        "spDef": 68,
+        "spd": 49
+      },
+      "growthRates": {
+        "hp": 2,
+        "atk": 2,
+        "def": 2,
+        "spAtk": 3,
+        "spDef": 1,
+        "spd": 2
+      },
+      "pendingMoves": [],
+      "isShiny": false
+    },
+    {
+      "id": "mock_ember",
+      "specId": "ember_marmot",
+      "level": 8,
+      "exp": 0,
+      "element": "fire",
+      "maxHp": 60,
+      "hp": 60,
+      "atk": 59,
+      "def": 50,
+      "spAtk": 67,
+      "spDef": 57,
+      "spd": 72,
+      "status": "none",
+      "moveIds": [
+        "scratch",
+        "ember",
+        "fire_punch"
+      ],
+      "initStats": {
+        "hp": 39,
+        "atk": 52,
+        "def": 43,
+        "spAtk": 60,
+        "spDef": 50,
+        "spd": 65
+      },
+      "growthRates": {
+        "hp": 3,
+        "atk": 1,
+        "def": 1,
+        "spAtk": 1,
+        "spDef": 1,
+        "spd": 1
+      },
+      "pendingMoves": [],
+      "isShiny": false
+    },
+    {
+      "id": "mock_tide",
+      "specId": "tide_newt",
+      "level": 9,
+      "exp": 0,
+      "element": "water",
+      "maxHp": 68,
+      "hp": 68,
+      "atk": 56,
+      "def": 81,
+      "spAtk": 58,
+      "spDef": 80,
+      "spd": 51,
+      "status": "none",
+      "moveIds": [
+        "tackle",
+        "water_gun",
+        "aqua_jet"
+      ],
+      "initStats": {
+        "hp": 44,
+        "atk": 48,
+        "def": 65,
+        "spAtk": 50,
+        "spDef": 64,
+        "spd": 43
+      },
+      "growthRates": {
+        "hp": 3,
+        "atk": 1,
+        "def": 2,
+        "spAtk": 1,
+        "spDef": 2,
+        "spd": 1
+      },
+      "pendingMoves": [],
+      "isShiny": false
+    }
+  ],
+  "box": [
+    {
+      "id": "mock_sprout2",
+      "specId": "sprout_owl",
+      "level": 6,
+      "exp": 0,
+      "element": "grass",
+      "maxHp": 62,
+      "hp": 62,
+      "atk": 61,
+      "def": 61,
+      "spAtk": 82,
+      "spDef": 73,
+      "spd": 59,
+      "status": "none",
+      "moveIds": [
+        "tackle",
+        "wood_strike"
+      ],
+      "initStats": {
+        "hp": 47,
+        "atk": 51,
+        "def": 51,
+        "spAtk": 67,
+        "spDef": 68,
+        "spd": 49
+      },
+      "growthRates": {
+        "hp": 3,
+        "atk": 2,
+        "def": 2,
+        "spAtk": 3,
+        "spDef": 1,
+        "spd": 2
+      },
+      "pendingMoves": [],
+      "isShiny": false
+    }
+  ],
+  "inventory": {
+    "capsule_basic": 24,
+    "capsule_prism": 5,
+    "capsule_ultra": 3,
+    "capsule_master": 0,
+    "potion_small": 8,
+    "potion_medium": 4,
+    "potion_large": 2,
+    "potion_max": 0,
+    "heal_antidote": 0,
+    "heal_paralyze": 0,
+    "heal_awake": 0,
+    "heal_burn": 0,
+    "heal_ice": 0,
+    "berry_oran": 6,
+    "berry_sitrus": 0,
+    "berry_lum": 0,
+    "stone_fire": 2,
+    "stone_water": 1,
+    "stone_leaf": 0,
+    "stone_thunder": 0,
+    "stone_rock": 0,
+    "stone_steel": 0,
+    "stone_ghost": 0,
+    "stone_ice": 0,
+    "stone_bug": 0,
+    "stone_normal": 0,
+    "stone_ground": 0,
+    "stone_poison": 0,
+    "stone_dark": 0,
+    "stone_psychic": 0,
+    "stone_fairy": 0,
+    "stone_dragon": 0,
+    "stone_fighting": 0,
+    "stone_flying": 0,
+    "essence_flame": 1,
+    "essence_tide": 0,
+    "essence_forest": 0,
+    "essence_dragon": 0,
+    "amulet_coin": 0,
+    "exp_share": 1
+  },
+  "collection": {
+    "sprout_owl": {
+      "seen": true,
+      "captured": true,
+      "timesCaptured": 1,
+      "seenLocations": [
+        "town_starter"
+      ]
+    },
+    "ember_marmot": {
+      "seen": true,
+      "captured": true,
+      "timesCaptured": 2,
+      "seenLocations": [
+        "route_1"
+      ]
+    },
+    "tide_newt": {
+      "seen": true,
+      "captured": true,
+      "timesCaptured": 1,
+      "seenLocations": [
+        "forest_1"
+      ]
+    }
+  },
+  "lastSavedAt": "2026-11-17T12:36:20.591Z",
+  "clearedAreas": {
+    "route_1": {
+      "cleared": true
+    },
+    "forest_1": {
+      "cleared": true
+    }
+  }
+}

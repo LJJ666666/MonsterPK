@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "types": [
+    {
+      "type": "monster_power",
+      "label": "单宠战力",
+      "unit": "战力",
+      "description": "队伍与箱子中六维总和最高的一只",
+      "disclaimer": "战力仅为六维总和，不代表实战强弱"
+    },
+    {
+      "type": "team_power",
+      "label": "全队战力",
+      "unit": "战力",
+      "description": "出战队伍各只六维总和之和（不含箱子）",
+      "disclaimer": "战力仅为六维总和，不代表实战强弱"
+    },
+    {
+      "type": "summoner_level",
+      "label": "召唤师等级",
+      "unit": "级",
+      "description": "服务端徽章真值：基础 Lv.5 + 每枚徽章等级加成；账号等级与宠物等级帽见规范 §31",
+      "disclaimer": "等级来自服务端徽章发放记录，客户端上报无效"
+    },
+    {
+      "type": "progress",
+      "label": "推图",
+      "unit": "区",
+      "description": "已首通区域数量，同数量时比较最高区域难度",
+      "disclaimer": "按服务端 clearedAreas 统计，客户端上报无效"
+    }
+  ],
+  "disclaimer": "战力仅为六维总和，不代表实战强弱",
+  "readonly": true
+}

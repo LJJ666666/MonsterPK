@@ -15,7 +15,9 @@
     "verify:unit": "node scripts/verify.mjs --only=unit",
     "verify:e2e": "node scripts/verify.mjs --only=e2e",
     "verify:hardening": "node scripts/verify.mjs --only=e2e:hardening",
-    "verify:smoke": "node scripts/verify.mjs --only=smoke"
+    "verify:smoke": "node scripts/verify.mjs --only=smoke",
+    "demo:apk": "node demo-app/build-apk.mjs",
+    "demo:apk:install": "node demo-app/build-apk.mjs --install"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

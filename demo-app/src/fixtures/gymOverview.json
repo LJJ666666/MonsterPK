@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "readonly": true,
+  "gyms": [
+    {
+      "locationId": "town_starter",
+      "leaderName": "木之导师 青岚",
+      "aceSpeciesId": "sprout_owl",
+      "aceLevel": 8,
+      "badgeId": "badge_sprout",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "city_pebble",
+      "leaderName": "磐石馆主 岩岳",
+      "aceSpeciesId": "rock_golem",
+      "aceLevel": 12,
+      "badgeId": "badge_stone",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "town_leafy",
+      "leaderName": "疾风馆主 翠翎",
+      "aceSpeciesId": "iron_bird",
+      "aceLevel": 16,
+      "badgeId": "badge_leaf",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "city_spring",
+      "leaderName": "流泉馆主 涟心",
+      "aceSpeciesId": "tide_newt",
+      "aceLevel": 20,
+      "badgeId": "badge_spring",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "town_sun",
+      "leaderName": "赤焰馆主 焰心",
+      "aceSpeciesId": "ember_marmot",
+      "aceLevel": 24,
+      "badgeId": "badge_flame",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "city_shadow",
+      "leaderName": "幽玄馆主 夜魅",
+      "aceSpeciesId": "shadow_spirit",
+      "aceLevel": 28,
+      "badgeId": "badge_shadow",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    },
+    {
+      "locationId": "town_winter",
+      "leaderName": "霜华馆主 凛雪",
+      "aceSpeciesId": "frost_cub",
+      "aceLevel": 30,
+      "badgeId": "badge_frost",
+      "badgeOwned": false,
+      "onCooldown": false,
+      "cooldownUntil": 0
+    }
+  ]
+}

@@ -1,0 +1,271 @@
+{
+  "ok": true,
+  "periodKey": "2026-11-17",
+  "readonly": true,
+  "bosses": [
+    {
+      "mapBossId": "mb_starter_guardian",
+      "name": "萌芽守望者",
+      "locationId": "town_starter",
+      "speciesId": "sprout_owl",
+      "speciesName": "苔羽鸮",
+      "level": 8,
+      "theme": "forest",
+      "description": "盘踞新手镇外围的稀有头领，掉落草木精华与文柚果。",
+      "dailyLimit": 3,
+      "unlocked": true,
+      "drop": {
+        "money": 50,
+        "items": [
+          {
+            "itemId": "stone_leaf",
+            "count": 1
+          },
+          {
+            "itemId": "stone_normal",
+            "count": 1
+          },
+          {
+            "itemId": "stone_fairy",
+            "count": 1
+          },
+          {
+            "itemId": "berry_sitrus",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 3
+    },
+    {
+      "mapBossId": "mb_pebble_warden",
+      "name": "磐石守矿石",
+      "locationId": "city_pebble",
+      "speciesId": "rock_golem",
+      "speciesName": "岩刺灵",
+      "level": 13,
+      "theme": "cave",
+      "description": "镇守矿洞深处的巨岩，掉落火之石与高级捕获器。",
+      "dailyLimit": 3,
+      "unlocked": false,
+      "drop": {
+        "money": 60,
+        "items": [
+          {
+            "itemId": "stone_rock",
+            "count": 1
+          },
+          {
+            "itemId": "stone_ground",
+            "count": 1
+          },
+          {
+            "itemId": "stone_fire",
+            "count": 1
+          },
+          {
+            "itemId": "capsule_prism",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 3
+    },
+    {
+      "mapBossId": "mb_leafy_tide",
+      "name": "碧波林灵",
+      "locationId": "town_leafy",
+      "speciesId": "tide_newt",
+      "speciesName": "潮纹螈",
+      "level": 16,
+      "theme": "lake",
+      "description": "林间湖泊的主宰，掉落水之石与文柚果。",
+      "dailyLimit": 2,
+      "unlocked": false,
+      "drop": {
+        "money": 70,
+        "items": [
+          {
+            "itemId": "stone_water",
+            "count": 1
+          },
+          {
+            "itemId": "stone_ice",
+            "count": 1
+          },
+          {
+            "itemId": "stone_bug",
+            "count": 1
+          },
+          {
+            "itemId": "berry_sitrus",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 2
+    },
+    {
+      "mapBossId": "mb_spring_ironwing",
+      "name": "铁翼春隼",
+      "locationId": "city_spring",
+      "speciesId": "iron_bird",
+      "speciesName": "铁翎雀",
+      "level": 19,
+      "theme": "cave",
+      "description": "掠过春城的钢翼猛禽，掉落雷之石与特级捕获器。",
+      "dailyLimit": 2,
+      "unlocked": false,
+      "drop": {
+        "money": 80,
+        "items": [
+          {
+            "itemId": "stone_steel",
+            "count": 1
+          },
+          {
+            "itemId": "stone_flying",
+            "count": 1
+          },
+          {
+            "itemId": "stone_thunder",
+            "count": 1
+          },
+          {
+            "itemId": "capsule_ultra",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 2
+    },
+    {
+      "mapBossId": "mb_sun_emberlord",
+      "name": "炽炎日侯",
+      "locationId": "town_sun",
+      "speciesId": "ember_marmot",
+      "speciesName": "焰尾狸",
+      "level": 22,
+      "theme": "volcano",
+      "description": "盘踞炎阳山口的火兽，掉落火之石与叶之石。",
+      "dailyLimit": 2,
+      "unlocked": false,
+      "drop": {
+        "money": 90,
+        "items": [
+          {
+            "itemId": "stone_fire",
+            "count": 1
+          },
+          {
+            "itemId": "stone_leaf",
+            "count": 1
+          },
+          {
+            "itemId": "stone_fighting",
+            "count": 1
+          },
+          {
+            "itemId": "stone_dragon",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 2
+    },
+    {
+      "mapBossId": "mb_shadow_phantom",
+      "name": "幽影夜主",
+      "locationId": "city_shadow",
+      "speciesId": "shadow_spirit",
+      "speciesName": "幽影灵",
+      "level": 25,
+      "theme": "mansion",
+      "description": "宅邸深处的暗影领主，掉落特级捕获器与木子果。",
+      "dailyLimit": 1,
+      "unlocked": false,
+      "drop": {
+        "money": 100,
+        "items": [
+          {
+            "itemId": "stone_ghost",
+            "count": 1
+          },
+          {
+            "itemId": "stone_dark",
+            "count": 1
+          },
+          {
+            "itemId": "stone_poison",
+            "count": 1
+          },
+          {
+            "itemId": "stone_psychic",
+            "count": 1
+          },
+          {
+            "itemId": "capsule_ultra",
+            "count": 1
+          },
+          {
+            "itemId": "berry_lum",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 1
+    },
+    {
+      "mapBossId": "mb_winter_frostbite",
+      "name": "霜寒霸主",
+      "locationId": "town_winter",
+      "speciesId": "frost_cub",
+      "speciesName": "冰霜幼崽",
+      "level": 28,
+      "theme": "cave",
+      "description": "冰原尽头的远古霸主，掉落水之石、雷之石与大师捕获器。",
+      "dailyLimit": 1,
+      "unlocked": false,
+      "drop": {
+        "money": 120,
+        "items": [
+          {
+            "itemId": "essence_flame",
+            "count": 1
+          },
+          {
+            "itemId": "essence_tide",
+            "count": 1
+          },
+          {
+            "itemId": "essence_forest",
+            "count": 1
+          },
+          {
+            "itemId": "essence_dragon",
+            "count": 1
+          },
+          {
+            "itemId": "capsule_master",
+            "count": 1
+          }
+        ]
+      },
+      "used": 0,
+      "held": 0,
+      "remaining": 1
+    }
+  ]
+}

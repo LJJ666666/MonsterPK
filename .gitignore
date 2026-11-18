@@ -23,6 +23,10 @@ dist-ssr
 gradle-*.zip
 *.apk
 
+# demo-app（L1/L2 演示包）：配置与 mock 源码入库，构建产物不入库
+demo-app/dist/
+demo-app/output/
+
 # Local runtime save data
 save_data.json
 

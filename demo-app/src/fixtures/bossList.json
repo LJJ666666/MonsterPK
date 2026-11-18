@@ -1,0 +1,64 @@
+{
+  "ok": true,
+  "periodKey": "2026-11-17",
+  "readonly": true,
+  "bosses": [
+    {
+      "bossId": "boss_ember_behemoth",
+      "name": "烈焰巨兽 · 讨伐",
+      "speciesId": "ember_behemoth",
+      "speciesName": "烈焰巨兽",
+      "level": 12,
+      "theme": "volcano",
+      "description": "盘踞火山口的巨兽，皮糙肉厚，适合练手。",
+      "dailyLimit": 3,
+      "unlockAreaId": null,
+      "used": 0,
+      "held": 0,
+      "remaining": 3,
+      "my": {
+        "total": 0,
+        "best": 0,
+        "attempts": 0
+      }
+    },
+    {
+      "bossId": "boss_phantom_lord",
+      "name": "幽冥领主 · 讨伐",
+      "speciesId": "phantom_lord",
+      "speciesName": "幽冥领主",
+      "level": 16,
+      "theme": "mansion",
+      "description": "废弃宅邸的主人，速度快、擅长消耗。",
+      "dailyLimit": 2,
+      "unlockAreaId": null,
+      "used": 0,
+      "held": 0,
+      "remaining": 2,
+      "my": {
+        "total": 0,
+        "best": 0,
+        "attempts": 0
+      }
+    },
+    {
+      "bossId": "boss_apex_dragon",
+      "name": "霸主苍龙 · 讨伐",
+      "speciesId": "apex_dragon",
+      "speciesName": "霸主苍龙",
+      "level": 22,
+      "theme": "cave",
+      "description": "深岩尽头的天空霸主，每天只给一次机会。",
+      "dailyLimit": 1,
+      "unlockAreaId": null,
+      "used": 0,
+      "held": 0,
+      "remaining": 1,
+      "my": {
+        "total": 0,
+        "best": 0,
+        "attempts": 0
+      }
+    }
+  ]
+}

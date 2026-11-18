@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "readonly": true,
+  "progress": {
+    "level": 5,
+    "cap": 5,
+    "baseLevel": 5,
+    "badgeBonus": 0,
+    "badgeCount": 0,
+    "badges": [],
+    "achievements": [],
+    "bonuses": [],
+    "readonly": true
+  },
+  "catalog": [
+    {
+      "id": "badge_sprout",
+      "name": "青苗徽章",
+      "locationName": "初心镇",
+      "levelBonus": 5,
+      "desc": "初心镇演武堂的证明，草木初生。",
+      "owned": false
+    },
+    {
+      "id": "badge_stone",
+      "name": "磐石徽章",
+      "locationName": "坚石市",
+      "levelBonus": 5,
+      "desc": "坚石市演武堂的证明，稳如山岳。",
+      "owned": false
+    },
+    {
+      "id": "badge_leaf",
+      "name": "翠羽徽章",
+      "locationName": "绿叶镇",
+      "levelBonus": 5,
+      "desc": "绿叶镇演武堂的证明，林间疾风。",
+      "owned": false
+    },
+    {
+      "id": "badge_spring",
+      "name": "流泉徽章",
+      "locationName": "涌泉市",
+      "levelBonus": 5,
+      "desc": "涌泉市演武堂的证明，流水不绝。",
+      "owned": false
+    },
+    {
+      "id": "badge_flame",
+      "name": "赤焰徽章",
+      "locationName": "烈阳镇",
+      "levelBonus": 5,
+      "desc": "烈阳镇演武堂的证明，赤焰不熄。",
+      "owned": false
+    },
+    {
+      "id": "badge_shadow",
+      "name": "幽玄徽章",
+      "locationName": "幽影市",
+      "levelBonus": 5,
+      "desc": "幽影市演武堂的证明，幽玄难测。",
+      "owned": false
+    },
+    {
+      "id": "badge_frost",
+      "name": "霜华徽章",
+      "locationName": "凛冬镇",
+      "levelBonus": 5,
+      "desc": "凛冬镇演武堂的证明，霜华凛冽。",
+      "owned": false
+    }
+  ],
+  "unlockedLocations": [
+    "town_starter"
+  ]
+}

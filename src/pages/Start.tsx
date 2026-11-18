@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PixelButton from "@/components/PixelButton";
 import ModalShell from "@/components/ModalShell";
+import ConfirmModal from "@/components/ConfirmModal";
 import PixelCard from "@/components/PixelCard";
 import BrandMark from "@/components/BrandMark";
 import { MONSTER_SPECS, STARTERS } from "@/game/data";
@@ -59,6 +60,7 @@ export default function Start() {
   const activeSave = save;
 
   const [open, setOpen] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [playerName, setPlayerName] = useState("旅行者");
   const [starter, setStarter] = useState<(typeof STARTERS)[number]>(STARTERS[0]);
@@ -270,11 +272,8 @@ export default function Start() {
                   size="sm"
                   disabled={!activeSave}
                   onClick={() => {
-                    // P5：本地存档已删除，「清空内存」不再有任何意义（服务端那份才是真值，
-                    // 刷新就回来）。重开必须走服务端 new_game 覆盖，这里换个入口而已。
-                    if (confirm("确定重新开始吗？当前存档会被新档覆盖，无法撤销。")) {
-                      setOpen(true);
-                    }
+                    // 原生 confirm 在 WebView 会弹系统级对话框，改游戏内弹窗。
+                    setConfirmRestart(true);
                   }}
                 >
                   重新开始
@@ -284,6 +283,20 @@ export default function Start() {
           )}
         </div>
       </main>
+
+      {/* 重开二次确认（游戏内弹窗，不用原生 confirm） */}
+      {confirmRestart && (
+        <ConfirmModal
+          title="重新开始"
+          message="确定重新开始吗？当前存档会被新档覆盖，无法撤销。"
+          onClose={() => setConfirmRestart(false)}
+          onConfirm={() => {
+            setConfirmRestart(false);
+            // P5：本地存档已删除，重开走服务端 new_game 覆盖（见创建新档弹窗）。
+            setOpen(true);
+          }}
+        />
+      )}
 
       {/* 创建新档弹窗（游戏必要流程，保留） */}
       {open && (

@@ -20,6 +20,7 @@ import StoryModal from "@/components/StoryModal";
 import MapBossModal from "@/components/MapBossModal";
 import { useStoryTriggers } from "@/lib/story";
 import ModalShell from "@/components/ModalShell";
+import ConfirmModal from "@/components/ConfirmModal";
 import GameHeader from "@/components/GameHeader";
 
 import { MonsterName } from "@/components/MonsterName";
@@ -153,6 +154,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const [mapView, setMapView] = useState<"list" | "detail">("list");
   
   const [dialog, setDialog] = useState<{ name: string; text: string } | null>(null);
+  /** 二次确认弹窗（替代原生 confirm）：消息 + 确认回调，确认后自动关闭。 */
+  const [confirm, setConfirm] = useState<{ message: string; onYes: () => void } | null>(null);
   const [bagFilter, setBagFilter] = useState<"all" | "heal" | "item" | "skill" | "quest">("all");
   const [showTypeChart, setShowTypeChart] = useState(false);
   const [showRank, setShowRank] = useState(false);
@@ -362,10 +365,15 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               <PixelButton
                 tone="danger"
                 disabled={save.party.length <= 1}
-                onClick={async () => {
-                  if (confirm(`确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`)) {
-                    if (await runOp(() => useGameStore.getState().releaseMonster(m.id))) setSelected(null);
-                  }
+                onClick={() => {
+                  setConfirm({
+                    message: `确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`,
+                    onYes: () => {
+                      void runOp(() => useGameStore.getState().releaseMonster(m.id)).then((ok) => {
+                        if (ok) setSelected(null);
+                      });
+                    },
+                  });
                 }}
               >
                 放生
@@ -657,10 +665,13 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                 <PixelButton
                   tone="muted"
                   onClick={() => {
-                    if (confirm("确定放弃本次挂机收益吗？")) {
-                      void cancelIdle();
-                      setIdleResult(null);
-                    }
+                    setConfirm({
+                      message: "确定放弃本次挂机收益吗？未领取的收益将作废。",
+                      onYes: () => {
+                        void cancelIdle();
+                        setIdleResult(null);
+                      },
+                    });
                   }}
                 >
                   取消派遣
@@ -1141,10 +1152,15 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               </PixelButton>
               <PixelButton
                 tone="danger"
-                onClick={async () => {
-                  if (confirm(`确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`)) {
-                    if (await runOp(() => useGameStore.getState().releaseMonster(m.id))) setBoxSelected(null);
-                  }
+                onClick={() => {
+                  setConfirm({
+                    message: `确定要放生 ${m.nickname || MONSTER_SPECS[m.specId].name} 吗？这无法撤销！`,
+                    onYes: () => {
+                      void runOp(() => useGameStore.getState().releaseMonster(m.id)).then((ok) => {
+                        if (ok) setBoxSelected(null);
+                      });
+                    },
+                  });
                 }}
               >
                 放生
@@ -1226,6 +1242,19 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
               navigate("/arena");
             }
             return res;
+          }}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmModal
+          title="请确认"
+          message={confirm.message}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => {
+            const onYes = confirm.onYes;
+            setConfirm(null);
+            onYes();
           }}
         />
       )}

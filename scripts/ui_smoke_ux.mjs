@@ -227,7 +227,10 @@ f.addEventListener('load', function () {
               if (relog) relog.click();
               setTimeout(function () {
                 out.step = 'done';
-                out.backToAuth = txt().indexOf('登录账号') >= 0 || txt().indexOf('创建账号') >= 0;
+                // 用登录表单的功能元素判定「回到登录页」，不依赖可改的装饰文案。
+                var dAuth = doc();
+                out.backToAuth = !!(dAuth && dAuth.getElementById('auth-username')
+                  && byText('登录并继续'));
                 finish();
               }, 350);
             }, 350);

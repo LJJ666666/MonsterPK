@@ -5,10 +5,13 @@
  * 背景：2026-11-15 真机修复过三个 UI 问题 —— 注册页普通态 687px 溢出 616px 一屏、
  * `.safe-top` 的 24px 兜底白占顶部、无档账号残留旧渲染副本。前两个当时只用真机 CDP
  * 取证，14 套既有冒烟都不覆盖 Auth 页，改版后没有自动回归。本套件把这几条契约固化：
- *   - 登录 / 注册切换 + 注册态紧凑排版（品牌描述、API 行隐藏，确认密码出现）；
+ *   - 登录 / 注册共用一套排版（品牌描述两态都显示，注册多一个确认密码）；
+ *   - 服务状态只在标题右侧展示红绿灯（带 aria-label），不再有底部状态栏与 API 行；
+ *   - 切换时锚点对齐：header / tab / 表单顶部 / 服务红绿灯四处的 top 两态完全一致，
+ *     不出现「切换就整块错位」（2026-11-17 修复：旧版注册态用紧凑排版导致 16~30px 跳动）；
  *   - 360×616 真机视口下两种形态都必须一屏、无横向溢出、顶部内边距为 0；
  *   - 三字段报错态（最容易把页面顶出屏幕）仍一屏、无横向溢出；
- *   - 切回登录清错误并恢复普通态；忘记密码提示同样不破坏一屏。
+ *   - 切回登录清错误；忘记密码提示同样不破坏一屏。
  *
  * 范式与 ui_smoke_ux.mjs 一致：probe HTML 用 iframe + 固定延时时间线驱动 SPA，
  * 结果写进 body[data-probe] 由 --dump-dom 回传。与其余冒烟不同，这里**不注入登录态**
@@ -66,6 +69,11 @@ function txt() {
   try { return f.contentDocument.body.innerText || ''; } catch (e) { out.errors.push('read:' + e); return ''; }
 }
 function shell() { var d = doc(); return d ? d.querySelector('.page-shell') : null; }
+function topOf(sel) {
+  var d = doc(), el = d && d.querySelector(sel);
+  if (!el) return null;
+  return Math.round(el.getBoundingClientRect().top);
+}
 function metrics() {
   var d = doc(), s = shell();
   if (!d || !s) return null;
@@ -75,7 +83,13 @@ function metrics() {
     scrollHeight: s.scrollHeight,
     clientHeight: s.clientHeight,
     docScrollHeight: d.documentElement.scrollHeight,
-    padTop: st.paddingTop
+    padTop: st.paddingTop,
+    // 锚点：切换登录/注册时这四处的 top 必须完全一致，否则肉眼可见整块错位。
+    topHeader: topOf('header'),
+    topTabs: topOf('[role="tablist"]'),
+    topForm: topOf('form'),
+    // 服务状态已移到标题右侧红绿灯（原底部状态栏已删）。
+    topStatus: topOf('[data-service-dot]')
   };
 }
 function buttons() {
@@ -146,10 +160,15 @@ f.addEventListener('load', function () {
     out.loginHasPassword = hasInput('auth-password');
     out.loginHasConfirm = hasInput('auth-confirm');
     out.loginBrand = t.indexOf('BEAST JOURNAL') >= 0;
-    out.loginApi = t.indexOf('API ·') >= 0;
-    out.loginService = t.indexOf('服务器在线') >= 0
-      || t.indexOf('正在连接服务器') >= 0
-      || t.indexOf('正在自动重试') >= 0;
+    out.loginApiGone = t.indexOf('API ·') < 0;
+    out.loginServiceDot = (function () {
+      var el = doc().querySelector('[data-service-dot]');
+      return el ? el.getAttribute('data-service-dot') : null;
+    })();
+    out.loginServiceLabel = (function () {
+      var el = doc().querySelector('[data-service-dot]');
+      return el ? el.getAttribute('aria-label') : null;
+    })();
     out.login = metrics();
 
     // ①b 登录态字段报错态：空表单提交出 2 条错误，也不得把页面顶出屏幕
@@ -172,8 +191,9 @@ f.addEventListener('load', function () {
         out.regHasConfirm = hasInput('auth-confirm');
         out.regLabelHint = t2.indexOf('用户名 · 3–20 位') >= 0;
         out.regBrand = t2.indexOf('BEAST JOURNAL') >= 0;
-        out.regApi = t2.indexOf('API ·') >= 0;
+        out.regApiGone = t2.indexOf('API ·') < 0;
         out.regAlerts = alerts().length;
+        out.regDesc = t2.indexOf('野外考察手记') >= 0;
         out.register = metrics();
 
         // ③ 三字段报错态：username/password 留空，confirm 填不一致值，直接提交
@@ -276,9 +296,12 @@ async function main() {
   check('登录页渲染（登录/注册双 tab + 两个输入框）',
     a.loginTabs === 2 && a.loginHasUsername === true && a.loginHasPassword === true
     && a.loginHasConfirm === false, JSON.stringify(a.login));
-  check('登录页显示持续嗅探的服务器状态条', a.loginService === true, brief(a));
-  check('登录态为普通排版（品牌描述 + API 行可见）',
-    a.loginBrand === true && a.loginApi === true, brief(a));
+  check('标题右侧显示服务红绿灯（checking/online/offline 三态之一 + 无障碍标签）',
+    ['checking', 'online', 'offline'].indexOf(a.loginServiceDot) >= 0
+      && (a.loginServiceLabel || '').indexOf('服务器状态') >= 0,
+    `dot=${a.loginServiceDot} label=${a.loginServiceLabel}`);
+  check('登录态显示品牌描述，且不再有 API 行',
+    a.loginBrand === true && a.loginApiGone === true, brief(a));
   check('登录态 360px 无横向溢出',
     Number.isFinite(a.login?.scrollWidth) && a.login.scrollWidth <= VIEW_W,
     `scrollWidth=${a.login?.scrollWidth}`);
@@ -289,13 +312,21 @@ async function main() {
   check('登录态字段报错态仍 360×616 一屏且无横向溢出',
     oneScreen(a.loginErrors), JSON.stringify(a.loginErrors));
 
-  // ② 注册态紧凑排版
+  // ② 注册态（与登录共用排版）
   check('点「注册」切换到注册态（tab 选中 + 确认密码出现）',
     a.regTabSelected === true && a.regHasConfirm === true, brief(a));
   check('注册态提示并进 label（用户名 · 3–20 位）', a.regLabelHint === true, brief(a));
-  check('注册态紧凑：品牌描述与 API 调试行都隐藏',
-    a.regBrand === false && a.regApi === false, brief(a));
+  check('注册态与登录同款品牌区（品牌名/描述都在，无 API 行）',
+    a.regBrand === true && a.regDesc === true && a.regApiGone === true, brief(a));
   check('切换清空旧字段错误', a.regAlerts === 0, `alerts=${a.regAlerts}`);
+  // 2026-11-17：登录/注册排版统一后，切换时四个锚点的 top 必须完全一致，
+  // 否则就是肉眼可见的「切 tab 整块错位」。旧版注册态用紧凑排版会在 tab/表单/状态栏跳动 16~30px。
+  var al = a.login || {}, ar = a.register || {};
+  check('切换登录/注册锚点对齐（品牌区/tab/表单顶部/服务红绿灯 top 一致）',
+    al.topHeader === ar.topHeader && al.topTabs === ar.topTabs
+      && al.topForm === ar.topForm && al.topStatus === ar.topStatus,
+    `login=${JSON.stringify({ h: al.topHeader, t: al.topTabs, f: al.topForm, s: al.topStatus })}`
+    + ` reg=${JSON.stringify({ h: ar.topHeader, t: ar.topTabs, f: ar.topForm, s: ar.topStatus })}`);
   check('注册态 360px 无横向溢出',
     Number.isFinite(a.register?.scrollWidth) && a.register.scrollWidth <= VIEW_W,
     `scrollWidth=${a.register?.scrollWidth}`);
@@ -315,8 +346,12 @@ async function main() {
   // ④ 切回登录
   check('切回登录清空错误并移除确认密码',
     a.backAlerts === 0 && a.backHasConfirm === false, brief(a));
-  check('切回登录恢复普通态（品牌描述回来）', a.backBrand === true, brief(a));
+  check('切回登录品牌区仍在（两态同款）', a.backBrand === true, brief(a));
   check('切回登录 360×616 一屏且无横向溢出', oneScreen(a.back), JSON.stringify(a.back));
+  check('切回登录后锚点仍与首次登录一致（来回切换不漂移）',
+    a.back?.topHeader === al.topHeader && a.back?.topTabs === al.topTabs
+      && a.back?.topForm === al.topForm && a.back?.topStatus === al.topStatus,
+    `back=${JSON.stringify({ h: a.back?.topHeader, t: a.back?.topTabs, f: a.back?.topForm, s: a.back?.topStatus })}`);
 
   // ⑤ 忘记密码提示
   check('忘记密码提示可打开且文案正确',

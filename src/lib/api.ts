@@ -22,7 +22,12 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   // P4-1a：被顶号后本设备进入只读下线态，任何业务请求都不再发出。
   // 放在最前面比逐个调用点加判断可靠：自动同步、意图、写操作、战斗动作全部覆盖，
   // 也不会把本地未上传的改动偷偷同步上去。登录/注册接口必须放行，否则无法重新登录。
-  if (isSessionSuspended() && !path.startsWith("/api/auth/")) {
+  // /api/health 也必须放行：它是纯可达性探测、不读写任何状态；顶号后 SessionGate
+  // 停掉实时通道并置 suspended，此时登录页靠 health 嗅探绿灯才能解除「不让登录」
+  // 的前置拦截（service === offline 直接 return），否则形成「红灯→不让登录→
+  // 无法 setToken 复位 suspended→继续红灯」死锁。
+  const isProbe = path === "/api/health";
+  if (isSessionSuspended() && !isProbe && !path.startsWith("/api/auth/")) {
     throw Object.assign(new Error("账号已在其他设备登录，本设备已下线"), {
       status: 403, code: SESSION_REPLACED_CODE,
     });

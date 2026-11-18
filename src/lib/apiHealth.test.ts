@@ -4,6 +4,7 @@
 // 修复后必须保证每次探测都带 cache: "no-store"，且悬挂请求能被超时打断。
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { api } from "@/lib/api";
+import { setSessionSuspended } from "@/lib/sessionState";
 
 function okResponse(): Response {
   return {
@@ -22,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setSessionSuspended(false);
   vi.unstubAllGlobals();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -50,6 +52,18 @@ describe("api.health：状态嗅探必须绕开 HTTP 缓存", () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.cache).toBe("no-store");
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("顶号下线态（suspended）下 health 仍可达，避免登录页红灯死锁", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    setSessionSuspended(true);
+
+    const data = await api.health({ timeoutMs: 2500 });
+
+    expect(data).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/health");
   });
 
   it("请求悬挂超过 timeoutMs 时中止，避免状态永远停在 checking/online", async () => {

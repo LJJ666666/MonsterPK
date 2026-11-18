@@ -198,7 +198,8 @@ try {
     && battleRun.last?.battle?.result === 'enemy_fainted',
     `finished=${battleRun.last?.battle?.finished} result=${battleRun.last?.battle?.result}`);
 
-  // 第二个账号：无任何 Grant，验证「首通野区 → 服务端幂等发对应徽章」闭环。
+  // 第二个账号：无任何 Grant，验证「打野区（含首通）不发放徽章、不解锁新城」。
+  // 徽章唯一来源是演武堂胜利（gym:<locationId>），不能靠打野点白拿。
   const acc2 = await newAccount('f04b');
   accounts.push(acc2.username);
   const put2 = await save.put(acc2.token, validSave());
@@ -206,14 +207,17 @@ try {
   const areaRun = await winBattle(acc2.token, 'wild_starter');
   const afterArea = await api('/api/player/progress', { token: acc2.token });
   const areaBadges = afterArea.data?.progress?.badges ?? [];
-  suite.check('首通初心镇野区 → 自动获得青苗徽章 / 人物 Lv.5 → Lv.10',
+  const areaUnlocked = afterArea.data?.unlockedLocations ?? [];
+  suite.check('打野区（首通）不发徽章：仍是 Lv.5 / 0 徽章 / 仅首城解锁',
     put2.status === 200 && beforeArea.data?.progress?.level === 5
     && areaRun.last?.battle?.result === 'enemy_fainted'
-    && afterArea.data?.progress?.level === 10
-    && afterArea.data?.progress?.cap === 10
-    && areaBadges.some((b) => b.id === 'badge_sprout' && b.name === '青苗徽章'),
+    && afterArea.data?.progress?.level === 5
+    && afterArea.data?.progress?.cap === 5
+    && areaBadges.length === 0
+    && areaUnlocked.length === 1 && areaUnlocked[0] === 'town_starter',
     `before=${beforeArea.data?.progress?.level} after=${afterArea.data?.progress?.level} `
-    + `result=${areaRun.last?.battle?.result} badges=${JSON.stringify(areaBadges).slice(0, 160)}`);
+    + `result=${areaRun.last?.battle?.result} badges=${JSON.stringify(areaBadges).slice(0, 160)} `
+    + `unlocked=${JSON.stringify(areaUnlocked)}`);
 } catch (e) {
   suite.check('套件执行无异常', false, String(e?.stack ?? e).slice(0, 300));
 } finally {

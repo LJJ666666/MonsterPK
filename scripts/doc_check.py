@@ -260,12 +260,14 @@ checks = [
      "✅ 已偿还 2026-11-10" in future_text
      and "F04 召唤师等级" in task_text
      and "SAVE_INPUT_FORBIDDEN" in spec_text),
-    ("F04 等级帽链路：注入 / 冻结 / 捕获不钳 / 伪字段闸门 / 首通发徽章",
+    ("F04 等级帽链路：注入 / 冻结 / 捕获不钳 / 伪字段闸门 / 徽章只由演武堂发（野区不发）",
      "levelCap" in text(ROOT / "backend" / "src" / "game" / "battle.ts")
      and "expGrantAllowed" in text(ROOT / "backend" / "src" / "game" / "playerLevel.ts")
      and "capturedLevelOf" in text(ROOT / "backend" / "src" / "game" / "settlement.ts")
      and "FORBIDDEN_PROGRESS_SAVE_FIELDS" in text(ROOT / "backend" / "src" / "modules" / "save.ts")
-     and "grantBadgeForAreaClear" in text(ROOT / "backend" / "src" / "modules" / "battle.ts")),
+     and "grantBadgeForAreaClear" not in text(ROOT / "backend" / "src" / "modules" / "battle.ts")
+     and "grantBadgeForAreaClear" not in text(ROOT / "backend" / "src" / "modules" / "playerProgress.ts")
+     and "grantBadge(" in text(ROOT / "backend" / "src" / "modules" / "battle.ts")),
     ("F04 E2E / 冒烟接入 verify 且 STAGES + GROUPS 两处齐全",
      text(ROOT / "scripts" / "verify.mjs").count("e2e:f04") >= 2
      and text(ROOT / "scripts" / "verify.mjs").count("smoke:f04") >= 2),

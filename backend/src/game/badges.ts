@@ -58,7 +58,8 @@ export function badgeIdForLocation(locationId: string): string | null {
 }
 
 /**
- * 野区 areaId → 所属城镇徽章 id（V1 首通过渡口径，规范 §31.9）。
+ * 野区 areaId → 所属城镇徽章 id（纯内容映射，仅用于展示/解锁派生，绝不用于发奖）。
+ * 徽章唯一来源是演武堂胜利（`gym:<locationId>`）；野区首通不发徽章。
  * 内容表由调用方注入（服务端 `game/content.ts::LOCATIONS`），保持本文件零 IO / 零依赖，
  * 单测可直接塞假 LOCATIONS，不需要生成表。
  */

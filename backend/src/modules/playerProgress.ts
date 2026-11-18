@@ -10,8 +10,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../lib/prisma';
-import { LOCATIONS } from '../game/content';
-import { BADGE_BY_ID, ACHIEVEMENT_BY_ID, badgeIdForWildArea } from '../game/badges';
+import { BADGE_BY_ID, ACHIEVEMENT_BY_ID } from '../game/badges';
 import { buildPlayerProgress, allBadgeViews, type PlayerProgressView } from '../game/playerLevel';
 import { unlockedLocations } from '../game/mapLock';
 
@@ -24,7 +23,6 @@ export const FORBIDDEN_PROGRESS_QUERY_KEYS = [
 ] as const;
 
 export type GrantState = 'granted' | 'already' | 'invalid';
-export type AreaGrantResult = { state: GrantState; badgeId: string | null };
 
 function isUniqueViolation(e: unknown): boolean {
   return !!e && typeof e === 'object' && (e as { code?: string }).code === 'P2002';
@@ -89,18 +87,6 @@ export async function grantAchievement(p: {
     if (isUniqueViolation(e)) return 'already';
     throw e;
   }
-}
-
-/**
- * V1 过渡口径（规范 §31.9）：演武堂挑战玩法（F18）上线前，
- * 复用服务端 `clearedAreas` 首通真值 —— 某城镇任一野区首通即幂等发对应徽章。
- * 演武堂上线后把 source 收窄为 `gym:<locationId>` 即可，表与 UI 零改动。
- */
-export async function grantBadgeForAreaClear(userId: string, areaId: string): Promise<AreaGrantResult> {
-  const badgeId = badgeIdForWildArea(areaId, LOCATIONS);
-  if (!badgeId) return { state: 'invalid', badgeId: null };
-  const state = await grantBadge({ userId, badgeId, source: `cleared:${areaId}` });
-  return { state, badgeId };
 }
 
 /** health 用：纯常量统计，不查库。 */

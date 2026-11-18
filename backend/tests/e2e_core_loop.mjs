@@ -8,8 +8,8 @@
  *
  * 串联顺序：
  *   1) 野怪捕获   capture 一只 wild_starter 野怪（满血反复抛球，不误杀）→ party+1 / collection 更新
- *                注意：捕获不发放经验/金钱（只有 enemy_fainted 才发），但会触发「首通野区」徽章（V1 口径）。
- *   2) 演武堂     town_starter 胜馆主 → 幂等发 badge_sprout（捕获首通已发过则为 already，不双计）
+ *                注意：捕获不发放经验/金钱（只有 enemy_fainted 才发），也**不发徽章**（野区一律不发）。
+ *   2) 演武堂     town_starter 胜馆主 → 发放 badge_sprout（唯一来源）
  *                → travel 到 city_pebble 由 400 变为 200（徽章解锁）。
  *   3) 每日 Boss  ember_behemoth 一胜 → 记 BossDamageEvent(used=1) / F14 双档奖励（金钱+棱彩胶囊）/ 上榜。
  *   4) 地图首领   mb_starter_guardian 一胜 → 记 BossDamageEvent(bossId=mapBoss, used=1) / 3×经验 / 5×金钱 / 掉落，
@@ -209,13 +209,11 @@ async function main() {
   s.check('捕获不发金钱（rewards 为 null）', postWild?.money === preWild?.money,
     `money ${preWild?.money} → ${postWild?.money}`);
 
-  // 捕获触发「首通野区」→ 发 badge_sprout（V1 口径，幂等）
+  // 捕获野区不发徽章（徽章唯一来源是演武堂胜利）
   const pCap = await progressOf(token);
-  s.check('捕获后已持 badge_sprout（首通野区发徽章）',
-    (pCap?.badges ?? []).some((b) => b.id === 'badge_sprout'),
+  s.check('捕获后仍无徽章（打野区不发放徽章）',
+    (pCap?.badges ?? []).length === 0 && pCap?.level === 5,
     `badgeCount=${pCap?.badgeCount} level=${pCap?.level}`);
-  s.check('捕获后等级随徽章提升：= 5 + 5×徽章数', pCap?.level === 5 + 5 * (pCap?.badgeCount ?? 0),
-    `level=${pCap?.level} badgeCount=${pCap?.badgeCount}`);
 
   // ═══════════════════ 2) 演武堂 + 解锁 travel ═══════════════════
   console.log('\n—— 2) 演武堂 + 解锁 travel ——');
@@ -226,11 +224,11 @@ async function main() {
   s.check('演武堂战斗推进到结束且胜利', !!gymSt && gymSt.finished && gymSt.result === 'enemy_fainted',
     `result=${gymSt?.result}`);
   s.check('结算返回 gym 结果且 gymCleared=true', !!gymRes && gymRes.gymCleared === true, asText(gymRes));
-  s.check('胜馆主针对 badge_sprout（gym:<loc> 幂等，已持有的话为 already）',
+  s.check('胜馆主发放 badge_sprout（徽章唯一来源）',
     gymRes?.badgeId === 'badge_sprout', asText(gymRes));
 
   const pGym2 = await progressOf(token);
-  s.check('徽章数仍为 1（捕获首通已发，演武堂幂等不双计）',
+  s.check('徽章数为 1（仅演武堂发放）',
     (pGym2?.badgeCount ?? 0) === 1, `badgeCount=${pGym2?.badgeCount}`);
   s.check('徽章集合含 badge_sprout', (pGym2?.badges ?? []).some((b) => b.id === 'badge_sprout'),
     JSON.stringify(pGym2?.badges));
@@ -348,7 +346,7 @@ async function main() {
   // 最终跨模块不变量
   const pFinal = await progressOf(token);
   s.check('最终等级=10（1 徽章，经验冻结不降）', pFinal?.level === 10, `level=${pFinal?.level}`);
-  s.check('最终徽章仅 1 枚（捕获/演武堂同源 badge_sprout，无重复）', pFinal?.badgeCount === 1,
+  s.check('最终徽章仅 1 枚（仅演武堂发放，野区不发）', pFinal?.badgeCount === 1,
     `badgeCount=${pFinal?.badgeCount}`);
   s.check('最终队伍=3（捕获 +1 未被后续模块改回）', postCoop?.party?.length === 3, `party=${postCoop?.party?.length}`);
 

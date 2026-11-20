@@ -6,19 +6,20 @@
 - 本地存档 11-13 全删；刷新走 `GET /api/save`，`BootGate` 拉到档前不渲染路由。
 - 不变式：每块状态一个 owner key（档 `userId`、战斗 `battleId`、野怪 `areaId`、房间 `roomId`）；每处写入一个串行键；WS 上行绝不写状态；个人档唯一写入口 `commitState()`。
 - 反作弊：测试菜单仅管理员；改档/GG/加速器拦截+封号；改时间不封号但不生效；顶号旧 token 403 `SESSION_REPLACED`。
-- 进度：P0~P4-2e、F18-a/b/c/d、A1~A6、P5-1 W0~W9、P5-3 本机部分 ✅；F15 零产出、P4-3 C2C **阶段冻结**、**不打算开放交易系统**。
+- 进度：P0~P4-2e、F18-a/b/c/d、A1~A6、P5-1 W0~W9、P5-3 本机部分 ✅；F15 零产出、P4-3 C2C **阶段冻结**、**不打算开放交易系统**。**2026-11-20 新增 `mobile-server/` 手机自托管真后端（雷电 x86_64 已打通、vivo arm64 脚本/产物就绪待真机验证）+ 等级机制重设 + 10 项 UI/文案打磨**，详见 `HANDOFF.md §9`。
 - **P4 台账（勿删）**：**P4-2 五阶段全部完成**（P4-2a ✅ / P4-2b ✅ / P4-2c ✅ / P4-2d ✅ / P4-2e ✅，契约 `P4-2_多人玩法排期_2026-11-07.md`）；P3-2 写操作上移服务端；P4-0 写入并发控制；**P4-1 ✅** 顶号与共享野怪。**下一步**见末条。
 - P5-1 锚点（勿删）：**P5-1 W4 ✅**；W6.1 异步化+CAS；**W6.2 事务边界**；**W6.3 DB 计数**；W6.4~W9 见 §66~§70。
 - 选型 B：PG 唯一真值 + Redis 锁/租约/TTL/pub-sub/临时态，**Redis 不存权益真值**。权威 `P5-1_F10_迁移实施设计定稿与工单_2026-11-11.md`（**实施设计定稿**，W0 起「不改产品代码」解除）；`P5-1 / F10 共享存储迁移评估` 已被取代。
 - 债务：**F01/F02 已偿还**；**F14 已偿还**、**F16** 六房副本已实现；F04 真值在服务端独立表、**不写 `SaveData`**；**F17 单档化已实现并偿还**。
-- **下一步**：① P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；② 房间内核 A/B 已修完（§92：B 走 `RoomNonceSeen` 唯一表无淘汰窗口、A 补数组兜底+P6 正则统一）；③ 钻石商店（广告/充值买进化道具）；④ 内容扩充。
-- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89；玩法重做 §90；演武堂入口迁移+A/B评估 §91；房间内核 A/B 修复 §92。
+- **下一步**：① P5-3 切云（域名+TLS+正式 keystore+托管 PG/Redis）；② 房间内核 A/B 已修完（§92：B 走 `RoomNonceSeen` 唯一表无淘汰窗口、A 补数组兜底+P6 正则统一）；③ 钻石商店（广告/充值买进化道具）；④ 内容扩充；⑤ **房间列表 + 房间密码机制（对战/共斗）待杰哥拍板**——服务端现只有 create/join、无列表 API、无密码字段，zod 为 `z.object({}).strip()`，需前后端一起做且密码校验必须在服务端。
+- 里程碑索引：11-14~15 真机+UI §71~§74；P5-3 本机 §75；测试资产 §76/§77；交接 §78/§79（`HANDOFF.md` + 带回公司清单）；F18-d §80；bat §81；p42e §85~§88；P4 §89；玩法重做 §90；演武堂入口迁移+A/B评估 §91；房间内核 A/B 修复 §92；**mobile-server 手机自托管 + 等级重设 + UI 打磨见 2026-11-20 日志与 `HANDOFF.md §9`**。
+- **等级口径（11-20 重设，勿回退）**：人物等级 = 基础 **10** + 每枚徽章 **+20**（10/30/50/70/90/110/130/150），御三家初始 Lv.5 不变，`PLAYER_LEVEL_CAP_BONUS=0`（cap 恒等于人物等级）。真值源 `backend/src/game/playerLevel.ts`/`badges.ts`/`rank.ts`。野怪七档梯度 + 馆主/首领 12~132 在 `data.ts`/`gyms.ts`/`mapBosses.ts`；**改 `data.ts` 后必 `npm run gen:content`**。新增 `levelLimits.ts`（`ENCOUNTER_LEVEL_MAX=200`）解除 `clamp(1,30)`/`clamp(1,60)` 截断；`computeRewards` clamp 30 未动。
 - **演武堂入口口径（§91）**：馆主挑战**不在 `GameHeader`**，而在每张城镇地图详情页的本城馆主卡片（7 城 ↔ 7 馆主一一对应），只发 `startGymBattle(currentLocation.id)`；`GymModal.tsx` 已删。`smoke:f18b` 探针用「地图列表整行 button（含城名+进入）」进入详情，非独立"进入" button。
 
 ## 2. 技术栈 / 测试
 - 前端 React18+TS+Vite6+Tailwind3+zustand5+react-router7；内容唯一源 `src/game/data.ts`（剧情 `src/game/story.ts`）；`useGameStore.ts` 无 persist，`save` 只是服务端快照的渲染副本，`SCHEMA_VERSION`=**12**（W2 加 `expShareOn` 升版；后端 `EXPECTED_SAVE_VERSION` 同步），BattleState 不进存档。
 - 后端 Fastify4+Prisma5+PG16+zod+tsx；模型 `Room`/`RoomQuota*`/`Boss*Grant`/`BadgeGrant`/`AchievementGrant`/`StoryBeatSeen`；改 schema 前停 :3001（Windows DLL 锁）→ migrate dev → generate；`Save.data` 存 JSON 文本、`revision` 独立列。
-- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **64 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 161、后端 **538**、E2E **39 套**（含 `e2e:story_reward` / `e2e:nonce` 含 S5 窗口用例）、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
+- 测试：前端 vitest（node 环境、`renderToStaticMarkup`、无 jsdom）；后端 `node:test` 在 `backend/tests/`，两套不混跑。`verify.mjs` **64 阶段 / 6 分组**（`check:inventory` 门禁 34 条排最前）；前端 162、后端 **539**、E2E **39 套**（含 `e2e:story_reward` / `e2e:nonce` 含 S5 窗口用例）、冒烟 16 套、doc_check 232。**新增阶段必须同改 `STAGES` + `GROUPS`**。
 
 ## 3. 硬约束
 - 新增**存档**字段 → 递增 `SCHEMA_VERSION`（`src/stores/saveVersion.ts`）+ 后端 `EXPECTED_SAVE_VERSION`；前端已无 migrate。
@@ -34,7 +35,7 @@
 
 ## 4. 运行 / 环境 / Git
 - 前端 `npm run dev`（端口只由 `MPK_FRONT_PORT` 控制，默认 5173；**勿传 `--host/--port`**）；后端 `cd backend && npm run dev`（3001）。换会话不自动恢复，先 `curl --noproxy '*'` 探活。node 22.22.2，remote `LJJ666666/MonsterPK.git`。新机：`cp .env.example .env`→两侧 `npm install`→`migrate deploy`+`generate`→`npm run dev`。
-- **verify 口径**：全量 `npm run verify -- --strict`（63 阶段含 16 套冒烟）；服务缺失默认 FAIL，仅 `--allow-missing-services` 退 SKIP；`--skip=smoke` 只用于离线排查，**不得当默认**；离线 `--only=check,unit,docs --strict`。改 `vite.config.ts` 后必须真跑 `--only=smoke`。
+- **verify 口径**：全量 `npm run verify -- --strict`（64 阶段含 16 套冒烟）；服务缺失默认 FAIL，仅 `--allow-missing-services` 退 SKIP；`--skip=smoke` 只用于离线排查，**不得当默认**；离线 `--only=check,unit,docs --strict`。改 `vite.config.ts` 后必须真跑 `--only=smoke`。
 - Git：验收通过→建推 `rollback-YYYYMMDD-<阶段>` tag→`git add -A`（确认无 `.env`/`*.db`）→中文分条 commit（末尾验收数字）→push→核对 `HEAD==origin/master`、工作树干净、tag 在远端。推送失败：只读探活 + 最多 5 次原样重试（不换代理/不改 config），持续 502 交本机 `push-mpk.bat`。**Git 汇报只给一句话**。
 - **配置分层硬约束（§57，勿回退）**：沙箱层（`HTTPS_PROXY`/`CODEBUDDY_*`）≠ 系统层（注册表 `ProxyServer=8693`、本机 PG/Redis/JDK 路径）≠ 项目层（`MPK_FRONT_PORT`→`devConfig.mjs`；`DATABASE_URL`/`REDIS_URL`/`CORS_ORIGIN`→`backend/.env`）。沙箱值禁写仓库；覆盖 env 只用一次性前缀；**项目层是唯一可提交真值**。
 - **PowerShell + GBK（§61）**：npm script 禁裸 glob；Python stdout `reconfigure(errors="replace")`；保留 `server.watch.ignored`；不测选主的双实例 E2E 加 `MPK_DISABLE_SWEEP=1`；冒烟统一走 `scripts/lib/browser.mjs` 的 `resolveBrowser()`（禁写死 msedge，门禁 34 条），`waitFor` 每 4 轮挂真实 `fetch`。

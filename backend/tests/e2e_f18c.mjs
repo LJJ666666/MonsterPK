@@ -138,8 +138,8 @@ async function main() {
   s.check('返回 battle 且 mapBossId=mb_starter_guardian',
     !!battleId && start.data?.battle?.mapBossId === STARTER,
     `battleId=${battleId} mapBossId=${start.data?.battle?.mapBossId}`);
-  s.check('敌方为 sprout_owl (Lv8)',
-    start.data?.battle?.enemy?.specId === 'sprout_owl' && start.data?.battle?.enemy?.level === 8,
+  s.check('敌方为 sprout_owl (Lv12)',
+    start.data?.battle?.enemy?.specId === 'sprout_owl' && start.data?.battle?.enemy?.level === 12,
     `spec=${start.data?.battle?.enemy?.specId} lv=${start.data?.battle?.enemy?.level}`);
   s.check('开局占用一次在途名额 → 余量=limit-1=2', start.data?.quota?.remaining === 2,
     `quota=${asText(start.data?.quota)}`);

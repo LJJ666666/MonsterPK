@@ -1,0 +1,25 @@
+# 下载/构建产物（可复现，脚本可再生成）
+output/
+reports/
+
+# 探测临时文件
+output/.head-*
+output/.termux-release.json
+*.log
+
+# 开发期诊断/试错脚本（不入库，仅本机工作区保留）
+scripts/check1.sh
+scripts/diag*.sh
+scripts/do-upgrade.sh
+scripts/sim-upgrade.sh
+scripts/download-termux-*.sh
+scripts/fetch-termux-parallel.sh
+scripts/fill-termux.sh
+scripts/finish*.sh
+scripts/fix-*.sh
+scripts/install-debian-*.sh
+scripts/pd-probe.sh
+scripts/probe*.sh
+scripts/smoke.sh
+scripts/proot-deploy2.sh
+scripts/proot-deploy3.sh

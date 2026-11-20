@@ -873,8 +873,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "mom", name: "妈妈", dialog: ["路上小心，记得带上伤药。", "如果幻兽受伤了，一定要带它们去恢复中心哦。"] }
     ],
     wildAreas: [
-      { id: "wild_starter", name: "微风林道", desc: "充满草属性与虫属性怪物的茂密森林小路。", levelMin: 1, levelMax: 5, encounters: ["grass"] },
-      { id: "wild_starter_pond", name: "镇后小池", desc: "镇子后方的一口清澈小池塘，能看到水属性幻兽的踪迹。", levelMin: 3, levelMax: 6, encounters: ["lake"] }
+      { id: "wild_starter", name: "微风林道", desc: "充满草属性与虫属性怪物的茂密森林小路。", levelMin: 3, levelMax: 6, encounters: ["grass"] },
+      { id: "wild_starter_pond", name: "镇后小池", desc: "镇子后方的一口清澈小池塘，能看到水属性幻兽的踪迹。", levelMin: 5, levelMax: 8, encounters: ["lake"] }
     ]
   },
   city_pebble: {
@@ -890,8 +890,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "shopkeeper", name: "商人", dialog: ["欢迎光临坚石市！我们这里的特产是火之石，能让特定幻兽进化哦。"] }
     ],
     wildAreas: [
-      { id: "wild_pebble", name: "回音洞窟一层", desc: "漆黑且错综复杂的地下洞穴。", levelMin: 6, levelMax: 12, encounters: ["cave"] },
-      { id: "wild_pebble_mountain", name: "碎石山道", desc: "崎岖陡峭的山路，偶尔会有落石。", levelMin: 8, levelMax: 15, encounters: ["volcano"] }
+      { id: "wild_pebble", name: "回音洞窟一层", desc: "漆黑且错综复杂的地下洞穴。", levelMin: 10, levelMax: 18, encounters: ["cave"] },
+      { id: "wild_pebble_mountain", name: "碎石山道", desc: "崎岖陡峭的山路，偶尔会有落石。", levelMin: 14, levelMax: 22, encounters: ["volcano"] }
     ]
   },
   town_leafy: {
@@ -906,8 +906,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "ranger", name: "护林员", dialog: ["幽暗林穴里容易让人迷路，请务必小心。", "带点解眠药吧，那里的孢子会让人昏睡。"] }
     ],
     wildAreas: [
-      { id: "wild_leafy", name: "繁茂密林", desc: "阳光难以穿透的深邃森林。", levelMin: 12, levelMax: 18, encounters: ["forest"] },
-      { id: "wild_leafy_cave", name: "幽暗林穴", desc: "长满发光苔藓的地下洞穴。", levelMin: 15, levelMax: 20, encounters: ["cave", "forest"] }
+      { id: "wild_leafy", name: "繁茂密林", desc: "阳光难以穿透的深邃森林。", levelMin: 20, levelMax: 32, encounters: ["forest"] },
+      { id: "wild_leafy_cave", name: "幽暗林穴", desc: "长满发光苔藓的地下洞穴。", levelMin: 26, levelMax: 38, encounters: ["cave", "forest"] }
     ]
   },
   city_spring: {
@@ -923,8 +923,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "swimmer", name: "游泳者", dialog: ["水之石是我们涌泉市的特产，多买几块准没错！"] }
     ],
     wildAreas: [
-      { id: "wild_spring", name: "静谧湖泊", desc: "湖水清澈见底，水系幻兽的乐园。", levelMin: 18, levelMax: 25, encounters: ["lake"] },
-      { id: "wild_spring_coast", name: "海风沙滩", desc: "海浪拍打着金色的沙滩，能遇到许多水属性幻兽。", levelMin: 20, levelMax: 28, encounters: ["coast"] }
+      { id: "wild_spring", name: "静谧湖泊", desc: "湖水清澈见底，水系幻兽的乐园。", levelMin: 34, levelMax: 48, encounters: ["lake"] },
+      { id: "wild_spring_coast", name: "海风沙滩", desc: "海浪拍打着金色的沙滩，能遇到许多水属性幻兽。", levelMin: 40, levelMax: 54, encounters: ["coast"] }
     ]
   },
   town_sun: {
@@ -939,8 +939,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "firebreather", name: "喷火者", dialog: ["炽热火山的岩浆温度极高，一定要带足烧伤药！", "雷之石也是这附近的特产。"] }
     ],
     wildAreas: [
-      { id: "wild_sun", name: "炽热火山", desc: "岩浆翻滚，危险与机遇并存。", levelMin: 25, levelMax: 35, encounters: ["volcano"] },
-      { id: "wild_sun_coast", name: "阳光沙滩", desc: "烈日下的海岸线，海水都被晒得温热。", levelMin: 28, levelMax: 38, encounters: ["coast"] }
+      { id: "wild_sun", name: "炽热火山", desc: "岩浆翻滚，危险与机遇并存。", levelMin: 50, levelMax: 66, encounters: ["volcano"] },
+      { id: "wild_sun_coast", name: "阳光沙滩", desc: "烈日下的海岸线，海水都被晒得温热。", levelMin: 56, levelMax: 72, encounters: ["coast"] }
     ]
   },
   city_shadow: {
@@ -955,8 +955,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "hex_maniac", name: "咒术师", dialog: ["迷雾沼泽里常有奇怪的光影闪烁。", "不要盯着看太久，否则会被吸进去的..."] }
     ],
     wildAreas: [
-      { id: "wild_shadow", name: "废弃洋馆", desc: "空无一人的古老建筑，充满未知的恐惧。", levelMin: 35, levelMax: 45, encounters: ["mansion"] },
-      { id: "wild_shadow_swamp", name: "迷雾沼泽", desc: "泥泞不堪的暗色沼泽，常年被毒雾笼罩。", levelMin: 38, levelMax: 48, encounters: ["forest", "mansion"] }
+      { id: "wild_shadow", name: "废弃洋馆", desc: "空无一人的古老建筑，充满未知的恐惧。", levelMin: 68, levelMax: 86, encounters: ["mansion"] },
+      { id: "wild_shadow_swamp", name: "迷雾沼泽", desc: "泥泞不堪的暗色沼泽，常年被毒雾笼罩。", levelMin: 74, levelMax: 92, encounters: ["forest", "mansion"] }
     ]
   },
   town_winter: {
@@ -971,8 +971,8 @@ export const LOCATIONS: Record<LocationId, LocationSpec> = {
       { id: "boarder", name: "单板手", dialog: ["冰晶洞窟深处有着极度稀有的幻兽！", "准备好大师捕获器了吗？"] }
     ],
     wildAreas: [
-      { id: "wild_winter", name: "极寒雪原", desc: "风雪交加，视线模糊。", levelMin: 45, levelMax: 60, encounters: ["snowfield"] },
-      { id: "wild_winter_cave", name: "冰晶洞窟", desc: "由不化的坚冰构成的美丽洞穴。", levelMin: 50, levelMax: 65, encounters: ["cave", "snowfield"] }
+      { id: "wild_winter", name: "极寒雪原", desc: "风雪交加，视线模糊。", levelMin: 88, levelMax: 111, encounters: ["snowfield"] },
+      { id: "wild_winter_cave", name: "冰晶洞窟", desc: "由不化的坚冰构成的美丽洞穴。", levelMin: 94, levelMax: 118, encounters: ["cave", "snowfield"] }
     ]
   }
 };

@@ -92,8 +92,8 @@ test('F04 不注入帽时按个体开关分配（W3 新公式，非开关宠不�
 });
 
 test('F04 帽判定边界：等于帽即冻结，基础等级与帽同源', () => {
-  assert.equal(BASE_PLAYER_LEVEL, 5);
-  assert.equal(levelCapOf(5), 5);
+  assert.equal(BASE_PLAYER_LEVEL, 10);
+  assert.equal(levelCapOf(10), 10);
   assert.equal(expGrantAllowed(4, 5), true);
   assert.equal(expGrantAllowed(5, 5), false, '达到帽即冻结');
   assert.equal(expGrantAllowed(50, 5), false, '高等级捕获怪也不获经验，但等级不被钳');

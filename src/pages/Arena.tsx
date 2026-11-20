@@ -202,6 +202,13 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
 
   const activePP = battle.ppByMonster?.[active.id] ?? {};
 
+  // 玩法级的行动禁用（仅前端置灰，服务端仍权威裁决）。
+  // 演武堂馆主战不允许逃跑；换位/道具预留同样开关，未来玩法按需在此扩展。
+  const isGymBattle = !!battle.gymId;
+  const blockFlee = isGymBattle;
+  const blockSwitch = false;
+  const blockItems = false;
+
   return (
     <div className="page-shell safe-top">
       {/* Header：辅助功能收进菜单，副信息常显 */}
@@ -209,16 +216,11 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
         title={battle.areaName}
         subtitle={
           <>
-            回合 {battle.turn} · {battle.theme.toUpperCase()}
+            回合 {battle.turn}
             {(battle.bossId || battle.mapBossId) && (
               <span className="ml-2 text-[color:var(--accent)]">
                 {battle.bossId ? "讨伐" : "首领"} · 本场伤害 {battle.damageDealt ?? 0}
               </span>
-            )}
-            {battle.serverId ? (
-              <span className="ml-2 text-[color:var(--accent)]">服务端裁决</span>
-            ) : (
-              <span className="ml-2 text-amber-500">本地模式（结果需服务端确认）</span>
             )}
             {battle.pending && <span className="ml-2 animate-pulse text-[color:var(--accent)]">处理中…</span>}
           </>
@@ -227,13 +229,14 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
           { label: "属性相克表", onClick: () => setShowTypeChart(true) },
           ...(onShowMoveChart ? [{ label: "技能图鉴", onClick: onShowMoveChart }] : []),
           ...(onShowMechanics ? [{ label: "战斗机制说明", onClick: onShowMechanics }] : []),
-          {
+          // 回程只在结算态进菜单；战斗进行中由底部行动区控制，避免误触中途撤离。
+          ...(battle.finished ? [{
             label: "回程",
             onClick: () => {
               leaveBattle();
               navigate("/camp", { state: { returnToTown: true } });
             },
-          },
+          }] : []),
         ]}
       />
 
@@ -313,13 +316,14 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                   <PixelButton tone={panel === "moves" ? "primary" : "muted"} size="sm" onClick={() => setPanel("moves")}>
                     技能
                   </PixelButton>
-                  <PixelButton tone={panel === "items" ? "primary" : "muted"} size="sm" onClick={() => setPanel("items")}>
+                  <PixelButton tone={panel === "items" ? "primary" : "muted"} size="sm" onClick={() => setPanel("items")} disabled={blockItems}>
                     道具
                   </PixelButton>
-                  <PixelButton tone={panel === "switch" ? "primary" : "muted"} size="sm" onClick={() => setPanel("switch")}>
+                  <PixelButton tone={panel === "switch" ? "primary" : "muted"} size="sm" onClick={() => setPanel("switch")} disabled={blockSwitch}>
                     换位
                   </PixelButton>
-                  <PixelButton tone="muted" size="sm" onClick={() => flee()} disabled={battle.pending}>
+                  <PixelButton tone="muted" size="sm" onClick={() => flee()} disabled={battle.pending || blockFlee}
+                    title={blockFlee ? "馆主挑战不可逃跑" : undefined}>
                     逃跑
                   </PixelButton>
                 </div>
@@ -356,7 +360,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       <PixelButton
                         key={x.id}
                         tone={x.spec.kind === "capture" ? "primary" : "muted"}
-                        disabled={battle.finished || battle.pending || x.qty <= 0 || !!(x.spec.kind === "capture" && (battle.bossId || battle.mapBossId))}
+                        disabled={blockItems || battle.finished || battle.pending || x.qty <= 0 || !!(x.spec.kind === "capture" && (battle.bossId || battle.mapBossId))}
                         onClick={() => useItem(x.id)}
                       >
                         {x.spec.name} <span className="ml-1 text-xs opacity-70">x{x.qty}</span>
@@ -371,7 +375,7 @@ export default function Arena({ onShowMechanics, onShowMoveChart }: { onShowMech
                       <PixelButton
                         key={m.id}
                         tone={idx === battle.playerActiveIndex ? "muted" : "primary"}
-                        disabled={battle.finished || battle.pending || m.hp <= 0 || idx === battle.playerActiveIndex}
+                        disabled={blockSwitch || battle.finished || battle.pending || m.hp <= 0 || idx === battle.playerActiveIndex}
                         onClick={() => switchTo(idx)}
                       >
                         <div className="flex flex-col items-center">

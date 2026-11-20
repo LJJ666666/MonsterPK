@@ -9,23 +9,23 @@
  */
 export type BadgeSpec = {
   id: string;
-  /** 徽章名，弹窗每行格式 `赤焰徽章 丨 5`。 */
+  /** 徽章名，弹窗每行格式 `赤焰徽章 丨 20`。 */
   name: string;
   locationId: string;
   locationName: string;
-  /** 等级加成，默认每枚 +5。 */
+  /** 等级加成，现口径每枚 +20（杰哥 2026-11-20 修订；原 +5）。 */
   levelBonus: number;
   desc: string;
 };
 
 export const BADGES: readonly BadgeSpec[] = [
-  { id: 'badge_sprout', name: '青苗徽章', locationId: 'town_starter', locationName: '初心镇', levelBonus: 5, desc: '初心镇演武堂的证明，草木初生。' },
-  { id: 'badge_stone', name: '磐石徽章', locationId: 'city_pebble', locationName: '坚石市', levelBonus: 5, desc: '坚石市演武堂的证明，稳如山岳。' },
-  { id: 'badge_leaf', name: '翠羽徽章', locationId: 'town_leafy', locationName: '绿叶镇', levelBonus: 5, desc: '绿叶镇演武堂的证明，林间疾风。' },
-  { id: 'badge_spring', name: '流泉徽章', locationId: 'city_spring', locationName: '涌泉市', levelBonus: 5, desc: '涌泉市演武堂的证明，流水不绝。' },
-  { id: 'badge_flame', name: '赤焰徽章', locationId: 'town_sun', locationName: '烈阳镇', levelBonus: 5, desc: '烈阳镇演武堂的证明，赤焰不熄。' },
-  { id: 'badge_shadow', name: '幽玄徽章', locationId: 'city_shadow', locationName: '幽影市', levelBonus: 5, desc: '幽影市演武堂的证明，幽玄难测。' },
-  { id: 'badge_frost', name: '霜华徽章', locationId: 'town_winter', locationName: '凛冬镇', levelBonus: 5, desc: '凛冬镇演武堂的证明，霜华凛冽。' },
+  { id: 'badge_sprout', name: '青苗徽章', locationId: 'town_starter', locationName: '初心镇', levelBonus: 20, desc: '初心镇演武堂的证明，草木初生。' },
+  { id: 'badge_stone', name: '磐石徽章', locationId: 'city_pebble', locationName: '坚石市', levelBonus: 20, desc: '坚石市演武堂的证明，稳如山岳。' },
+  { id: 'badge_leaf', name: '翠羽徽章', locationId: 'town_leafy', locationName: '绿叶镇', levelBonus: 20, desc: '绿叶镇演武堂的证明，林间疾风。' },
+  { id: 'badge_spring', name: '流泉徽章', locationId: 'city_spring', locationName: '涌泉市', levelBonus: 20, desc: '涌泉市演武堂的证明，流水不绝。' },
+  { id: 'badge_flame', name: '赤焰徽章', locationId: 'town_sun', locationName: '烈阳镇', levelBonus: 20, desc: '烈阳镇演武堂的证明，赤焰不熄。' },
+  { id: 'badge_shadow', name: '幽玄徽章', locationId: 'city_shadow', locationName: '幽影市', levelBonus: 20, desc: '幽影市演武堂的证明，幽玄难测。' },
+  { id: 'badge_frost', name: '霜华徽章', locationId: 'town_winter', locationName: '凛冬镇', levelBonus: 20, desc: '凛冬镇演武堂的证明，霜华凛冽。' },
 ] as const;
 
 export const BADGE_BY_ID: Readonly<Record<string, BadgeSpec>> = Object.freeze(

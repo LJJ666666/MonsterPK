@@ -17,13 +17,13 @@ import {
 
 const ALL_BADGE_IDS = BADGES.map((b) => b.id);
 
-test('§31.2 默认取值：基础 5 / 帽加成 0 / 上限 1000 / 7 徽章每枚 +5', () => {
-  assert.equal(BASE_PLAYER_LEVEL, 5);
+test('§31.2 默认取值：基础 10 / 帽加成 0 / 上限 1000 / 7 徽章每枚 +20', () => {
+  assert.equal(BASE_PLAYER_LEVEL, 10);
   assert.equal(PLAYER_LEVEL_CAP_BONUS, 0);
   assert.equal(PLAYER_LEVEL_MAX, 1000);
   assert.equal(BADGES.length, 7);
-  assert.ok(BADGES.every((b) => b.levelBonus === 5));
-  assert.equal(badgeLevelBonusOf(ALL_BADGE_IDS), 35);
+  assert.ok(BADGES.every((b) => b.levelBonus === 20));
+  assert.equal(badgeLevelBonusOf(ALL_BADGE_IDS), 140);
 });
 
 test('§31.3 七徽章对齐七个城镇，locationId 映射可逆', () => {
@@ -39,32 +39,32 @@ test('§31.3 七徽章对齐七个城镇，locationId 映射可逆', () => {
   assert.equal(BADGE_BY_ID['badge_flame'].name, '赤焰徽章');
 });
 
-test('无徽章 → 人物 Lv.5 / 帽 5 / 总加成 0；满徽章 → Lv.40 / 帽 40', () => {
-  assert.equal(playerLevelOf([]), 5);
-  assert.equal(levelCapOf(playerLevelOf([])), 5);
-  assert.equal(playerLevelOf(ALL_BADGE_IDS), 40);
-  assert.equal(levelCapOf(playerLevelOf(ALL_BADGE_IDS)), 40);
+test('无徽章 → 人物 Lv.10 / 帽 10 / 总加成 0；满徽章 → Lv.150 / 帽 150', () => {
+  assert.equal(playerLevelOf([]), 10);
+  assert.equal(levelCapOf(playerLevelOf([])), 10);
+  assert.equal(playerLevelOf(ALL_BADGE_IDS), 150);
+  assert.equal(levelCapOf(playerLevelOf(ALL_BADGE_IDS)), 150);
   const one = buildPlayerProgress(['badge_flame'], []);
-  assert.equal(one.level, 10);
-  assert.equal(one.cap, 10);
-  assert.equal(one.badgeBonus, 5);
+  assert.equal(one.level, 30);
+  assert.equal(one.cap, 30);
+  assert.equal(one.badgeBonus, 20);
   assert.equal(one.badgeCount, 1);
   assert.equal(one.badges[0].name, '赤焰徽章');
-  assert.equal(one.badges[0].levelBonus, 5);
+  assert.equal(one.badges[0].levelBonus, 20);
 });
 
 test('未知 / 重复 / 非字符串徽章 id 一律过滤，不虚增等级', () => {
   assert.deepEqual(knownBadgeIds(['badge_flame', 'badge_flame', 'badge_fake', 42, null]), ['badge_flame']);
-  assert.equal(playerLevelOf(['badge_flame', 'badge_flame', 'badge_fake']), 10);
+  assert.equal(playerLevelOf(['badge_flame', 'badge_flame', 'badge_fake']), 30);
   assert.equal(badgeLevelBonusOf(['badge_fake']), 0);
-  assert.equal(playerLevelOf(ALL_BADGE_IDS.concat(ALL_BADGE_IDS)), 40);
+  assert.equal(playerLevelOf(ALL_BADGE_IDS.concat(ALL_BADGE_IDS)), 150);
 });
 
 test('等级帽 N+5 只改 capBonus 入参；脏数据与上限钳制', () => {
   assert.equal(levelCapOf(10, 5), 15);
   assert.equal(levelCapOf(10, 0), 10);
   assert.equal(levelCapOf(999, 5), PLAYER_LEVEL_MAX);
-  assert.equal(clampLevel('999'), 5, '非数字回落基础等级');
+  assert.equal(clampLevel('999'), 10, '非数字回落基础等级');
   assert.equal(clampLevel(-3), 1);
   assert.equal(clampLevel(99999), 1000);
 });
@@ -79,13 +79,13 @@ test('§31.1 超帽不降级、只冻结升级：level >= cap 不再获得经验
   assert.equal(expGrantAllowed(50, cap), false);
 });
 
-test('§31.1 捕获高等级怪不钳等级：人物 5 级抓 Lv.50 → 仍是 50', () => {
+test('§31.1 捕获高等级怪不钳等级：人物 10 级抓 Lv.50 → 仍是 50', () => {
   const cap = levelCapOf(playerLevelOf([]));
-  assert.equal(cap, 5);
+  assert.equal(cap, 10);
   assert.equal(capturedLevelOf(50, cap), 50);
   assert.equal(capturedLevelOf(50), 50);
   assert.equal(capturedLevelOf(3, cap), 3);
-  assert.equal(capturedLevelOf('bad', cap), 5);
+  assert.equal(capturedLevelOf('bad', cap), 10);
   assert.equal(expGrantAllowed(capturedLevelOf(50, cap), cap), false, '入队后获取不到经验');
 });
 
@@ -113,10 +113,10 @@ test('buildPlayerProgress 只读视图：徽章 / 成就 / 总加成 / 聚合文
     ['ach_veteran', 'ach_flame_runner'],
   );
   assert.equal(v.readonly, true);
-  assert.equal(v.level, 15);
-  assert.equal(v.cap, 15);
-  assert.equal(v.baseLevel, 5);
-  assert.equal(v.badgeBonus, 10);
+  assert.equal(v.level, 50);
+  assert.equal(v.cap, 50);
+  assert.equal(v.baseLevel, 10);
+  assert.equal(v.badgeBonus, 40);
   assert.equal(v.badgeCount, 2);
   assert.deepEqual(v.badges.map((b) => b.name), ['青苗徽章', '赤焰徽章']);
   assert.deepEqual(v.achievements.map((a) => a.name), ['百战之姿', '炎行千里']);
@@ -128,6 +128,6 @@ test('buildPlayerProgress 只读视图：徽章 / 成就 / 总加成 / 聚合文
 test('allBadgeViews 给弹窗提供含未获得态的七行清单', () => {
   const all = allBadgeViews();
   assert.equal(all.length, 7);
-  assert.ok(all.every((b) => b.owned === false && b.levelBonus === 5));
+  assert.ok(all.every((b) => b.owned === false && b.levelBonus === 20));
   assert.equal(all[4].name, '赤焰徽章');
 });

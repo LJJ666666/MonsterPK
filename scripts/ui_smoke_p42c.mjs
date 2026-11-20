@@ -115,7 +115,7 @@ f.addEventListener('load', function () {
       var t = txt();
       out.step = 'board';
       out.title = t.indexOf('兽域讨伐') >= 0;
-      out.disclaimer = t.indexOf('服务端战斗结算产出') >= 0 && t.indexOf('不扣次数') >= 0;
+      out.disclaimer = t.indexOf('每日次数按账号计算') >= 0 && t.indexOf('不扣次数') >= 0;
       out.bossCount = (t.match(/Lv\\.\\d+/g) || []).length;
       out.hasBehemoth = t.indexOf('烈焰巨兽') >= 0;
       out.hasDragon = t.indexOf('霸主苍龙') >= 0;
@@ -137,7 +137,7 @@ f.addEventListener('load', function () {
         out.fightStarted = true;
         out.arenaTitle = t3.indexOf('烈焰巨兽 · 讨伐') >= 0;
         out.arenaDamage = t3.indexOf('讨伐 · 本场伤害') >= 0;
-        out.arenaServer = t3.indexOf('服务端裁决') >= 0;
+        out.arenaServer = t3.indexOf('回合 ') >= 0;
         out.scrollWidth2 = overflow();
         finish();
       }));
@@ -214,7 +214,7 @@ async function main() {
   check('弹窗存在开战按钮', Number(p.fightButtons) >= 1, `n=${p.fightButtons}`);
   check('点「讨伐」进入战斗并渲染 Boss 标题',
     p.fightStarted === true && p.arenaTitle === true, brief(p));
-  check('战斗页显示「本场伤害」与服务端裁决标识',
+  check('战斗页显示「本场伤害」与回合/HP 权威战斗态',
     p.arenaDamage === true && p.arenaServer === true, brief(p));
   check('战斗页 375px 无横向溢出',
     Number.isFinite(p.scrollWidth2) && p.scrollWidth2 <= 375, `scrollWidth=${p.scrollWidth2}`);

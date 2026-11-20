@@ -119,7 +119,7 @@ f.addEventListener('load', function () {
       var t = txt();
       out.step = 'modal';
       out.title = t.indexOf('玩家对战') >= 0;
-      out.disclaimer = t.indexOf('服务端裁决') >= 0 && t.indexOf('无法改写') >= 0;
+      out.disclaimer = t.indexOf('双方各出一招后结算一回合') >= 0 && t.indexOf('先击败对方全部幻兽者获胜') >= 0;
       out.createBtn = t.indexOf('创建对战房间') >= 0;
       out.joinBtn = buttons().some(function (b) { return b.textContent.trim() === '加入'; });
       out.scrollWidth = overflow();
@@ -201,7 +201,7 @@ async function main() {
 
   check('营地页存在「对战」入口', p.entry === true, JSON.stringify(p.errors));
   check('弹窗标题为「玩家对战」', p.title === true, brief(p));
-  check('免责文案含「服务端裁决」与「无法改写」', p.disclaimer === true, brief(p));
+  check('规则文案说明回合结算与胜负条件', p.disclaimer === true, brief(p));
   check('弹窗存在「创建对战房间」按钮', p.createBtn === true, brief(p));
   check('弹窗存在「加入」按钮', p.joinBtn === true, brief(p));
   check('弹窗打开时 375px 无横向溢出',

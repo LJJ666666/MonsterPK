@@ -1,6 +1,6 @@
 // F04 徽章 / 成就：客户端只读视图层。
 //
-// 唯一真值在服务端 `GET /api/player/progress`（等级 = 基础 5 + Σ徽章加成）。
+// 唯一真值在服务端 `GET /api/player/progress`（等级 = 基础 10 + Σ徽章加成，每枚 +20）。
 // 本文件只做防御性解析与展示，**不计算等级、不上报字段、没有领取入口**。
 import { api } from "./api";
 
@@ -46,7 +46,7 @@ export type PlayerProgressResponse = {
 };
 
 export const PROGRESS_DISCLAIMER =
-  "人物等级由徽章加成决定，等级帽超帽不降级、只冻结升级；数据由服务端裁决，此处仅查看。";
+  "人物等级由徽章加成决定，等级越高可培养的幻兽越强。";
 
 function num(v: unknown, fallback = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : fallback;
@@ -63,9 +63,9 @@ export function parsePlayerProgress(raw: unknown): PlayerProgressResponse | null
   if (!p || typeof p !== "object") return null;
   const s = p as Record<string, unknown>;
   const progress: PlayerProgress = {
-    level: num(s.level, 5),
-    cap: num(s.cap, 5),
-    baseLevel: num(s.baseLevel, 5),
+    level: num(s.level, 10),
+    cap: num(s.cap, 10),
+    baseLevel: num(s.baseLevel, 10),
     badgeBonus: num(s.badgeBonus),
     badgeCount: num(s.badgeCount),
     badges: arr(s.badges).map((x) => {

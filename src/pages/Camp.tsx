@@ -9,6 +9,9 @@ import { useGameStore } from "@/stores/useGameStore";
 import { getMonsterStatBounds, requiredExpForNextLevel, getMoveMaxPP } from "@/game/rules";
 import { IDLE_CAP_MINUTES, idleCapsuleExpectation, idleCapsulesPerHour, idleElapsedMinutes, idleMoneyFor, idleMoneyPerHour } from "@/game/idle";
 import { useIsAdmin } from "@/lib/admin";
+import { api } from "@/lib/api";
+import type { PlayerProgress } from "@/lib/playerProgress";
+import BrandMark from "@/components/BrandMark";
 
 import TypeChartModal from "@/components/TypeChartModal";
 import RankBoardModal from "@/components/RankBoardModal";
@@ -145,6 +148,8 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   const isAdmin = useIsAdmin();
   const { save, startEncounter, startBossBattle, startGymBattle, startMapBossBattle, healAll, useItemOutsideBattle, buyItem, travelTo, startIdle, claimIdle, cancelIdle } = useGameStore();
   const [tab, setTab] = useState<"party" | "bag" | "map" | "dex" | "box">("map");
+  const [profileOpen, setProfileOpen] = useState(true);
+  const [teamOpen, setTeamOpen] = useState(true);
   const [selected, setSelected] = useState<number | null>(null);
   const [boxSelected, setBoxSelected] = useState<number | null>(null);
   const [shopOpen, setShopOpen] = useState(false);
@@ -178,11 +183,22 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
   /** F18-a 地图锁：服务端下发的已解锁城镇集合（权威真值，仅用于前端灰显；最终以服务端 travel 校验为准）。 */
   const [unlockedLocations, setUnlockedLocations] = useState<string[] | null>(null);
   const [badgeCatalog, setBadgeCatalog] = useState<BadgeCatalogItem[]>([]);
+  const [progress, setProgress] = useState<PlayerProgress | null>(null);
   useEffect(() => {
     let cancelled = false;
     void fetchPlayerProgress()
-      .then((d) => { if (!cancelled) { setUnlockedLocations(d.unlockedLocations); setBadgeCatalog(d.catalog); } })
+      .then((d) => { if (!cancelled) { setUnlockedLocations(d.unlockedLocations); setBadgeCatalog(d.catalog); setProgress(d.progress); } })
       .catch(() => { if (!cancelled) setUnlockedLocations(null); });
+    return () => { cancelled = true; };
+  }, []);
+
+  /** 人物卡片：账号 id / 用户名（权威来自 /api/auth/me，前端不缓存）。 */
+  const [account, setAccount] = useState<{ id: string | number; username: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.me()
+      .then((u: any) => { if (!cancelled) setAccount({ id: u?.id ?? "", username: u?.username ?? "" }); })
+      .catch(() => { if (!cancelled) setAccount(null); });
     return () => { cancelled = true; };
   }, []);
 
@@ -384,39 +400,102 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       );
     }
 
+    // 人物卡片只读：头衔按徽章数派生（占位，不动存档/schema），头像用现有兽爪印章。
+    const badgeCount = progress?.badgeCount ?? 0;
+    const achievementCount = progress?.achievements?.length ?? 0;
+    const playerName = save?.playerName ?? account?.username ?? "旅行者";
+    const accountId = account?.id != null && account.id !== "" ? `#${account.id}` : "";
+    const titleByBadges = badgeCount >= 7 ? "兽域大师" : badgeCount >= 5 ? "精英训练家" : badgeCount >= 3 ? "地区训练家" : badgeCount >= 1 ? "城镇挑战者" : "见习训练家";
+    const dexCaptured = Object.values(save?.collection ?? {}).filter((e: any) => e?.captured).length;
+    const dexTotal = Object.keys(MONSTER_SPECS).length;
+
     return (
-      <PixelCard title="队伍">
-        <div className="grid gap-2">
-          {party.map((m, idx) => {
-            const { isSupreme, allInitMax, allGrowthMax } = getMonsterSupremeState(m);
-            const btnClassName = isSupreme
-              ? "theme-supreme-stats !bg-[color:var(--panel)] bg-blend-overlay"
-              : (allInitMax && allGrowthMax)
-                ? "theme-max-stats !bg-[color:var(--panel)] bg-blend-overlay"
-                : "border-[color:var(--stroke)] bg-[color:var(--bg2)] active:bg-[color:var(--panel2)]";
-            
-            return (
-              <button
-                key={m.id}
-                onClick={() => setSelected(idx)}
-                className={`flex items-center justify-between border-2 px-3 py-3 text-left ${btnClassName}`}
-              >
-                <div>
-                  <MonsterName m={m} className="text-sm font-semibold text-[color:var(--text)]" />
-                  <div className="text-xs text-[color:var(--muted)]">
-                    Lv.{m.level} · {ELEMENT_LABEL[m.element]}
+      <div className="grid gap-3">
+        {/* 人物卡片：账号身份 + 收集进度，可折叠 */}
+        <PixelCard
+          title="人物"
+          hideBodyWhenEmpty
+          right={
+            <button onClick={() => setProfileOpen((v) => !v)} className="px-2 py-1 text-xs text-[color:var(--accent)]">
+              {profileOpen ? "收起" : "展开"}
+            </button>
+          }
+        >
+          {profileOpen && (
+            <>
+              <button className="flex w-full items-center gap-3 text-left" onClick={() => setProfileOpen((v) => !v)}>
+                <BrandMark className="h-14 w-14 flex-none" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-[color:var(--text)]">
+                    {playerName} {accountId && <span className="text-[10px] text-[color:var(--muted)]">{accountId}</span>}
                   </div>
+                  <div className="mt-0.5 text-[10px] text-[color:var(--accent)]">{titleByBadges}</div>
                 </div>
-                <div className="w-32 sm:w-40 grid gap-1">
-                  <StatBar label="HP" value={m.hp} max={m.maxHp} className="mb-0" />
-                  <StatBar label="EXP" value={m.exp} max={requiredExpForNextLevel(m.level)} tone="exp" size="sm" className="mb-0" />
+                {/* 训练师等级本身即宠物等级上限（后端 cap 恒等于 level），只表达一个值 */}
+                <div className="flex-none text-right text-[10px] text-[color:var(--muted)]">
+                  <div>训练师 Lv.{progress?.level ?? 5}</div>
                 </div>
               </button>
-            );
-          })}
-          {party.length === 0 && <div className="text-sm text-[color:var(--muted)]">队伍为空。</div>}
-        </div>
-      </PixelCard>
+              <div className="mt-3 grid grid-cols-3 gap-2 border-t-2 border-[color:var(--stroke)] pt-3 text-center">
+                <div>
+                  <div className="text-base font-bold text-[color:var(--accent)]">{dexCaptured}/{dexTotal}</div>
+                  <div className="text-[10px] text-[color:var(--muted)]">图鉴</div>
+                </div>
+                <div>
+                  <div className="text-base font-bold text-[color:var(--accent)]">{badgeCount}</div>
+                  <div className="text-[10px] text-[color:var(--muted)]">徽章</div>
+                </div>
+                <div>
+                  <div className="text-base font-bold text-[color:var(--accent)]">{achievementCount}</div>
+                  <div className="text-[10px] text-[color:var(--muted)]">成就</div>
+                </div>
+              </div>
+            </>
+          )}
+        </PixelCard>
+
+        {/* 队伍卡片：原队伍效果不变，可折叠 */}
+        <PixelCard
+          title="队伍"
+          hideBodyWhenEmpty
+          right={
+            <button onClick={() => setTeamOpen((v) => !v)} className="px-2 py-1 text-xs text-[color:var(--accent)]">
+              {teamOpen ? "收起" : "展开"}
+            </button>
+          }
+        >
+          {teamOpen && <div className="grid gap-2">
+            {party.map((m, idx) => {
+              const { isSupreme, allInitMax, allGrowthMax } = getMonsterSupremeState(m);
+              const btnClassName = isSupreme
+                ? "theme-supreme-stats !bg-[color:var(--panel)] bg-blend-overlay"
+                : (allInitMax && allGrowthMax)
+                  ? "theme-max-stats !bg-[color:var(--panel)] bg-blend-overlay"
+                  : "border-[color:var(--stroke)] bg-[color:var(--bg2)] active:bg-[color:var(--panel2)]";
+
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setSelected(idx)}
+                  className={`flex items-center justify-between border-2 px-3 py-3 text-left ${btnClassName}`}
+                >
+                  <div>
+                    <MonsterName m={m} className="text-sm font-semibold text-[color:var(--text)]" />
+                    <div className="text-xs text-[color:var(--muted)]">
+                      Lv.{m.level} · {ELEMENT_LABEL[m.element]}
+                    </div>
+                  </div>
+                  <div className="w-32 sm:w-40 grid gap-1">
+                    <StatBar label="HP" value={m.hp} max={m.maxHp} className="mb-0" />
+                    <StatBar label="EXP" value={m.exp} max={requiredExpForNextLevel(m.level)} tone="exp" size="sm" className="mb-0" />
+                  </div>
+                </button>
+              );
+            })}
+            {party.length === 0 && <div className="text-sm text-[color:var(--muted)]">队伍为空。</div>}
+          </div>}
+        </PixelCard>
+      </div>
     );
   };
 
@@ -476,32 +555,30 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
           </div>
         }
       >
-        <div className="grid gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {filteredInv.map((x) => (
-            <div key={x.id} className="flex flex-col border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3">
-              <div className="flex flex-col justify-center">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-[color:var(--text)]">{x.spec.name}</div>
-                  <div className="text-sm text-[color:var(--muted)]">x{x.qty}</div>
-                </div>
-                <div className="mt-1 text-xs text-[color:var(--muted)]">
-                  {x.spec.kind === "capture" ? `捕获修正 ×${x.spec.modifier}` 
-                   : x.spec.kind === "heal" ? `回复 ${x.spec.heal} HP`
-                   : x.spec.kind === "status_heal" ? `解除状态异常`
-                   : x.spec.kind === "evolution" ? `进化用`
-                   : `特殊道具`}
-                </div>
+            <div key={x.id} className="flex flex-col border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-2 min-w-0">
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 text-xs font-semibold text-[color:var(--text)] truncate">{x.spec.name}</div>
+                <div className="flex-none text-[10px] text-[color:var(--muted)]">x{x.qty}</div>
+              </div>
+              <div className="mt-0.5 text-[10px] text-[color:var(--muted)] truncate">
+                {x.spec.kind === "capture" ? `捕获修正 ×${x.spec.modifier}` 
+                 : x.spec.kind === "heal" ? `回复 ${x.spec.heal} HP`
+                 : x.spec.kind === "status_heal" ? `解除状态异常`
+                 : x.spec.kind === "evolution" ? `进化用`
+                 : `特殊道具`}
               </div>
               {(() => {
                 const targets = usableTargets(x.id as ItemId, x.spec);
                 if (targets.length === 0) return null;
                 return (
-                  <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                  <div className="mt-1 flex flex-wrap gap-1">
                     {targets.map(({ m, idx }) => (
                       <button
                         key={m.id}
                         onClick={() => void runOp(() => useItemOutsideBattle(x.id as ItemId, idx))}
-                        className="shrink-0 whitespace-nowrap border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] px-2 py-1 text-[10px] text-[color:var(--text)]"
+                        className="min-h-[36px] shrink-0 whitespace-nowrap border-2 border-[color:var(--accent)] bg-[color:var(--panel2)] px-2 py-1 text-[10px] text-[color:var(--text)]"
                       >
                         对 <MonsterName m={m} /> 使用
                       </button>
@@ -751,21 +828,16 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
             const mm = Math.max(0, Math.ceil(cdLeft / 1000));
             const cdText = `${Math.floor(mm / 60)}:${(mm % 60).toString().padStart(2, "0")}`;
             return (
-              <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] p-3">
+              <div className="border-2 border-[color:var(--stroke)] bg-[color:var(--bg2)] px-2.5 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 text-sm font-semibold text-[color:var(--text)] truncate">
-                    演武堂 · {g.leaderName}
+                  <div className="min-w-0 text-xs font-semibold text-[color:var(--text)] truncate">
+                    {g.badgeOwned && <span className="text-[color:var(--accent)]">✓ </span>}演武堂 · {g.leaderName}
                   </div>
-                  {g.badgeOwned && <span className="flex-none text-[10px] text-[color:var(--accent)]">徽章 ✓</span>}
-                </div>
-                <div className="mt-1 text-[10px] text-[color:var(--muted)]">
-                  王牌 {aceName} · Lv.{g.aceLevel}
-                  {cooling && <span className="ml-2 text-[color:var(--danger)]">馆主休息中 {cdText}</span>}
-                </div>
-                <div className="mt-3">
                   <PixelButton
                     tone="primary"
+                    size="sm"
                     disabled={cooling}
+                    className="flex-none"
                     onClick={() => {
                       setGymFightError(null);
                       void (async () => {
@@ -780,8 +852,12 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
                   >
                     {cooling ? "馆主休息中" : "挑战馆主"}
                   </PixelButton>
-                  {gymFightError && <div className="mt-2 text-[10px] text-[color:var(--danger)]">{gymFightError}</div>}
                 </div>
+                <div className="mt-1 text-[10px] text-[color:var(--muted)] truncate">
+                  王牌 {aceName} · Lv.{g.aceLevel}
+                  {cooling && <span className="ml-2 text-[color:var(--danger)]">休息 {cdText}</span>}
+                </div>
+                {gymFightError && <div className="mt-1 text-[10px] text-[color:var(--danger)]">{gymFightError}</div>}
               </div>
             );
           })()}
@@ -1277,7 +1353,7 @@ export default function Camp({ onShowMechanics, onShowMoveChart }: { onShowMecha
       {/* Bottom Navigation：底部安全区避免手势条遮挡 */}
       <div className="nav-safe-bottom flex-none flex min-h-[56px] border-t-2 border-[color:var(--stroke)] bg-[color:var(--bg2)]">
         {[
-          { id: "party", label: "队伍" },
+          { id: "party", label: "人物" },
           { id: "bag", label: "背包" },
           { id: "map", label: "地图" },
           { id: "dex", label: "图鉴" },

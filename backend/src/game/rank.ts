@@ -40,7 +40,7 @@ export const RANK_META: Record<RankType, RankMeta> = {
   },
   summoner_level: {
     type: 'summoner_level', label: '召唤师等级', unit: '级',
-    description: '服务端徽章真值：基础 Lv.5 + 每枚徽章等级加成；账号等级与宠物等级帽见规范 §31',
+    description: '服务端徽章真值：基础 Lv.10 + 每枚徽章等级加成；账号等级与宠物等级帽见规范 §31',
     disclaimer: '等级来自服务端徽章发放记录，客户端上报无效',
   },
   progress: {

@@ -81,9 +81,9 @@ try {
 
   const p0 = await api('/api/player/progress', { token: acc.token });
   const v0 = p0.data?.progress;
-  suite.check('无 Grant 记录 → Lv.5 / 帽 5 / 0 徽章 / 0 成就 / readonly',
+  suite.check('无 Grant 记录 → Lv.10 / 帽 10 / 0 徽章 / 0 成就 / readonly',
     p0.status === 200 && p0.data?.ok === true && p0.data?.readonly === true
-    && v0?.level === 5 && v0?.cap === 5 && v0?.baseLevel === 5
+    && v0?.level === 10 && v0?.cap === 10 && v0?.baseLevel === 10
     && v0?.badgeBonus === 0 && v0?.badgeCount === 0
     && Array.isArray(v0?.badges) && v0.badges.length === 0
     && Array.isArray(v0?.achievements) && v0.achievements.length === 0
@@ -92,7 +92,7 @@ try {
 
   suite.check('catalog 下发 7 行且未获得标 false（弹窗灰态真值）',
     Array.isArray(p0.data?.catalog) && p0.data.catalog.length === 7
-    && p0.data.catalog.every((b) => b.owned === false && b.levelBonus === 5)
+    && p0.data.catalog.every((b) => b.owned === false && b.levelBonus === 20)
     && p0.data.catalog[4].name === '赤焰徽章',
     JSON.stringify(p0.data?.catalog).slice(0, 220));
 
@@ -111,31 +111,31 @@ try {
   const g1 = await grantBadge(uid, 'badge_flame');
   const p1 = await api('/api/player/progress', { token: acc.token });
   const v1 = p1.data?.progress;
-  suite.check('发 1 枚赤焰徽章 → Lv.10 / 帽 10 / 总加成 +5',
-    g1 === 'created' && v1?.level === 10 && v1.cap === 10
-    && v1.badgeBonus === 5 && v1.badgeCount === 1
-    && v1.badges?.[0]?.name === '赤焰徽章' && v1.badges[0].levelBonus === 5,
+  suite.check('发 1 枚赤焰徽章 → Lv.30 / 帽 30 / 总加成 +20',
+    g1 === 'created' && v1?.level === 30 && v1.cap === 30
+    && v1.badgeBonus === 20 && v1.badgeCount === 1
+    && v1.badges?.[0]?.name === '赤焰徽章' && v1.badges[0].levelBonus === 20,
     `g=${g1} ${JSON.stringify(v1).slice(0, 240)}`);
 
   const g2 = await grantBadge(uid, 'badge_flame');
   const p2 = await api('/api/player/progress', { token: acc.token });
   suite.check('同一徽章重复发放被唯一键挡下，等级不双涨',
-    g2 === 'duplicate' && p2.data?.progress?.level === 10
+    g2 === 'duplicate' && p2.data?.progress?.level === 30
     && p2.data.progress.badgeCount === 1,
     `g=${g2} level=${p2.data?.progress?.level}`);
 
   await grantBadge(uid, 'badge_sprout');
   const p3 = await api('/api/player/progress', { token: acc.token });
-  suite.check('第二枚徽章 → Lv.15 / 总加成 +10 / 7 行清单可展示',
-    p3.data?.progress?.level === 15 && p3.data.progress.cap === 15
-    && p3.data.progress.badgeBonus === 10 && p3.data.progress.badgeCount === 2,
+  suite.check('第二枚徽章 → Lv.50 / 总加成 +40 / 7 行清单可展示',
+    p3.data?.progress?.level === 50 && p3.data.progress.cap === 50
+    && p3.data.progress.badgeBonus === 40 && p3.data.progress.badgeCount === 2,
     JSON.stringify(p3.data?.progress).slice(0, 220));
 
   await grantBadge(uid, 'badge_fake');
   const p4 = await api('/api/player/progress', { token: acc.token });
   suite.check('脏 badgeId 落库也不虚增等级（派生层过滤）',
-    p4.data?.progress?.level === 15 && p4.data.progress.badgeCount === 2
-    && p4.data.progress.badgeBonus === 10,
+    p4.data?.progress?.level === 50 && p4.data.progress.badgeCount === 2
+    && p4.data.progress.badgeBonus === 40,
     `level=${p4.data?.progress?.level}`);
 
   await grantAchievement(uid, 'ach_veteran');
@@ -179,19 +179,19 @@ try {
       `${forged.status} ${JSON.stringify(forged.data).slice(0, 140)}`);
   }
   const pAfterForge = await api('/api/player/progress', { token: acc.token });
-  suite.check('伪上报被拒后等级仍是服务端真值 Lv.15',
-    pAfterForge.data?.progress?.level === 15,
+  suite.check('伪上报被拒后等级仍是服务端真值 Lv.50',
+    pAfterForge.data?.progress?.level === 50,
     `level=${pAfterForge.data?.progress?.level}`);
 
   const rk = await api('/api/rank/summoner_level?limit=50', { token: acc.token });
   const myRow = (rk.data?.entries ?? []).find((e) => e.username === acc.username);
-  suite.check('召唤师等级榜读 Grant 真值 Lv.15（2 枚徽章 × +5，脏 id 不计）',
-    rk.status === 200 && myRow?.value === 15,
+  suite.check('召唤师等级榜读 Grant 真值 Lv.50（2 枚徽章 × +20，脏 id 不计）',
+    rk.status === 200 && myRow?.value === 50,
     `${rk.status} ${JSON.stringify(myRow ?? null).slice(0, 180)}`);
 
   const battleRun = await winBattle(acc.token, 'wild_starter');
-  suite.check('常规战斗开局下发服务端等级帽 15，客户端传 levelCap=999 无效',
-    battleRun.start.status === 200 && battleRun.start.data?.battle?.levelCap === 15,
+  suite.check('常规战斗开局下发服务端等级帽 50，客户端传 levelCap=999 无效',
+    battleRun.start.status === 200 && battleRun.start.data?.battle?.levelCap === 50,
     `${battleRun.start.status} cap=${battleRun.start.data?.battle?.levelCap}`);
   suite.check('战斗正常打到结束（enemy_fainted）',
     battleRun.last?.battle?.finished === true
@@ -208,11 +208,11 @@ try {
   const afterArea = await api('/api/player/progress', { token: acc2.token });
   const areaBadges = afterArea.data?.progress?.badges ?? [];
   const areaUnlocked = afterArea.data?.unlockedLocations ?? [];
-  suite.check('打野区（首通）不发徽章：仍是 Lv.5 / 0 徽章 / 仅首城解锁',
-    put2.status === 200 && beforeArea.data?.progress?.level === 5
+  suite.check('打野区（首通）不发徽章：仍是 Lv.10 / 0 徽章 / 仅首城解锁',
+    put2.status === 200 && beforeArea.data?.progress?.level === 10
     && areaRun.last?.battle?.result === 'enemy_fainted'
-    && afterArea.data?.progress?.level === 5
-    && afterArea.data?.progress?.cap === 5
+    && afterArea.data?.progress?.level === 10
+    && afterArea.data?.progress?.cap === 10
     && areaBadges.length === 0
     && areaUnlocked.length === 1 && areaUnlocked[0] === 'town_starter',
     `before=${beforeArea.data?.progress?.level} after=${afterArea.data?.progress?.level} `

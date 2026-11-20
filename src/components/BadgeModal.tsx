@@ -40,11 +40,10 @@ export default function BadgeModal({ onClose }: { onClose: () => void }) {
           <button type="button" onClick={onClose} aria-label="关闭" className="modal-close tap-expand">&times;</button>
         </div>
 
-        {/* 顶部总览：人物等级 / 等级帽 / 总等级加成（服务端真值，只读） */}
+        {/* 顶部总览：人物等级 / 总等级加成（服务端真值） */}
         <div className="border-b-2 border-[color:var(--stroke2)] bg-[color:var(--panel2)] px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[color:var(--muted)]">
-            <span>人物等级 <b className="text-[color:var(--text)]">Lv.{p?.level ?? 5}</b></span>
-            <span>宠物等级帽 <b className="text-[color:var(--text)]">{p?.cap ?? 5}</b></span>
+            <span>人物等级 <b className="text-[color:var(--text)]">Lv.{p?.level ?? 10}</b></span>
           </div>
           <div className="mt-1 font-display text-sm text-[color:var(--accent)]">
             总等级加成 +{p?.badgeBonus ?? 0}

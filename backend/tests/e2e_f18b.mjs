@@ -96,8 +96,8 @@ async function main() {
   const battleId = start.data?.battle?.battleId;
   s.check('返回 battle 且 gymId=town_starter', !!battleId && start.data?.battle?.gymId === 'town_starter',
     `battleId=${battleId} gymId=${start.data?.battle?.gymId}`);
-  s.check('敌方为馆主王牌 sprout_owl (Lv8)',
-    start.data?.battle?.enemy?.specId === 'sprout_owl' && start.data?.battle?.enemy?.level === 8,
+  s.check('敌方为馆主王牌 sprout_owl (Lv12)',
+    start.data?.battle?.enemy?.specId === 'sprout_owl' && start.data?.battle?.enemy?.level === 12,
     `spec=${start.data?.battle?.enemy?.specId} lv=${start.data?.battle?.enemy?.level}`);
   s.check('下发 20min 馆主休息冷却到期时间',
     typeof start.data?.cooldownUntil === 'number' && start.data.cooldownUntil > Date.now(),

@@ -5,7 +5,7 @@
  * 为什么必须有这一层：store 单测是 mock 掉 api 的，能证明「入口分流写对了」，
  * 但证明不了「真浏览器里点按钮 → 前端发意图 → 服务端结算 → 存档真的变了」。
  * 这里就查这条端到端链路：
- *   1. 训练场点「快速开始」后出现服务端下发的战斗（顶部角标「服务端裁决」）；
+ *   1. 训练场点「快速开始」后出现服务端下发的战斗（顶部「回合 x」+ HP 状态）；
  *   2. 点技能/逃跑后回合推进或战斗结束（说明动作真的转给了 /api/battle/action）；
  *   3. 用 HTTP 复查存档：战斗结束后服务端已经写档（HP / 金钱 / 图鉴有变化）。
  *
@@ -109,11 +109,11 @@ f.addEventListener('load', function () {
     out.startClicked = clickOne(function (b) { return b.textContent.indexOf('快速开始') >= 0; });
   });
 
-  waitFor('battle-started', function () { return txt().indexOf('服务端裁决') >= 0; }, function () {
+  waitFor('battle-started', function () { return txt().indexOf('回合 ') >= 0 && txt().indexOf('HP') >= 0; }, function () {
     if (out.battleSeen) return;
     out.battleSeen = true;
     out.step = 'battle';
-    out.serverBadge = txt().indexOf('服务端裁决') >= 0;
+    out.serverBadge = txt().indexOf('回合 ') >= 0;
     out.localBadge = txt().indexOf('本地模式') >= 0;
     out.turnAtStart = turn();
     out.hasEnemyHp = txt().indexOf('HP') >= 0;

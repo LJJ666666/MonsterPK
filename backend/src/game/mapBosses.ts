@@ -40,7 +40,7 @@ export type MapBossSpec = {
 /**
  * 每城一座地图首领（与 LOCATION_ORDER 的 7 城一一对应）。
  * 物种取内容表里已存在的幻兽，不新增（避免动 data.ts 与内容表同步）；
- * 数值保守：原型期玩家队伍 Lv.8~28，硬度过高会「打不过 = 没数据」。
+ * 数值随人物档位（杰哥 2026-11-20 重设：12/32/52/72/92/112/132），硬度来自 hpMultiplier。
  * drop 为暂定方案（杰哥 2026-11-10：先支撑，后续想到再补充），调数值只改本表。
  */
 export const MAP_BOSSES: Record<string, MapBossSpec> = {
@@ -49,7 +49,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '萌芽守望者',
     locationId: 'town_starter',
     speciesId: 'sprout_owl',
-    level: 8,
+    level: 12,
     hpMultiplier: 1.6,
     theme: 'forest',
     dailyLimit: 3,
@@ -61,7 +61,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '磐石守矿石',
     locationId: 'city_pebble',
     speciesId: 'rock_golem',
-    level: 13,
+    level: 32,
     hpMultiplier: 1.8,
     theme: 'cave',
     dailyLimit: 3,
@@ -73,7 +73,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '碧波林灵',
     locationId: 'town_leafy',
     speciesId: 'tide_newt',
-    level: 16,
+    level: 52,
     hpMultiplier: 2.0,
     theme: 'lake',
     dailyLimit: 2,
@@ -85,7 +85,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '铁翼春隼',
     locationId: 'city_spring',
     speciesId: 'iron_bird',
-    level: 19,
+    level: 72,
     hpMultiplier: 2.0,
     theme: 'cave',
     dailyLimit: 2,
@@ -97,7 +97,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '炽炎日侯',
     locationId: 'town_sun',
     speciesId: 'ember_marmot',
-    level: 22,
+    level: 92,
     hpMultiplier: 2.2,
     theme: 'volcano',
     dailyLimit: 2,
@@ -109,7 +109,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '幽影夜主',
     locationId: 'city_shadow',
     speciesId: 'shadow_spirit',
-    level: 25,
+    level: 112,
     hpMultiplier: 2.4,
     theme: 'mansion',
     dailyLimit: 1,
@@ -121,7 +121,7 @@ export const MAP_BOSSES: Record<string, MapBossSpec> = {
     name: '霜寒霸主',
     locationId: 'town_winter',
     speciesId: 'frost_cub',
-    level: 28,
+    level: 132,
     hpMultiplier: 2.6,
     theme: 'cave',
     dailyLimit: 1,

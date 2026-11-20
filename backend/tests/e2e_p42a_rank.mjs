@@ -185,16 +185,16 @@ async function main() {
 
   const inLevel = mine(boards.summoner_level, names);
   // 全量 verify 时前面套件会留下大量账号，全服榜 limit=50 会把低等级的 low/mid 截断
-  // （§28 老坑）。因此「未发徽章恒为 Lv.5」直接查只读进度接口，不依赖全服子集完整性。
+  // （§28 老坑）。因此「未发徽章恒为 Lv.10」直接查只读进度接口，不依赖全服子集完整性。
   const progLow = await api('/api/player/progress', { token: accLow.token });
   const progMid = await api('/api/player/progress', { token: accMid.token });
   const hiRow = inLevel.find((e) => e.username === accHigh.username);
   const loRow = inLevel.find((e) => e.username === accLow.username);
-  suite.check('F04 召唤师等级读服务端徽章真值：high（+5）=10，未发徽章恒为基础 Lv.5',
-    badgeGranted === true && hiRow?.value === 10
-    && progLow.data?.progress?.level === 5 && progMid.data?.progress?.level === 5
+  suite.check('F04 召唤师等级读服务端徽章真值：high（+20）=30，未发徽章恒为基础 Lv.10',
+    badgeGranted === true && hiRow?.value === 30
+    && progLow.data?.progress?.level === 10 && progMid.data?.progress?.level === 10
     && (!loRow || loRow.value < hiRow.value || loRow.rank > hiRow.rank)
-    && inLevel.every((e) => e.username === accHigh.username || e.value === 5),
+    && inLevel.every((e) => e.username === accHigh.username || e.value === 10),
     `granted=${badgeGranted} hi=${hiRow?.value} lo=${loRow?.value} `
     + `progLow=${progLow.data?.progress?.level} progMid=${progMid.data?.progress?.level} `
     + JSON.stringify(inLevel.map((e) => `${e.username}:${e.value}`)));

@@ -95,14 +95,14 @@ f.addEventListener('load', function () {
     }, once('modal', function () {
       var t = txt();
       out.step = 'badges';
-      out.totalBonus = t.indexOf('总等级加成 +15') >= 0;
-      out.playerLevel = t.indexOf('人物等级 Lv.20') >= 0;
-      out.cap = t.indexOf('宠物等级帽 20') >= 0;
-      out.badgeRows = ['青苗徽章 丨 5','磐石徽章 丨 5','翠羽徽章 丨 5','流泉徽章 丨 5',
-        '赤焰徽章 丨 5','幽玄徽章 丨 5','霜华徽章 丨 5'].every(function (s) { return t.indexOf(s) >= 0; });
+      out.totalBonus = t.indexOf('总等级加成 +60') >= 0;
+      out.playerLevel = t.indexOf('人物等级 Lv.70') >= 0;
+      out.noCapText = t.indexOf('宠物等级帽') < 0;
+      out.badgeRows = ['青苗徽章 丨 20','磐石徽章 丨 20','翠羽徽章 丨 20','流泉徽章 丨 20',
+        '赤焰徽章 丨 20','幽玄徽章 丨 20','霜华徽章 丨 20'].every(function (s) { return t.indexOf(s) >= 0; });
       out.owned = t.indexOf('已获得') >= 0;
       out.locked = t.indexOf('未挑战') >= 0 && t.indexOf('凛冬镇') >= 0;
-      out.disclaimer = t.indexOf('超帽不降级') >= 0;
+      out.disclaimer = t.indexOf('等级越高可培养的幻兽越强') >= 0;
       out.scrollWidthA = overflow();
       var ach = byText('成就');
       if (!ach) { out.errors.push('no-ach-tab'); return finish(); }
@@ -181,8 +181,8 @@ async function main() {
       await prisma.achievementGrant.create({ data: { userId: uid, achievementId, source: 'ui_smoke' } });
     }
     const progress = await apiJson('/api/player/progress', { headers: auth });
-    check('服务端真值：3 徽章 → Lv.20 / 总加成 +15',
-      progress.data?.progress?.level === 20 && progress.data.progress.badgeBonus === 15
+    check('服务端真值：3 徽章 → Lv.70 / 总加成 +60',
+      progress.data?.progress?.level === 70 && progress.data.progress.badgeBonus === 60
       && progress.data.catalog?.length === 7,
       JSON.stringify(progress.data?.progress).slice(0, 200));
   } finally {
@@ -207,11 +207,11 @@ async function main() {
   check('探针回传（营地 → 徽章弹窗 → 成就 Tab）', !!p && p.step === 'done', brief(p) ?? dom.slice(0, 200));
   if (!p) return report();
 
-  check('顶部显示总等级加成 +15', p.totalBonus === true, brief(p));
-  check('顶部显示人物等级 Lv.20 与宠物等级帽 20', p.playerLevel === true && p.cap === true, brief(p));
-  check('徽章 Tab 七行「名称 丨 5」齐全', p.badgeRows === true, brief(p));
+  check('顶部显示总等级加成 +60', p.totalBonus === true, brief(p));
+  check('顶部显示人物等级 Lv.70，且不再出现「宠物等级帽」', p.playerLevel === true && p.noCapText === true, brief(p));
+  check('徽章 Tab 七行「名称 丨 20」齐全', p.badgeRows === true, brief(p));
   check('已获得 / 未挑战两态可见', p.owned === true && p.locked === true, brief(p));
-  check('免责文案含「超帽不降级」', p.disclaimer === true, brief(p));
+  check('进度说明文案为玩法口径（等级越高可培养幻兽越强）', p.disclaimer === true, brief(p));
   check('徽章 Tab 375px 无横向溢出',
     Number.isFinite(p.scrollWidthA) && p.scrollWidthA <= 375, `scrollWidth=${p.scrollWidthA}`);
   check('成就 Tab 显示全体物攻 +5 / 火属性速度 +1',

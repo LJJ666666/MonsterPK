@@ -13,7 +13,7 @@ export function coopViewOf(room: RoomView | null | undefined): CoopView | null {
 }
 
 export const COOP_DISCLAIMER =
-  "共斗由服务端裁决：6 间房各自结算，全清即通关；一房同时 1 人，战败可重打。通关且有战斗贡献者得奖励，每日上限 3 次。";
+  "6 间房各自结算，全清即通关；一房同时 1 人，战败可重打。通关且有战斗贡献者得奖励，每日上限 3 次。";
 
 /** 房间四态文案（与服务端 `CoopRoomState` 对应）。 */
 export function coopRoomStateText(state: CoopRoomView["state"]): string {

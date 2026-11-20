@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { LOCATIONS, THEME_TABLE } from '../game/content';
+import { ENCOUNTER_LEVEL_MAX } from '../game/levelLimits';
 import { encodeServerMessage } from '../lib/wsProtocol';
 import type { WildAreaSpec } from '../lib/wildRegistry';
 import { wilds, broadcastAll } from './sessionBus';
@@ -16,12 +17,12 @@ import { wilds, broadcastAll } from './sessionBus';
 const querySchema = z.object({
   areaId: z.string().min(1).max(60),
   theme: z.string().min(1).max(40).default('grass'),
-  levelMin: z.coerce.number().int().min(1).max(60).default(1),
-  levelMax: z.coerce.number().int().min(1).max(60).default(5),
+  levelMin: z.coerce.number().int().min(1).max(ENCOUNTER_LEVEL_MAX).default(1),
+  levelMax: z.coerce.number().int().min(1).max(ENCOUNTER_LEVEL_MAX).default(5),
 });
 
 function clampLv(v: number): number {
-  return Math.min(Math.max(Math.round(Number.isFinite(v) ? v : 1), 1), 60);
+  return Math.min(Math.max(Math.round(Number.isFinite(v) ? v : 1), 1), ENCOUNTER_LEVEL_MAX);
 }
 
 /**

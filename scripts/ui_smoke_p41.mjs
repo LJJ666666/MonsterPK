@@ -165,12 +165,12 @@ async function main() {
     console.log(`[INFO] 探针内部提示：${p.errors.join(', ')}`);
   }
 
-  // 服务端侧对照：UI 看到的等级区间必须来自内容表（wild_starter 1-5）
-  const wild = await apiJson('/api/wild?areaId=wild_starter&theme=grass&levelMin=1&levelMax=5', { headers: auth });
+  // 服务端侧对照：UI 看到的等级区间必须来自内容表（wild_starter 3-6）
+  const wild = await apiJson('/api/wild?areaId=wild_starter&theme=grass&levelMin=3&levelMax=6', { headers: auth });
   check('服务端共享野怪列表可读且为真实区域', wild.status === 200 && wild.data?.areaName === '微风林道',
     JSON.stringify({ status: wild.status, areaName: wild.data?.areaName }));
-  check('服务端等级区间来自内容表（1-5）',
-    wild.data?.levelMin === 1 && wild.data?.levelMax === 5,
+  check('服务端等级区间来自内容表（3-6）',
+    wild.data?.levelMin === 3 && wild.data?.levelMax === 6,
     JSON.stringify({ min: wild.data?.levelMin, max: wild.data?.levelMax }));
   report();
 }

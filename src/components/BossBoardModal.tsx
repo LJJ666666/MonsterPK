@@ -154,27 +154,34 @@ export default function BossBoardModal({
           {!rankLoading && !rankError && rank?.entries.length === 0 && (
             <div className="py-6 text-center text-sm text-[color:var(--muted)]">今日还没有人上榜，抢个第一。</div>
           )}
-          {!rankLoading && !rankError && rank?.entries.map((row) => (
-            <div
-              key={`${row.username}#${row.rank}`}
-              className={`flex items-center gap-2 border-2 p-2 min-w-0 ${
-                row.isMe
-                  ? "border-[color:var(--accent)] bg-[color:var(--panel2)]"
-                  : "border-[color:var(--stroke)] bg-[color:var(--bg2)]"
-              }`}
-            >
-              <div className="w-7 flex-none text-center font-display text-sm text-[color:var(--accent)]">{row.rank}</div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-[color:var(--text)] truncate">
-                  {row.username}
-                  {row.isMe && <span className="ml-1 text-[color:var(--accent)]">[我]</span>}
+          {!rankLoading && !rankError && rank?.entries.map((row, idx) => (
+            <div key={`${row.username}#${row.rank}`}>
+              {/* 自身保底行（排名超出展示上限）与正常榜单之间加一条说明分隔 */}
+              {idx > 0 && row.isMe && !rank.entries[idx - 1].isMe && (
+                <div className="my-1 border-t border-dashed border-[color:var(--stroke)] pt-1 text-center text-[10px] text-[color:var(--muted)]">
+                  — 以下为你的成绩 · 未进入前 {rank.entries.length - 1} 名 —
                 </div>
-                <div className="text-[10px] text-[color:var(--muted)] truncate">
-                  {row.attempts} 次 · 最高 {fmt(row.best)}
+              )}
+              <div
+                className={`flex items-center gap-2 border-2 p-2 min-w-0 ${
+                  row.isMe
+                    ? "border-[color:var(--accent)] bg-[color:var(--panel2)]"
+                    : "border-[color:var(--stroke)] bg-[color:var(--bg2)]"
+                }`}
+              >
+                <div className="w-7 flex-none text-center font-display text-sm text-[color:var(--accent)]">{row.rank}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-[color:var(--text)] truncate">
+                    {row.username}
+                    {row.isMe && <span className="ml-1 text-[color:var(--accent)]">[我]</span>}
+                  </div>
+                  <div className="text-[10px] text-[color:var(--muted)] truncate">
+                    {row.attempts} 次 · 最高 {fmt(row.best)}
+                  </div>
                 </div>
-              </div>
-              <div className="flex-none text-right text-xs font-bold text-[color:var(--text)] whitespace-nowrap">
-                {fmt(row.damage)}
+                <div className="flex-none text-right text-xs font-bold text-[color:var(--text)] whitespace-nowrap">
+                  {fmt(row.damage)}
+                </div>
               </div>
             </div>
           ))}
@@ -190,7 +197,7 @@ export default function BossBoardModal({
             <div className="text-[10px] text-[color:var(--muted)] min-w-0 truncate">
               {current
                 ? `今日已用 ${current.used} 次${current.remaining <= 0 ? " · 次数已用完" : ""}`
-                : "只读视图"}
+                : "次数加载中…"}
             </div>
             <PixelButton
               size="sm"

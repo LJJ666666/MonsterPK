@@ -63,6 +63,28 @@ test('buildBossBoard：isMe 只按账号标记，limit 被钳制且不改变排�
   assert.equal(buildBossBoard(rows, -5).length, 1, 'limit 下限 1');
 });
 
+test('buildBossBoard：viewer 在 cap 之外时底部追加自身保底行（真实名次）', () => {
+  const rows = [
+    run('u1', '甲', 500), run('u2', '乙', 400), run('u3', '丙', 300),
+    run('me', '我', 100), run('u4', '丁', 50),
+  ];
+  const board = buildBossBoard(rows, 3, 'me');
+  assert.equal(board.length, 4, '前 3 + 自身 1 行');
+  assert.deepEqual(board.slice(0, 3).map((r) => r.username), ['甲', '乙', '丙']);
+  assert.equal(board[3].username, '我');
+  assert.equal(board[3].rank, 4, '真实名次第 4，不重编为第 3');
+  assert.equal(board[3].isMe, true);
+  assert.equal(board[3].damage, 100);
+
+  // 自身已在榜内：不重复追加
+  const inBoard = buildBossBoard(rows, 3, 'u2');
+  assert.equal(inBoard.length, 3);
+  assert.equal(inBoard[1].isMe, true);
+
+  // 自身无记录：不追加全 0 假名次
+  assert.equal(buildBossBoard(rows, 3, 'ghost').length, 3);
+});
+
 test('buildBossBoard：空 / 脏数据不炸', () => {
   assert.deepEqual(buildBossBoard([], 20), []);
   assert.deepEqual(buildBossBoard(null as any, 20), []);

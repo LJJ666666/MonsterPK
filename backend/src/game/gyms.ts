@@ -23,7 +23,7 @@ export interface GymSpec {
   leaderName: string;
   /** 王牌幻兽种 id（必须在 `MONSTER_SPECS` 中存在，否则 `createInstance` 抛错）。 */
   aceSpeciesId: string;
-  /** 王牌等级（1~30，钳制见 `game/battle.ts::createInstance`）。 */
+  /** 王牌等级（杰哥 2026-11-20 重设：12/32/52/72/92/112/132，随人物档位）。 */
   aceLevel: number;
   /** 馆主休息冷却毫秒（默认 20 分钟）。 */
   cooldownMs: number;
@@ -32,13 +32,13 @@ export interface GymSpec {
 export const GYM_COOLDOWN_MS = 20 * 60 * 1000;
 
 export const GYMS: readonly GymSpec[] = [
-  { locationId: 'town_starter', leaderName: '木之导师 青岚', aceSpeciesId: 'sprout_owl', aceLevel: 8, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'city_pebble', leaderName: '磐石馆主 岩岳', aceSpeciesId: 'rock_golem', aceLevel: 12, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'town_leafy', leaderName: '疾风馆主 翠翎', aceSpeciesId: 'iron_bird', aceLevel: 16, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'city_spring', leaderName: '流泉馆主 涟心', aceSpeciesId: 'tide_newt', aceLevel: 20, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'town_sun', leaderName: '赤焰馆主 焰心', aceSpeciesId: 'ember_marmot', aceLevel: 24, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'city_shadow', leaderName: '幽玄馆主 夜魅', aceSpeciesId: 'shadow_spirit', aceLevel: 28, cooldownMs: GYM_COOLDOWN_MS },
-  { locationId: 'town_winter', leaderName: '霜华馆主 凛雪', aceSpeciesId: 'frost_cub', aceLevel: 30, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'town_starter', leaderName: '木之导师 青岚', aceSpeciesId: 'sprout_owl', aceLevel: 12, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'city_pebble', leaderName: '磐石馆主 岩岳', aceSpeciesId: 'rock_golem', aceLevel: 32, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'town_leafy', leaderName: '疾风馆主 翠翎', aceSpeciesId: 'iron_bird', aceLevel: 52, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'city_spring', leaderName: '流泉馆主 涟心', aceSpeciesId: 'tide_newt', aceLevel: 72, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'town_sun', leaderName: '赤焰馆主 焰心', aceSpeciesId: 'ember_marmot', aceLevel: 92, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'city_shadow', leaderName: '幽玄馆主 夜魅', aceSpeciesId: 'shadow_spirit', aceLevel: 112, cooldownMs: GYM_COOLDOWN_MS },
+  { locationId: 'town_winter', leaderName: '霜华馆主 凛雪', aceSpeciesId: 'frost_cub', aceLevel: 132, cooldownMs: GYM_COOLDOWN_MS },
 ] as const;
 
 export const GYM_BY_LOCATION: Readonly<Record<string, GymSpec>> = Object.freeze(

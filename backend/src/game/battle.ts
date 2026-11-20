@@ -23,6 +23,7 @@ import {
 import { createBossEnemy, type BossSpec } from './boss.js';
 import { createMapBossEnemy, type MapBossSpec } from './mapBosses.js';
 import { expGrantAllowed } from './playerLevel.js';
+import { ENCOUNTER_LEVEL_MAX } from './levelLimits.js';
 
 export type BattleResult = 'captured' | 'enemy_fainted' | 'fled' | 'player_fainted';
 
@@ -178,7 +179,7 @@ export function generateEncounter(theme: string, partyLevel: number, rng: Rng, t
   if (!table || table.length === 0) throw new BattleError('THEME_UNKNOWN', '该区域没有可遭遇的幻兽');
   const rare = roll(0.08, rng);
   const elite = roll(0.12, rng);
-  const levelBase = clamp(partyLevel + (elite ? 2 : 0) + (rare ? 3 : 0) + (rng() < 0.5 ? 0 : 1), 1, 30);
+  const levelBase = clamp(partyLevel + (elite ? 2 : 0) + (rare ? 3 : 0) + (rng() < 0.5 ? 0 : 1), 1, ENCOUNTER_LEVEL_MAX);
   const specId = table[Math.floor(rng() * table.length)];
   const enemy = createInstance(specId, levelBase, rng);
   const label = `${rare ? '稀有' : elite ? '精英' : '野生'} ${MONSTER_SPECS[specId]?.name ?? specId}`;
@@ -227,8 +228,8 @@ export function createBattle(params: {
   const activeIndex = findFirstAliveIndex(params.party);
   if (activeIndex < 0) throw new BattleError('PARTY_FAINTED', '队伍中没有可战斗的幻兽');
 
-  const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, 60);
-  const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, 60);
+  const levelMin = clamp(Math.floor(params.levelMin) || 1, 1, ENCOUNTER_LEVEL_MAX);
+  const levelMax = clamp(Math.floor(params.levelMax) || levelMin, levelMin, ENCOUNTER_LEVEL_MAX);
   const level = levelMin + Math.floor(rng() * (levelMax - levelMin + 1));
   const { enemy, label } = params.mapBoss
     ? { enemy: createMapBossEnemy(params.mapBoss.spec, rng), label: params.mapBoss.spec.name }
@@ -385,7 +386,7 @@ function finish(s: BattleState, result: BattleResult, inventory: Record<string, 
       s.rewards = { expGain, moneyGain };
       pushLog(s, [
         `${bossName} 倒下了。`,
-        `获得经验 ${expGain}（3 倍），金钱 ¥${moneyGain}（5 倍）。`,
+        `获得经验 ${expGain}，金钱 ¥${moneyGain}。`,
         ...(frozen > 0 ? [`${frozen} 只伙伴已达等级帽 Lv.${s.levelCap}，本次不获得经验。`] : []),
       ]);
       return s;

@@ -20,7 +20,7 @@ export function newNonce(): string {
 }
 
 export const PVP_DISCLAIMER =
-  "玩家对战由服务端裁决：双方交齐意图后结算一回合，胜负 / 伤害 / PP 全在服务端，客户端无法改写。";
+  "双方各出一招后结算一回合，先击败对方全部幻兽者获胜。";
 
 /** 状态文案（与房间内核状态机对应）。 */
 export function pvpStatusText(room: RoomView | null | undefined): string {

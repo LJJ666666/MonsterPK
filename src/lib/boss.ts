@@ -42,7 +42,7 @@ export type BossRank = {
   me: BossMySummary;
 };
 
-export const BOSS_DISCLAIMER = "伤害由服务端战斗结算产出；每日次数按账号计算，逃跑与放弃不扣次数";
+export const BOSS_DISCLAIMER = "每日次数按账号计算，逃跑与放弃不扣次数";
 
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;

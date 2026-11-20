@@ -14,6 +14,7 @@
  * 全部方法 async：调用方统一 `await`，两套实现签名一致。
  */
 import { MONSTER_SPECS, THEME_TABLE } from '../game/content';
+import { ENCOUNTER_LEVEL_MAX } from '../game/levelLimits';
 import { MemoryWildStorage } from './memoryWildStorage';
 import { RedisWildStorage } from './redisWildStorage';
 import { clampInt, WILD_CLAIM_TTL_MS, WILD_PER_AREA, WILD_RESOLVED_GRACE_MS, WILD_TTL_MS }
@@ -57,7 +58,7 @@ function createSpawner(rng: () => number, ttlMs: number): WildSpawner {
       : Object.keys(MONSTER_SPECS)[0];
     const lvMin = Math.min(spec.levelMin, spec.levelMax);
     const lvMax = Math.max(spec.levelMin, spec.levelMax);
-    const level = clampInt(lvMin + rng() * (lvMax - lvMin + 1), 1, 60);
+    const level = clampInt(lvMin + rng() * (lvMax - lvMin + 1), 1, ENCOUNTER_LEVEL_MAX);
     const rare = rng() < 0.08;
     const elite = !rare && rng() < 0.12;
     const name = MONSTER_SPECS[speciesId]?.name ?? speciesId;
@@ -67,7 +68,7 @@ function createSpawner(rng: () => number, ttlMs: number): WildSpawner {
       theme: spec.theme,
       speciesId,
       name,
-      level: clampInt(level + (elite ? 2 : 0) + (rare ? 3 : 0), 1, 60),
+      level: clampInt(level + (elite ? 2 : 0) + (rare ? 3 : 0), 1, ENCOUNTER_LEVEL_MAX),
       label: `${rare ? '稀有' : elite ? '精英' : '野生'} ${name}`,
       spawnedAt: now,
       expiresAt: now + ttlMs,

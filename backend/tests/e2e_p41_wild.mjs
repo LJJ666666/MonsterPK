@@ -23,7 +23,7 @@ let aborted = false;
 
 /** 用内容表里的真实野怪区域：主题与等级区间完全由服务端 LOCATIONS 决定。 */
 const AREA = 'wild_starter';
-const WILD_QUERY = `/api/wild?areaId=${AREA}&theme=grass&levelMin=1&levelMax=5`;
+const WILD_QUERY = `/api/wild?areaId=${AREA}&theme=grass&levelMin=3&levelMax=6`;
 
 const mk = async (prefix) => {
   const acc = await newAccount(prefix);
@@ -82,13 +82,13 @@ async function main() {
       && m.claim === undefined && m.userId === undefined && m.battleId === undefined),
     JSON.stringify(first.data?.monsters?.[0] ?? null));
   suite.check('区域真值由服务端给出（theme / 等级区间）',
-    first.data?.theme === 'grass' && first.data?.levelMin === 1 && first.data?.levelMax === 5,
+    first.data?.theme === 'grass' && first.data?.levelMin === 3 && first.data?.levelMax === 6,
     JSON.stringify({ theme: first.data?.theme, min: first.data?.levelMin, max: first.data?.levelMax }));
 
   const spoof = await api(`/api/wild?areaId=${AREA}&theme=volcano&levelMin=50&levelMax=60`, { token: accA.token });
   const idsOf = (r) => (r?.monsters ?? []).map((m) => m.id).join(',');
   suite.check('客户端伪造主题/等级不能改共享野怪真值',
-    spoof.status === 200 && spoof.data?.theme === 'grass' && spoof.data?.levelMax === 5
+    spoof.status === 200 && spoof.data?.theme === 'grass' && spoof.data?.levelMax === 6
       && idsOf(spoof.data) === idsOf(first.data),
     JSON.stringify({ theme: spoof.data?.theme, max: spoof.data?.levelMax }));
 

@@ -1,9 +1,10 @@
 /**
  * F04 召唤师等级 / 宠物等级帽（纯函数层，规范 §31）。
  *
- * 现行口径（杰哥 2026-11-10 修订）：
- *  - 人物等级 = 基础等级 + **徽章等级加成总和**，不是打怪经验；
- *  - 等级帽 cap = playerLevel + PLAYER_LEVEL_CAP_BONUS（默认 0，N+5 只改常量/入参）；
+ * 现行口径（杰哥 2026-11-20 修订）：
+ *  - 人物等级 = 基础等级 10 + **徽章等级加成总和（每枚 +20）**，不是打怪经验；
+ *    御三家初始 Lv.5 不变（宠物起点，与人物起点是两个概念）；
+ *  - 等级帽 cap = playerLevel + PLAYER_LEVEL_CAP_BONUS（默认 0，与人物等级同一数值）；
  *  - 超帽**不降级、只冻结升级**（不再获得经验）；
  *  - 捕获到的高等级怪**不钳等级**，原样入队，只是之后获取不到经验；
  *  - 等级 / 徽章 / 成就真值都在服务端独立表，**不写存档 JSON**。
@@ -18,8 +19,8 @@ import {
   type StatBonus,
 } from './badges.js';
 
-/** 新账号基础等级：对齐 `game/mutations.ts::createNewSave()` 御三家 Lv.5。 */
-export const BASE_PLAYER_LEVEL = 5;
+/** 新账号人物基础等级（杰哥 2026-11-20 定）：10。御三家宠物初始 Lv.5 不变。 */
+export const BASE_PLAYER_LEVEL = 10;
 /** 等级帽相对人物等级的加成；未来改 N+5 只动这里（或由 modules 层注入）。 */
 export const PLAYER_LEVEL_CAP_BONUS = 0;
 /** 与 `saveValidator.LEVEL_MAX` 一致，防脏数据 / 溢出。 */
@@ -88,7 +89,7 @@ export function expGrantAllowed(monsterLevel: unknown, cap: number): boolean {
 
 /**
  * 捕获入队时的等级处理：**不按帽钳制**，只做合法性钳制（1..LEVEL_MAX）。
- * 例：人物 5 级抓到 Lv.50 → 仍是 50，之后因超帽而获取不到经验。
+ * 例：人物 10 级抓到 Lv.50 → 仍是 50，之后因超帽而获取不到经验。
  */
 export function capturedLevelOf(rawLevel: unknown, cap?: number): number {
   void cap; // 显式声明：cap 参与判定但不参与等级写入，防止后人手滑加钳制

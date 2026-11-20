@@ -120,7 +120,7 @@ f.addEventListener('load', function () {
       var t = txt();
       out.step = 'modal';
       out.title = t.indexOf('共斗副本') >= 0;
-      out.disclaimer = t.indexOf('服务端裁决') >= 0 && t.indexOf('全清即通关') >= 0;
+      out.disclaimer = t.indexOf('全清即通关') >= 0 && t.indexOf('每日上限 3 次') >= 0;
       out.createBtn = t.indexOf('创建共斗房间') >= 0;
       out.joinBtn = buttons().some(function (b) { return b.textContent.trim() === '加入'; });
       // 共斗目标列表（服务端只读下发）渲染出来才算接线成功
@@ -203,7 +203,7 @@ async function main() {
 
   check('营地页存在「共斗」入口', p.entry === true, JSON.stringify(p.errors));
   check('弹窗标题为「共斗副本」', p.title === true, brief(p));
-  check('免责文案含「服务端裁决」与「全清即通关」', p.disclaimer === true, brief(p));
+  check('规则文案含「全清即通关」与每日次数', p.disclaimer === true, brief(p));
   check('共斗目标列表已从服务端下发', p.bossList === true, brief(p));
   check('弹窗存在「创建共斗房间」按钮', p.createBtn === true, brief(p));
   check('弹窗存在「加入」按钮', p.joinBtn === true, brief(p));

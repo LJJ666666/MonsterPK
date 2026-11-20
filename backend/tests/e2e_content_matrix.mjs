@@ -104,8 +104,8 @@ async function main() {
     catalog.length === 7 && catalog.every((b) => b.owned === false),
     `catalog=${catalog.length} owned=${catalog.filter((b) => b.owned).length}`);
   const p = progress.data?.progress;
-  s.check('A10 初始进度 0 徽章 / 等级 5',
-    p?.badgeCount === 0 && p?.level === 5, `badgeCount=${p?.badgeCount} level=${p?.level}`);
+  s.check('A10 初始进度 0 徽章 / 等级 10',
+    p?.badgeCount === 0 && p?.level === 10, `badgeCount=${p?.badgeCount} level=${p?.level}`);
   const unlocked = progress.data?.unlockedLocations ?? [];
   s.check('A11 0 徽章时只解锁首城 town_starter',
     unlocked.length === 1 && unlocked[0] === 'town_starter', norm(unlocked));
@@ -123,8 +123,8 @@ async function main() {
     gyms.every((g) => g.badgeOwned === false && g.onCooldown === false),
     norm(gyms.map((g) => [g.badgeOwned, g.onCooldown])));
   const aceLevels = gyms.map((g) => g.aceLevel);
-  s.check('A15 王牌等级按城镇梯度递增（8 → 30）',
-    aceLevels.length === 7 && aceLevels[0] === 8 && aceLevels[6] === 30
+  s.check('A15 王牌等级按城镇梯度递增（12 → 132）',
+    aceLevels.length === 7 && aceLevels[0] === 12 && aceLevels[6] === 132
       && aceLevels.every((v, i) => i === 0 || v > aceLevels[i - 1]), norm(aceLevels));
 
   const mb = await api('/api/mapboss', { token });

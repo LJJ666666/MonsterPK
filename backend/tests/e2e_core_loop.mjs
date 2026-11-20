@@ -17,7 +17,7 @@
  *   5) 共斗       hero=房主 + guest=第二账号，六房全清 → hero 获通关奖励（+40 金钱 / +capsule_basic×1）。
  *
  * 不变量断言：
- *   - 等级 = 5 + 5×徽章数（本流程 1 枚 → 10）；经验到达等级帽只冻不降（不依赖宠物经验到账验证）。
+ *   - 等级 = 10 + 20×徽章数（本流程 1 枚 → 30）；经验到达等级帽只冻不降（不依赖宠物经验到账验证）。
  *   - 队伍长度 = 2（起步）+ 1（捕获）= 3。
  *   - hero 的 BossDamageEvent 计数 = 2（每日Boss 1 + 地图首领 1），且两者不串味（不同 bossId）。
  *   - 每个模块结算后，其它模块的关键状态未被篡改（徽章/等级/队伍保持）。
@@ -165,7 +165,7 @@ async function main() {
     `${travelLocked.status} ${asText(travelLocked.data).slice(0, 120)}`);
 
   const p0 = await progressOf(token);
-  s.check('初始进度：0 徽章 / 等级 5', p0?.badgeCount === 0 && p0?.level === 5,
+  s.check('初始进度：0 徽章 / 等级 10', p0?.badgeCount === 0 && p0?.level === 10,
     `badgeCount=${p0?.badgeCount} level=${p0?.level}`);
   const preWild = saveDataOf(await save.get(token));
   s.check('初始队伍 = 2', preWild?.party?.length === 2, `party=${preWild?.party?.length}`);
@@ -212,7 +212,7 @@ async function main() {
   // 捕获野区不发徽章（徽章唯一来源是演武堂胜利）
   const pCap = await progressOf(token);
   s.check('捕获后仍无徽章（打野区不发放徽章）',
-    (pCap?.badges ?? []).length === 0 && pCap?.level === 5,
+    (pCap?.badges ?? []).length === 0 && pCap?.level === 10,
     `badgeCount=${pCap?.badgeCount} level=${pCap?.level}`);
 
   // ═══════════════════ 2) 演武堂 + 解锁 travel ═══════════════════
@@ -232,7 +232,7 @@ async function main() {
     (pGym2?.badgeCount ?? 0) === 1, `badgeCount=${pGym2?.badgeCount}`);
   s.check('徽章集合含 badge_sprout', (pGym2?.badges ?? []).some((b) => b.id === 'badge_sprout'),
     JSON.stringify(pGym2?.badges));
-  s.check('等级保持 10（5 + 5×1）', pGym2?.level === 10, `level=${pGym2?.level}`);
+  s.check('等级保持 30（10 + 20×1）', pGym2?.level === 30, `level=${pGym2?.level}`);
   const postGym = saveDataOf(await save.get(token));
   s.check('队伍保持 3（捕获不被演武堂篡改）', postGym?.party?.length === 3, `party=${postGym?.party?.length}`);
   s.check('演武堂给金钱（enemy_fainted 普通战斗奖励）', postGym.money > postWild.money,
@@ -303,7 +303,7 @@ async function main() {
 
   // 跨模块一致性：前面的徽章/等级/队伍在地图首领后仍完好
   const pMb = await progressOf(token);
-  s.check('地图首领后等级仍为 10 / 队伍仍为 3', pMb?.level === 10 && postMb.party.length === 3,
+  s.check('地图首领后等级仍为 30 / 队伍仍为 3', pMb?.level === 30 && postMb.party.length === 3,
     `level=${pMb?.level} party=${postMb.party.length}`);
 
   // ═══════════════════ 5) 共斗（hero=房主 + guest=第二账号）═══════════════════
@@ -345,7 +345,7 @@ async function main() {
 
   // 最终跨模块不变量
   const pFinal = await progressOf(token);
-  s.check('最终等级=10（1 徽章，经验冻结不降）', pFinal?.level === 10, `level=${pFinal?.level}`);
+  s.check('最终等级=30（1 徽章，经验冻结不降）', pFinal?.level === 30, `level=${pFinal?.level}`);
   s.check('最终徽章仅 1 枚（仅演武堂发放，野区不发）', pFinal?.badgeCount === 1,
     `badgeCount=${pFinal?.badgeCount}`);
   s.check('最终队伍=3（捕获 +1 未被后续模块改回）', postCoop?.party?.length === 3, `party=${postCoop?.party?.length}`);

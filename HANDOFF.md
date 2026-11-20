@@ -347,7 +347,11 @@ cd backend && npm run check:content       # 内容表与 src/game/data.ts 一致
 
 - **后端架构**：Termux → proot Debian → PG(5432) + Redis(6379) + Node/Prisma → 后端(3001) → 游戏 WebView。两条路线共用后端核心代码，只差架构二进制（Termux / Node / rootfs）与保活方式：真机 non-root + tmux 会话 + `termux-wake-lock`，雷电 root 常驻 proot 会话。
 - **随 git 走的**：`mobile-server/` 全部脚本与文档（`.gitignore` / `README.md` / `DEVICE.md` / `PLAN.md` / `scripts/`）。
-- **不随 git、新机必须重新生成的**：`mobile-server/output/`（游戏 APK、Termux APK、Node arm64、Debian aarch64 rootfs、`mpk-device.zip`、`backend-src.tar.gz`）已被 `.gitignore` 忽略 → 换机器当天在新机重跑 `bash scripts/fetch-arm64.sh` + `node scripts/build-game-apk.mjs` + `node scripts/pack-backend.mjs`。构建仍需 JDK 21 / Android SDK / 离线 Gradle（路径因机而异，见 `apk_build_guide.md §1`）。
+- **不随 git、新机必须重新生成的**：`mobile-server/output/` 已被 `.gitignore` 忽略，换机器当天按下面三步重建（脚本均机器无关：路径动态推导 + env 覆盖 + 常见位置探测，家里 `D:` / 公司 `E:` 都在探测列表里）：
+  1. `bash scripts/fetch-arm64.sh` → Termux arm64 APK + Node arm64 + Debian aarch64 rootfs（需联网，ghfast / npmmirror 镜像，断点续传 + 大小校验；`MPK_OUT` 可覆盖输出目录）。
+  2. `node scripts/pack-backend.mjs` → `backend-src.tar.gz`（纯 Node 读 `backend/` 源码；**不依赖宿主机 `backend/.env`**——手机端 `device-setup.sh` 会自己写 .env）。
+  3. `node scripts/build-game-apk.mjs` → 游戏 APK（需 JDK 21 / Android SDK / 离线 Gradle 8.14.3 / Git Bash，路径可由 `MPK_JAVA_HOME` / `MPK_ANDROID_HOME` / `MPK_GRADLE` / `MPK_GRADLE_USER_HOME` 覆盖，见 `apk_build_guide.md §1`）。**前置**：`android/app/src/main/assets/public/` 不入库，必须先在主工程跑 `npm run build` + `MPK_DEV_APK=1 npx cap sync android` 生成真前端 assets；否则脚本守卫（要求无 mock 痕迹且 `API_BASE=localhost:3001`）会拒绝出包。
+- **装进手机**：有 adb 就 `bash scripts/install-device.sh`（自动装两个 APK + push 三件套与脚本，机器无关，`MPK_ADB` 覆盖路径）；无 adb 才需要 `mpk-device.zip`——它是一次性便利包（后端包 + Node/rootfs + 5 个 device 脚本），**没有任何生成脚本**，要重建只能在 `output/` 下手工 zip 这些文件，或改走 `install-device.sh`。
 - 真机一次性部署 `bash /sdcard/mpk/device-setup.sh`（首次需联网 / 国内源），日常启动 `bash /sdcard/mpk/device-start.sh`（**纯本地、不需代理**），自检 `device-check.sh`（health=200）。vivo 保活四层（电池不优化 / 自启动 / 锁后台 / 关幽灵进程杀手）见 `DEVICE.md §4`，不做会被后台杀掉。
 - 雷电卡点：未 root 时 Termux bootstrap 必失败（雷电在文件系统层拦截名为 `su` 的创建），须先在模拟器设置里开 root 并重启，或改用真机。`device-setup` 的 proot 依赖继承 Termux PATH，静态查 `xz`/`curl` 缺失是误报。
 
